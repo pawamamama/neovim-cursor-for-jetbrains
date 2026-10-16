@@ -286,20 +286,32 @@ public class CaretAnimator implements Disposable, CaretListener {
         scheduler.start();
     }
 
-    /** 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应） */
+    /**
+     * 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应）。
+     *
+     * <p>本方法在<b>每次光标事件</b>（含每次击键）时都会被调用，因此这里只做
+     * 「从空闲档回到活跃档」时的必要修整，不能无条件重置状态 —— 原因见下。
+     */
     private void wakeUp() {
+        // 必须在覆盖 currentDelayMs 之前取：它记录的是"刚才所处的档位"。
+        //   true  → 刚才在空闲档（IDLE_DELAY_MS / IDLE_UNFOCUSED_DELAY_MS）
+        //   false → 刚才已在活跃档，说明这是打字／移动光标过程中的普通唤醒
+        final boolean fromIdleTier = currentDelayMs > MAX_ADAPTIVE_DELAY_MS;
+
         currentDelayMs = ACTIVE_DELAY_MS;
 
-        // 调度延迟归位还不够：{@link #smoothedIntervalMs} 是帧间隔的指数平滑值，
-        // 它只在 tick() 里更新，因此空闲期每 120/600ms 才被喂一次 ——
-        // 长时间失焦后它已稳定在空闲间隔上。若不一并归位，tick() 末尾的
-        // computeNextDelay() 会用它算出自适应间隔并被 MAX_ADAPTIVE_DELAY_MS 截断，
-        // 之后要几十帧才收敛回满帧率。实测：失焦 600ms 档切回后需 825ms / 29 帧
-        // 才恢复，正是"切回界面动光标卡一下"的成因。
+        // 从空闲档唤醒时，{@link #smoothedIntervalMs} 已被空闲间隔喂大
+        // （最坏接近 IDLE_UNFOCUSED_DELAY_MS = 600），而它只在 tick() 内更新。
+        // 若不一并归位，tick() 末尾的 computeNextDelay() 会用它算出被
+        // MAX_ADAPTIVE_DELAY_MS 截断的间隔，之后要几十帧才收敛回满帧率 ——
+        // 实测：失焦 600ms 档切回后需 715ms / 26 帧才恢复，
+        // 正是"切回界面动光标卡一下"的成因。
         //
-        // 阈值取 MAX_ADAPTIVE_DELAY_MS：低于它说明估计量反映的是真实的帧间隔
-        // （编辑器繁忙导致），属于自适应机制的正常输入，不该被抹掉。
-        if (smoothedIntervalMs > MAX_ADAPTIVE_DELAY_MS) {
+        // 但绝不能无条件重置：活跃档下的 smoothedIntervalMs 反映的是真实帧间隔
+        // （编辑器繁忙所致，可达 30~40ms），那正是自适应调度赖以工作的输入。
+        // 若在每次击键时都把它按回 8ms，调度器会以编辑器实际交付不了的频率提交，
+        // 绝大多数任务随即被 framePending 丢弃，反而白白占用 EDT —— 打字手感变差。
+        if (fromIdleTier) {
             smoothedIntervalMs = ACTIVE_DELAY_MS;
             // 紧随其后的那次测量跨越了整个空闲期，不是真实帧间隔，丢弃
             skipNextIntervalMeasurement = true;
