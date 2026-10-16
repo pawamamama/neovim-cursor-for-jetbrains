@@ -166,6 +166,14 @@ public class CaretAnimator implements Disposable, CaretListener {
     private double smoothedIntervalMs = ACTIVE_DELAY_MS;
 
     /**
+     * 是否需要丢弃下一帧的帧间隔测量（仅 EDT 访问）。
+     *
+     * <p>从低频空闲档被 {@link #wakeUp()} 拉回高帧率时置位：那一刻的"帧间隔"
+     * 实际是整个空闲期的长度，并非真实帧间隔，喂给平滑器会再次污染估计量。
+     */
+    private boolean skipNextIntervalMeasurement = false;
+
+    /**
      * 平滑后的帧间隔（秒），用于低帧率下的动画补偿。
      *
      * <p>低帧率时瞬时 dt 波动很大（15~40fps 意味着 0.025~0.067s），
@@ -281,6 +289,22 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应） */
     private void wakeUp() {
         currentDelayMs = ACTIVE_DELAY_MS;
+
+        // 调度延迟归位还不够：{@link #smoothedIntervalMs} 是帧间隔的指数平滑值，
+        // 它只在 tick() 里更新，因此空闲期每 120/600ms 才被喂一次 ——
+        // 长时间失焦后它已稳定在空闲间隔上。若不一并归位，tick() 末尾的
+        // computeNextDelay() 会用它算出自适应间隔并被 MAX_ADAPTIVE_DELAY_MS 截断，
+        // 之后要几十帧才收敛回满帧率。实测：失焦 600ms 档切回后需 825ms / 29 帧
+        // 才恢复，正是"切回界面动光标卡一下"的成因。
+        //
+        // 阈值取 MAX_ADAPTIVE_DELAY_MS：低于它说明估计量反映的是真实的帧间隔
+        // （编辑器繁忙导致），属于自适应机制的正常输入，不该被抹掉。
+        if (smoothedIntervalMs > MAX_ADAPTIVE_DELAY_MS) {
+            smoothedIntervalMs = ACTIVE_DELAY_MS;
+            // 紧随其后的那次测量跨越了整个空闲期，不是真实帧间隔，丢弃
+            skipNextIntervalMeasurement = true;
+        }
+
         Thread s = scheduler;
         if (s != null) {
             s.interrupt();
@@ -309,9 +333,14 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 测量真实帧间隔（指数平滑）。变快时快速跟随、变慢时缓慢跟随，
         // 避免偶发的一次卡顿把调度频率长期压低。
         if (lastTickNanos != 0L) {
-            double actualMs = (now - lastTickNanos) / 1_000_000.0;
-            double weight = actualMs < smoothedIntervalMs ? 0.4 : 0.1;
-            smoothedIntervalMs += (actualMs - smoothedIntervalMs) * weight;
+            if (skipNextIntervalMeasurement) {
+                // 该测量跨越了整个空闲期，不代表真实帧间隔，丢弃
+                skipNextIntervalMeasurement = false;
+            } else {
+                double actualMs = (now - lastTickNanos) / 1_000_000.0;
+                double weight = actualMs < smoothedIntervalMs ? 0.4 : 0.1;
+                smoothedIntervalMs += (actualMs - smoothedIntervalMs) * weight;
+            }
         }
         lastTickNanos = now;
 

@@ -1,0 +1,8 @@
+# 统一以 LF 存储：源码本身全为 LF，本项目面向 Windows / macOS / Linux。
+# 强制规范化可避免编辑器自动转换行尾而产生整文件重写式的 diff。
+* text=auto eol=lf
+
+# 二进制资源不做转换
+*.jar binary
+*.png binary
+*.zip binary
