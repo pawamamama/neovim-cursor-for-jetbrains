@@ -12,16 +12,6 @@ package com.github.yyyolo7a79.neovidecursor.core;
  */
 public class TrailCorner {
 
-    /**
-     * 动画至少跨越的帧数（低帧率适配）。
-     *
-     * <p>{@link DampedSpring#update} 开头有「animationLength 小于一帧就直接归零」的短路，
-     * 本意是省掉无意义的极短动画。但在帧率只有 20~30fps 时 dt ≈ 0.03~0.05s，
-     * 而相邻两行移动的动画时长恰为 0.015~0.05s —— 动画被整体吃掉，
-     * 光标瞬间闪到目标，视觉上就是"卡"。这也是"十几行跳转反而更流畅"的原因。
-     */
-    private static final double MIN_ANIMATION_FRAMES = 6.0;
-
     /** 角点相对光标矩形的归一化位置，例如 (-0.5, -0.5) 表示左上角 */
     private final double relativeX;
     private final double relativeY;
@@ -96,11 +86,10 @@ public class TrailCorner {
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
-     * @param rank    按对齐度排序后的名次（0 = 最靠前，最跟手）
-     * @param frameDt 当前帧间隔（秒），用于低帧率下的动画时长补偿；传 0 表示不补偿
+     * @param rank 按对齐度升序的名次：0 = 最靠后（拿 trailFactors[0]=1，最慢），
+     *             3 = 最靠前（最跟手）。与原 JS 版排序方式一致
      */
-    public void jump(double width, double height, double centerX, double centerY,
-                     int rank, double frameDt) {
+    public void jump(double width, double height, double centerX, double centerY, int rank) {
         double destX = destX(centerX, width);
         double destY = destY(centerY, height);
 
@@ -130,17 +119,10 @@ public class TrailCorner {
                 ? config.snapAnimationLength
                 : baseTime * clamp(factor, 0, 1);
 
-        // 【低帧率适配】保证动画至少跨越若干帧。
-        //
-        // DampedSpring.update() 开头的短路条件 `animationLength <= dt` 本意是
-        // "动画比一帧还短就没必要做"，但帧率降到 20~30fps 时 dt ≈ 0.03~0.05s，
-        // 恰好把相邻两行移动的短动画（0.015~0.05s）整体吃掉 ——
-        // 表现为光标瞬间闪到目标位置、看起来"卡住"。
-        //
-        // 硬吸附（useSnap）的角本就该瞬间到位，不做延长。
-        if (!useSnap && frameDt > 0) {
-            animationLength = Math.max(animationLength, frameDt * MIN_ANIMATION_FRAMES);
-        }
+        // 【不做低帧率时长补偿】曾强制「至少跨越 6 帧」，结果短距离移动时
+        // 四个角的时长被抬到同一值（0.015~0.05s 全变成 ~0.06s），梯度消失，
+        // 光标只是整体平移、不再被拉伸。原版在 60fps 下最短的角本就一帧到位，
+        // 这是设计行为而非缺陷，此处严格对齐原版。
 
         springX.setAnimationLength(animationLength);
         springY.setAnimationLength(animationLength);
@@ -203,6 +185,22 @@ public class TrailCorner {
         currentY = destY;
         previousDestX = destX;
         previousDestY = destY;
+        springX.reset();
+        springY.reset();
+    }
+
+    /**
+     * 把角点直接摆到指定坐标，并视其为"上一次目标"（多光标新增时用）。
+     *
+     * <p>新光标从相邻光标的当前位置起飞：把 previousDest 也设为该点，
+     * 下一次 {@link #jump} 算出的位移就是"相邻光标 → 新光标"的真实距离（通常一行），
+     * 从而走短距离动画，而不是被初值 -1e5 误判成超远跳转。
+     */
+    public void placeAt(double x, double y) {
+        currentX = x;
+        currentY = y;
+        previousDestX = x;
+        previousDestY = y;
         springX.reset();
         springY.reset();
     }

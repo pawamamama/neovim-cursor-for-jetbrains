@@ -64,7 +64,7 @@ public class NeovideConfig {
     /** 短距离移动时的动画时长（秒）—— 短距离用更短动画，避免拖泥带水 */
     public float shortAnimationLength = 0.05f;
 
-    /** 短距离阈值（像素）：位移小于该值视为短距离移动 */
+    /** 短距离阈值（单位：光标尺寸倍数，非像素）：位移不超过该值视为短距离移动 */
     public float shortMoveThreshold = 8f;
 
     /**
@@ -101,14 +101,30 @@ public class NeovideConfig {
      */
     public float maxTrailDistanceFactor = 60f;
 
-    /** 硬吸附时的动画时长（秒） */
-    public float snapAnimationLength = 0.02f;
+    /**
+     * 硬吸附时的动画时长（秒）。
+     *
+     * <p>对齐原版 v1.2.7：0.02 → 0（瞬时贴合）。弹簧的 {@code animationLength <= dt}
+     * 短路对任意帧率恒成立，前缘每次移动后立即贴住光标，
+     * 消除快速连续输入时前缘约 5px 滞后造成的"两个光标"观感。
+     */
+    public float snapAnimationLength = 0f;
 
     /** 光标宽度（像素）—— IntelliJ 默认光标较细 */
     public float cursorWidth = 2f;
 
-    /** 是否隐藏原生光标（改 CARET_COLOR 为透明） */
-    public boolean hideNativeCaret = true;
+    /**
+     * 是否隐藏原生光标（改全局配色的 CARET_COLOR 为透明）。
+     *
+     * <ul>
+     *   <li>false（默认，对齐原版 {@code hideNativeCursor: false}）——
+     *       原生光标负责零延迟跟随，覆盖层只在移动时叠加拖尾，停下后淡出。
+     *       不改配色方案，控制台/终端也无需特殊处理</li>
+     *   <li>true —— 原生光标隐去，由覆盖层常驻绘制光标（不闪烁、颜色可自定义），
+     *       但跟随完全取决于 EDT 调度，繁忙时会有滞后感</li>
+     * </ul>
+     */
+    public boolean hideNativeCaret = false;
 
     /** 全局开关：关掉后立即恢复原生光标与干净界面 */
     public boolean enabled = true;

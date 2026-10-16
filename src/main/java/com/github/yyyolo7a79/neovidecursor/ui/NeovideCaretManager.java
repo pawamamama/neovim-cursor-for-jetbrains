@@ -4,6 +4,7 @@ import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
+import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.colors.EditorColors;
 import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
@@ -111,6 +112,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
         // 借第一次回调的机会把它们一并补建，避免"只有新开的文件才有拖尾"
         if (!initialScanDone) {
             initialScanDone = true;
+            if (!CONFIG.hideNativeCaret) {
+                repairPollutedCaretColor();
+            }
             for (Editor existing : EditorFactory.getInstance().getAllEditors()) {
                 install(existing);
             }
@@ -151,7 +155,12 @@ public class NeovideCaretManager implements EditorFactoryListener {
             //
             // 注：终端（Terminal 工具窗口）的光标由终端模拟器自己绘制，不受
             // CARET_COLOR 影响，因此不在此列，也无需特殊处理。
-            applyNativeCaretHidden();
+            if (CONFIG.hideNativeCaret) {
+                applyNativeCaretHidden();
+            } else if (editor.getEditorKind() == EditorKind.CONSOLE) {
+                // 叠加模式：原生光标未被隐藏，控制台光标完好，无需补画
+                return;
+            }
 
             ANIMATORS.computeIfAbsent(editor, e -> new CaretAnimator(e, CONFIG));
         } catch (Throwable t) {
@@ -212,6 +221,26 @@ public class NeovideCaretManager implements EditorFactoryListener {
         }
     }
 
+    /**
+     * 切换「隐藏原生光标」。
+     *
+     * <p>两种模式挂载的编辑器范围不同（叠加模式不接管控制台），
+     * 因此直接整体卸载再重装，最简单也最不易留下残余状态。
+     */
+    public static void setHideNativeCaret(boolean hide) {
+        if (CONFIG.hideNativeCaret == hide) {
+            return;
+        }
+        boolean wasEnabled = enabled;
+        if (wasEnabled) {
+            setEnabled(false);
+        }
+        CONFIG.hideNativeCaret = hide;
+        if (wasEnabled) {
+            setEnabled(true);
+        }
+    }
+
     public static NeovideConfig.TrailMode getTrailMode() {
         return CONFIG.trailMode;
     }
@@ -223,7 +252,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
         enabled = on;
 
         if (on) {
-            applyNativeCaretHidden();
+            if (CONFIG.hideNativeCaret) {
+                applyNativeCaretHidden();
+            }
             // 为当前已打开的编辑器补建动画
             for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
                 install(editor);
@@ -300,6 +331,24 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 + "关闭插件时将恢复为 #" + String.format("%06X", fallback.getRGB() & 0xFFFFFF)
                 + "。如仍不可见，请在 Settings | Editor | Color Scheme | General | Caret 中设置");
         return fallback;
+    }
+
+    /**
+     * 叠加模式启动时的自愈：若配色方案里的光标色已是全透明（旧版本隐藏模式
+     * 被 IDE 落盘的遗留，见踩坑 #18），叠加模式依赖的原生光标就是隐形的 ——
+     * 此时按 {@link #sanitizeCaretColor} 的兜底色把它恢复为可见。
+     */
+    private static void repairPollutedCaretColor() {
+        try {
+            EditorColorsScheme scheme = EditorColorsManager.getInstance().getGlobalScheme();
+            Color current = scheme.getColor(EditorColors.CARET_COLOR);
+            if (current != null && current.getAlpha() == 0) {
+                scheme.setColor(EditorColors.CARET_COLOR, sanitizeCaretColor(scheme, current));
+                repaintAllEditors();
+            }
+        } catch (Throwable ignored) {
+            // 配色方案不可用时静默跳过
+        }
     }
 
     /** 恢复原生光标原始颜色 */

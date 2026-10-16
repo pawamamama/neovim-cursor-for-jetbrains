@@ -2,9 +2,9 @@ package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.core.AfterimageTrail;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
-import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.VisualPosition;
@@ -19,8 +19,9 @@ import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Map;
 
 /**
  * 单个编辑器的拖尾动画控制器。
@@ -91,19 +92,33 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final double GLOW_FADE_START = 0.5;
     private static final double GLOW_FADE_END = 2.5;
 
-    /** 四个角点的相对位置（左上 → 右上 → 右下 → 左下，顺时针） */
-    private static final double[][] CORNER_RELATIVE = {
-            {-0.5, -0.5},
-            {0.5, -0.5},
-            {0.5, 0.5},
-            {-0.5, 0.5},
-    };
+    /**
+     * 参与拖尾动画的光标数量上限（自我保护，对齐原版 MAX_CURSORS = 40）。
+     *
+     * <p>Alt + 拖拽列选跨上千行时会产生上千个光标，全部带辉光绘制会拖垮 EDT。
+     * 超出部分不做拖尾 —— 叠加模式下它们的原生光标仍正常显示，不影响使用。
+     */
+    private static final int MAX_TRAILS = 64;
 
     private final Editor editor;
     private final JComponent content;
     private final CaretTrailPanel panel;
     private final NeovideConfig config;
-    private final TrailCorner[] corners;
+
+    /**
+     * 每个光标一份弹簧拖尾状态（多光标支持）。
+     *
+     * <p>以 {@link Caret} 对象<b>身份</b>为键：IntelliJ 在光标移动时复用同一个 Caret 实例，
+     * 因此新增/删除某个光标时，其余光标的拖尾不会因列表下标错位而集体跳一行。
+     */
+    private final Map<Caret, SpringTrail> trails = new IdentityHashMap<>();
+
+    /** 本帧参与动画的拖尾（按光标列表顺序），复用以避免每帧分配 */
+    private final List<SpringTrail> activeTrails = new ArrayList<>();
+
+    /** 绘制时复用的角点坐标缓冲 */
+    private final double[] quadX = new double[4];
+    private final double[] quadY = new double[4];
 
     /**
      * 是否为「静态光标」模式 —— 用于控制台类编辑器（{@link EditorKind#CONSOLE}）。
@@ -131,14 +146,14 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     // ===== 渲染调度 =====
 
-    /** 调度线程：以高精度 sleep 驱动渲染节奏 */
-    private Thread scheduler;
+    /**
+     * 下一次希望被 tick 的时刻（System.nanoTime）。
+     * 由 EDT 写入、{@link RenderScheduler} 的调度线程读取。
+     */
+    volatile long nextDueNanos = System.nanoTime();
 
-    /** 是否有尚未执行的渲染任务（用于跳过积压帧） */
-    private final AtomicBoolean framePending = new AtomicBoolean(false);
-
-    /** 当前调度间隔：EDT 侧更新，调度线程读取 */
-    private volatile int currentDelayMs = IDLE_DELAY_MS;
+    /** 当前调度间隔（毫秒） */
+    private int currentDelayMs = IDLE_DELAY_MS;
 
     /** 是否已销毁 */
     private volatile boolean disposed = false;
@@ -150,6 +165,12 @@ public class CaretAnimator implements Disposable, CaretListener {
     private int frameCount = 0;
     private int peakRepaintArea = 0;
     private long fpsWindowStart = 0L;
+
+    /** 上一个活动帧的时刻：两次活动间隔过长时重开统计窗口，避免空闲时间拉低 fps */
+    private long lastActiveFrameNanos = 0L;
+
+    /** 空闲超过该时长（纳秒）即视为一段新的运动，统计窗口重新开始 */
+    private static final long FPS_IDLE_GAP_NANOS = 200_000_000L;
 
     // ===== 重绘区域复用对象（避免每帧分配）=====
 
@@ -166,32 +187,20 @@ public class CaretAnimator implements Disposable, CaretListener {
     private double smoothedIntervalMs = ACTIVE_DELAY_MS;
 
     /**
-     * 平滑后的帧间隔（秒），用于低帧率下的动画补偿。
-     *
-     * <p>低帧率时瞬时 dt 波动很大（15~40fps 意味着 0.025~0.067s），
-     * 若直接用它计算动画时长，弹簧的时间常数会每帧跳变，运动就不连续了。
+     * 叠加模式（保留原生光标）下最后一次处于运动状态的时刻。
+     * 停止运动后经过 cursorDisappearDelay 再用 cursorFadeOutDuration 淡出，
+     * 对齐原版 canvas 的 opacity 过渡。初值 0 = 启动时不显示覆盖层。
      */
-    private double smoothedDt = 1.0 / 60.0;
-
-    /**
-     * 上次记录的视觉位置，用于低成本地判断光标是否移动。
-     * {@code getVisualPosition()} 远比 {@code visualPositionToXY()} 便宜 ——
-     * 后者要换算折叠、制表符宽度等，是高帧率下的主要开销来源。
-     */
-    private int lastVisualLine = Integer.MIN_VALUE;
-    private int lastVisualColumn = Integer.MIN_VALUE;
+    private long lastAnimatingNanos = 0L;
 
     // ===== 动画目标状态 =====
 
-    /** 光标矩形中心点（contentComponent 坐标系） */
+    /** 主光标矩形中心点（contentComponent 坐标系），残影模式使用 */
     private double centerX;
     private double centerY;
 
     private double cursorWidth;
     private double cursorHeight;
-
-    /** 标记目标点刚发生变化，下一帧需要重新分配角点 rank */
-    private boolean jumped = false;
 
     /** 是否已完成初始化（首帧直接吸附到位，不做入场动画） */
     private boolean initialized = false;
@@ -213,11 +222,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 不做拖尾 —— 它们的光标被全局隐藏了，必须有人补上，原因见 staticCaret 字段说明。
         this.staticCaret = editor.getEditorKind() == EditorKind.CONSOLE;
 
-        this.corners = new TrailCorner[CORNER_RELATIVE.length];
-        for (int i = 0; i < CORNER_RELATIVE.length; i++) {
-            corners[i] = new TrailCorner(CORNER_RELATIVE[i][0], CORNER_RELATIVE[i][1], config);
-        }
-
         this.afterimageTrail = new AfterimageTrail(config);
         afterimageTrail.setLifetime(config.afterimageLifetime);
 
@@ -235,56 +239,28 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 首次定位
         refreshTarget();
 
-        startScheduler();
+        RenderScheduler.register(this);
     }
 
     // ==================== 渲染调度 ====================
 
-    /**
-     * 启动渲染调度线程。
-     *
-     * <p>用后台线程 {@code Thread.sleep} 控制节奏，再通过 {@code invokeLater}
-     * 把绘制切回 EDT —— 绕开了 {@code javax.swing.Timer} 的 15.6ms 精度天花板。
-     */
-    private void startScheduler() {
-        scheduler = new Thread(() -> {
-            while (!disposed) {
-                try {
-                    Thread.sleep(Math.max(1, currentDelayMs));
-                } catch (InterruptedException e) {
-                    // 被 wakeUp() 主动唤醒：立即进入下一轮，不退出线程
-                    if (disposed) {
-                        return;
-                    }
-                }
-                if (disposed) {
-                    return;
-                }
-
-                // 上一帧还没渲染完就跳过本次调度，避免任务在 EDT 队列里堆积
-                if (!framePending.compareAndSet(false, true)) {
-                    continue;
-                }
-
-                SwingUtilities.invokeLater(() -> {
-                    framePending.set(false);
-                    if (!disposed) {
-                        tick();
-                    }
-                });
-            }
-        }, "neovide-cursor-render");
-        scheduler.setDaemon(true);
-        scheduler.start();
+    /** 由 {@link RenderScheduler} 在 EDT 上调用：执行一帧并登记下一次到期时刻 */
+    void runTick() {
+        if (disposed) {
+            return;
+        }
+        try {
+            tick();
+        } finally {
+            nextDueNanos = System.nanoTime() + currentDelayMs * 1_000_000L;
+        }
     }
 
     /** 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应） */
     private void wakeUp() {
         currentDelayMs = ACTIVE_DELAY_MS;
-        Thread s = scheduler;
-        if (s != null) {
-            s.interrupt();
-        }
+        nextDueNanos = System.nanoTime();
+        RenderScheduler.wakeUp();
     }
 
     // ==================== 光标监听 ====================
@@ -295,6 +271,17 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     @Override
     public void caretPositionChanged(@NotNull CaretEvent event) {
+        wakeUp();
+    }
+
+    /** 多光标新增（Alt + 拖拽列选、Alt+Shift+点击等） */
+    @Override
+    public void caretAdded(@NotNull CaretEvent event) {
+        wakeUp();
+    }
+
+    @Override
+    public void caretRemoved(@NotNull CaretEvent event) {
         wakeUp();
     }
 
@@ -336,24 +323,14 @@ public class CaretAnimator implements Disposable, CaretListener {
             forceResync = true;
         }
 
-        // 目标点刚变化：按运动方向重新分配四个角点的滞后名次
-        // 平滑帧间隔：低帧率下 dt 波动大，直接用于计算动画时长会让弹簧的
-        // 时间常数每帧跳变、运动不连续。
-        //
-        // 但必须取「平滑值」与「瞬时值」的较大者：平滑需要好几帧才收敛，
-        // 而动画本身可能就只有 4~6 帧 —— 若直接用平滑值，
-        // 开头几帧的补偿会严重不足，动画照样被 dt 吃掉（实测帧数反而更少）。
-        smoothedDt += (dt - smoothedDt) * 0.25;
-        double effectiveDt = Math.max(dt, smoothedDt);
-
         boolean anyAnimating;
         if (staticCaret) {
             // 控制台编辑器：只补画静止光标，不参与拖尾
-            anyAnimating = tickStaticCaret();
+            anyAnimating = tickStaticCaret(moved);
         } else if (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE) {
             anyAnimating = tickAfterimage(now, moved);
         } else {
-            anyAnimating = tickSpring(dt, effectiveDt);
+            anyAnimating = tickSpring(now, dt);
         }
 
         currentDelayMs = computeNextDelay(moved || anyAnimating);
@@ -406,9 +383,15 @@ public class CaretAnimator implements Disposable, CaretListener {
         if (!active) {
             return;
         }
-        if (fpsWindowStart == 0L) {
+        // 距上一个活动帧太久：这是一段新的运动，重开窗口。
+        // 修复前空闲时间也计入分母 —— 按一下键动画 10 帧、停 2 秒再按，
+        // 日志会报 fps≈5，而真实帧率是 100。
+        if (fpsWindowStart == 0L || now - lastActiveFrameNanos > FPS_IDLE_GAP_NANOS) {
             fpsWindowStart = now;
+            frameCount = 0;
+            peakRepaintArea = 0;
         }
+        lastActiveFrameNanos = now;
         frameCount++;
 
         int area = currentBounds.width * currentBounds.height;
@@ -417,7 +400,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         long elapsed = now - fpsWindowStart;
-        if (elapsed >= 1_000_000_000L) {
+        if (elapsed >= 1_000_000_000L && frameCount > 1) {
             LOG.info(String.format(
                     "neovide-cursor: fps=%.1f  peakRepaintArea=%dpx  delay=%dms",
                     frameCount * 1_000_000_000.0 / elapsed, peakRepaintArea, currentDelayMs));
@@ -456,21 +439,19 @@ public class CaretAnimator implements Disposable, CaretListener {
         double maxX = -Double.MAX_VALUE;
         double maxY = -Double.MAX_VALUE;
 
-        for (TrailCorner corner : corners) {
-            double x = corner.getCurrentX();
-            double y = corner.getCurrentY();
-            if (x < minX) {
-                minX = x;
+        for (SpringTrail trail : activeTrails) {
+            for (var corner : trail.corners) {
+                double x = corner.getCurrentX();
+                double y = corner.getCurrentY();
+                minX = Math.min(minX, x);
+                maxX = Math.max(maxX, x);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
             }
-            if (x > maxX) {
-                maxX = x;
-            }
-            if (y < minY) {
-                minY = y;
-            }
-            if (y > maxY) {
-                maxY = y;
-            }
+        }
+        if (activeTrails.isEmpty()) {
+            out.setBounds(0, 0, 0, 0);
+            return;
         }
 
         int pad = glowPadding;
@@ -482,62 +463,93 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /**
-     * 重新读取光标位置并更新动画目标点。
+     * 重新读取所有光标的位置并更新各自的动画目标点。
      *
-     * @return true 表示位置确实发生了变化
+     * <p>多光标（Alt + 鼠标拖拽列选等）时每个光标各有一份 {@link SpringTrail}。
+     * 新出现的光标从<b>相邻光标</b>的当前形状起飞 —— 列选向下拖时，
+     * 新光标会从上一行"滑"下来，对应原版为新 {@code .cursor} 指定 jumpSource 的做法。
+     *
+     * @return true 表示有光标位置变化，或光标集合发生了增删
      */
     private boolean refreshTarget() {
         try {
-            VisualPosition vp = editor.getCaretModel().getVisualPosition();
-
-            // 快速路径：视觉位置没变就直接返回，跳过昂贵的坐标换算。
-            // 这是高帧率下最关键的性能优化 —— 绝大多数帧其实光标根本没动。
-            // forceResync 用于布局刚变化的情形：视觉位置可能没变，
-            // 但像素坐标已经失效，必须强制重算。
-            if (!forceResync && vp.line == lastVisualLine && vp.column == lastVisualColumn) {
-                return false;
-            }
-            forceResync = false;
-
-            Point p = editor.visualPositionToXY(vp);
-            lastVisualLine = vp.line;
-            lastVisualColumn = vp.column;
-
+            List<Caret> carets = editor.getCaretModel().getAllCarets();
+            Caret primary = editor.getCaretModel().getPrimaryCaret();
             double height = editor.getLineHeight();
             double width = config.cursorWidth;
 
-            double newCenterX = p.x + width / 2.0;
-            double newCenterY = p.y + height / 2.0;
+            // forceResync：布局刚变化，视觉位置可能没变但像素坐标已失效，必须绕过快速路径
+            boolean resync = forceResync;
+            forceResync = false;
 
-            if (newCenterX == centerX && newCenterY == centerY && height == cursorHeight) {
-                return false;
-            }
+            int count = Math.min(carets.size(), MAX_TRAILS);
+            boolean changed = count != activeTrails.size();
 
-            cursorWidth = width;
-            cursorHeight = height;
-            centerX = newCenterX;
-            centerY = newCenterY;
-
-            // 辉光半径与重绘余量随光标尺寸同步更新
-            panel.updateGlowRadius(width, height);
-            glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
-
-            if (!initialized) {
-                // 首次定位：四个角直接吸附到位，避免从 (0,0) 飞入
-                for (TrailCorner corner : corners) {
-                    corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
+            activeTrails.clear();
+            SpringTrail previous = null;
+            for (int i = 0; i < count; i++) {
+                Caret caret = carets.get(i);
+                SpringTrail trail = trails.get(caret);
+                if (trail == null) {
+                    trail = new SpringTrail(config);
+                    SpringTrail source = previous != null ? previous : firstInitializedTrail();
+                    if (source != null) {
+                        trail.startFrom(source);
+                    }
+                    trails.put(caret, trail);
+                    changed = true;
                 }
-                initialized = true;
-                jumped = false;
-            } else {
-                jumped = true;
+                activeTrails.add(trail);
+                previous = trail;
+
+                // 快速路径：视觉位置没变就跳过昂贵的 visualPositionToXY 换算 ——
+                // 高帧率下绝大多数帧光标根本没动
+                VisualPosition vp = caret.getVisualPosition();
+                if (resync || !trail.isInitialized() || !trail.isAt(vp.line, vp.column)) {
+                    Point p = editor.visualPositionToXY(vp);
+                    trail.markAt(vp.line, vp.column);
+                    if (trail.setTarget(p.x + width / 2.0, p.y + height / 2.0, width, height)) {
+                        changed = true;
+                    }
+                }
+
+                if (caret == primary) {
+                    centerX = trail.centerX;
+                    centerY = trail.centerY;
+                }
             }
-            return true;
+
+            // 回收已消失的光标（或超出上限的光标）
+            if (trails.size() > activeTrails.size()) {
+                trails.values().removeIf(t -> !activeTrails.contains(t));
+                changed = true;
+            }
+
+            if (height != cursorHeight || width != cursorWidth) {
+                cursorWidth = width;
+                cursorHeight = height;
+                // 辉光半径与重绘余量随光标尺寸同步更新
+                panel.updateGlowRadius(width, height);
+                glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
+            }
+
+            initialized = !activeTrails.isEmpty();
+            return changed;
 
         } catch (Throwable t) {
             // 编辑器正在销毁或重绘中：本次跳过，下一帧会自动重试
             return false;
         }
+    }
+
+    /** 任取一个已就位的拖尾，作为新光标的起飞点 */
+    private SpringTrail firstInitializedTrail() {
+        for (SpringTrail t : trails.values()) {
+            if (t.isInitialized()) {
+                return t;
+            }
+        }
+        return null;
     }
 
     // ==================== 两种渲染模式 ====================
@@ -548,61 +560,115 @@ public class CaretAnimator implements Disposable, CaretListener {
      * <p>仅用于控制台类编辑器（Build / Run / Services / Problems 等输出区）——
      * 它们的光标被全局隐藏了，必须有人补画，详见 {@link #staticCaret}。
      *
-     * <p>返回值恒为 false，让调度器保持在空闲频率：控制台光标不需要高帧率，
-     * 仅在 caret 事件唤醒时才会短暂提速。
+     * <p>只在光标移动（或布局变化）时重绘：修复前每个 tick 都无条件重绘，
+     * 每个控制台每 120ms 重绘一次、永不停止。
+     *
+     * <p>返回值恒为 false，让调度器保持在空闲频率。
      */
-    private boolean tickStaticCaret() {
-        for (TrailCorner corner : corners) {
-            corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
+    private boolean tickStaticCaret(boolean moved) {
+        if (!moved && panel.hasContent()) {
+            return false;
+        }
+        for (SpringTrail trail : activeTrails) {
+            trail.snapToTarget();
         }
 
         // 不绘制辉光：控制台不需要，也省掉这部分重绘开销
-        panel.setGlowStrength(0f);
-
-        panel.updateCorners(
-                corners[0].getCurrentX(), corners[0].getCurrentY(),
-                corners[1].getCurrentX(), corners[1].getCurrentY(),
-                corners[2].getCurrentX(), corners[2].getCurrentY(),
-                corners[3].getCurrentX(), corners[3].getCurrentY());
-
+        panel.setOverlayAlpha(1f);
+        pushQuads(false);
         computeTrailBounds(currentBounds);
         submitRepaint();
         return false;
     }
 
-    /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
-    private boolean tickSpring(double dt, double effectiveDt) {
-        if (jumped) {
-            assignRanks(effectiveDt);
-            jumped = false;
-        }
-
+    /**
+     * 弹簧模式的一帧：推动物理模拟并绘制四边形。
+     *
+     * <p>叠加模式（{@code hideNativeCaret = false}，默认）下对齐原版 canvas 的显隐：
+     * 运动中覆盖层不透明度为 1；停止后等待 cursorDisappearDelay，
+     * 再用 cursorFadeOutDuration 线性淡出 —— 此后只剩原生光标。
+     *
+     * @return true 表示仍需高帧率（弹簧在动，或正在淡出）
+     */
+    private boolean tickSpring(long now, double dt) {
         boolean anyAnimating = false;
-        double maxOffset = 0;
-        for (TrailCorner corner : corners) {
-            if (corner.update(cursorWidth, cursorHeight, centerX, centerY, dt, false)) {
+        for (SpringTrail trail : activeTrails) {
+            if (trail.update(dt)) {
                 anyAnimating = true;
             }
-            double offset = corner.getOffsetMagnitude();
-            if (offset > maxOffset) {
-                maxOffset = offset;
-            }
         }
 
-        // 辉光只在拖尾展开时点亮 —— 静止的光标顶着一圈光晕并不好看，
-        // 那是"运动中"才该有的效果。强度由最大偏移量映射，边界见 GLOW_FADE_*。
-        panel.setGlowStrength((float) ((maxOffset - GLOW_FADE_START)
-                / (GLOW_FADE_END - GLOW_FADE_START)));
+        boolean fading = false;
+        if (config.hideNativeCaret) {
+            // 常驻模式：覆盖层就是光标本体，始终可见
+            panel.setOverlayAlpha(1f);
+        } else {
+            if (anyAnimating) {
+                lastAnimatingNanos = now;
+            }
+            float alpha = overlayAlpha(now);
+            if (alpha <= 0f) {
+                // 已完全淡出：只需擦掉最后一帧，此后不再重绘
+                if (panel.hasContent()) {
+                    panel.clearCorners();
+                    submitClear();
+                }
+                return false;
+            }
+            panel.setOverlayAlpha(alpha);
+            fading = alpha < 1f || !anyAnimating;
+        }
 
-        panel.updateCorners(
-                corners[0].getCurrentX(), corners[0].getCurrentY(),
-                corners[1].getCurrentX(), corners[1].getCurrentY(),
-                corners[2].getCurrentX(), corners[2].getCurrentY(),
-                corners[3].getCurrentX(), corners[3].getCurrentY());
-
+        pushQuads(true);
         computeTrailBounds(currentBounds);
         submitRepaint();
-        return anyAnimating;
+        return anyAnimating || fading;
+    }
+
+    /** 叠加模式下覆盖层的不透明度：停止后延迟 → 线性淡出 → 0 */
+    private float overlayAlpha(long now) {
+        if (lastAnimatingNanos == 0L) {
+            return 0f;
+        }
+        double sinceStop = (now - lastAnimatingNanos) / 1_000_000_000.0
+                - config.cursorDisappearDelay / 1000.0;
+        if (sinceStop <= 0) {
+            return 1f;
+        }
+        double fade = config.cursorFadeOutDuration;
+        if (fade <= 0 || sinceStop >= fade) {
+            return 0f;
+        }
+        return (float) (1.0 - sinceStop / fade);
+    }
+
+    /**
+     * 把所有拖尾的四边形写入绘制面板。
+     *
+     * @param withGlow 是否按拖尾展开程度点亮辉光 —— 静止的光标顶着一圈光晕并不好看，
+     *                 那是"运动中"才该有的效果。强度由最大偏移量映射，边界见 GLOW_FADE_*
+     */
+    private void pushQuads(boolean withGlow) {
+        panel.beginQuads();
+        for (SpringTrail trail : activeTrails) {
+            for (int j = 0; j < 4; j++) {
+                quadX[j] = trail.corners[j].getCurrentX();
+                quadY[j] = trail.corners[j].getCurrentY();
+            }
+            float glow = withGlow
+                    ? (float) ((trail.maxOffset() - GLOW_FADE_START) / (GLOW_FADE_END - GLOW_FADE_START))
+                    : 0f;
+            panel.addQuad(quadX, quadY, glow);
+        }
+    }
+
+    /** 擦除上一帧绘制的区域（覆盖层淡出完毕时调用） */
+    private void submitClear() {
+        if (NeovideCaretManager.isPaintDisabled()) {
+            return;
+        }
+        repaintRegion(lastDirtyRegion);
+        lastDirtyRegion.setBounds(0, 0, 0, 0);
     }
 
     /**
@@ -641,17 +707,30 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         boolean hasTail = !ghostBuffer.isEmpty();
 
-        // ---- 第二部分：常驻光标 ----
+        // ---- 第二部分：常驻光标（仅隐藏原生光标时）----
         // 残影会在 lifetime 到期后淡出，若只画残影，光标静止一会儿画面就空了。
         // 因此额外绘制一个始终完全不透明的"光标本体"。
-        ghostBuffer.add(new float[]{
-                (float) (centerX - cursorWidth / 2.0),
-                (float) (centerY - cursorHeight / 2.0),
-                (float) cursorWidth,
-                (float) cursorHeight,
-                1.0f
-        });
+        // 叠加模式下原生光标仍在，再画本体就成了双光标，故跳过。
+        if (config.hideNativeCaret) {
+            ghostBuffer.add(new float[]{
+                    (float) (centerX - cursorWidth / 2.0),
+                    (float) (centerY - cursorHeight / 2.0),
+                    (float) cursorWidth,
+                    (float) cursorHeight,
+                    1.0f
+            });
+        }
 
+        if (ghostBuffer.isEmpty()) {
+            // 尾巴已全部淡出且无本体：擦掉最后一帧即可
+            if (panel.hasContent()) {
+                panel.clearCorners();
+                submitClear();
+            }
+            return false;
+        }
+
+        panel.setOverlayAlpha(1f);
         if (moved || hasTail) {
             panel.updateGhosts(ghostBuffer);
             computeGhostBounds(currentBounds);
@@ -709,8 +788,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         afterimageTrail.clear();
         afterimageTrail.setLifetime(config.afterimageLifetime);
 
-        for (TrailCorner corner : corners) {
-            corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
+        for (SpringTrail trail : trails.values()) {
+            trail.snapToTarget();
         }
 
         panel.clearCorners();
@@ -720,37 +799,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         forceResync = true;
         lastDirtyRegion.setBounds(0, 0, 0, 0);
         wakeUp();
-    }
-
-    /**
-     * 按「运动方向对齐度」给四个角点名次。
-     *
-     * <p>对齐度越高说明该角越位于运动前方，名次越靠前（rank 越小），
-     * 它在 {@link TrailCorner#jump} 中拿到的滞后系数越大 —— 于是前缘紧跟、
-     * 后缘拖沓，矩形被拉长成拖尾形状。
-     */
-    private void assignRanks(double dt) {
-        double[] alignment = new double[corners.length];
-        for (int i = 0; i < corners.length; i++) {
-            alignment[i] = corners[i].calculateDirectionAlignment(
-                    cursorWidth, cursorHeight, centerX, centerY);
-        }
-
-        // 求名次：对齐度更高的角 rank 更小（更跟手）
-        int[] ranks = new int[corners.length];
-        for (int i = 0; i < corners.length; i++) {
-            int rank = 0;
-            for (int j = 0; j < corners.length; j++) {
-                if (alignment[j] < alignment[i]) {
-                    rank++;
-                }
-            }
-            ranks[i] = rank;
-        }
-
-        for (int i = 0; i < corners.length; i++) {
-            corners[i].jump(cursorWidth, cursorHeight, centerX, centerY, ranks[i], dt);
-        }
     }
 
     /** 清除已绘制的拖尾并刷新一次（切到诊断模式时调用） */
@@ -769,10 +817,7 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void dispose() {
         disposed = true;
 
-        Thread s = scheduler;
-        if (s != null) {
-            s.interrupt();
-        }
+        RenderScheduler.unregister(this);
 
         try {
             editor.getCaretModel().removeCaretListener(this);

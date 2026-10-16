@@ -25,6 +25,13 @@
             <add-to-group group-id="ToolsMenu" anchor="first"/>
         </action>
 
+        <action id="NeovideCursor.HideNativeCaret"
+                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleHideNativeCaretAction"
+                text="Neovide 光标：隐藏原生光标（常驻绘制）"
+                description="勾选后由插件常驻绘制光标（不闪烁）；不勾选则保留原生光标、拖尾仅在移动时显示（与 VS Code 版默认一致）">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
         <action id="NeovideCursor.PaintDiag"
                 class="com.github.yyyolo7a79.neovidecursor.ui.TogglePaintDiagAction"
                 text="Neovide 光标：性能诊断（禁用重绘）"

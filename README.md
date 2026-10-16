@@ -33,7 +33,8 @@ While the caret moves:
 - **Trail** — the caret stretches into an irregular quadrilateral (spring model)
 - **Smooth follow** — driven by damped springs, not instant jumps
 - **Glow** — a soft halo along the edges (approximating Canvas `shadowBlur`), which **lights up as the trail unfolds and fades out once the caret stops**
-- **Native caret hidden** — so it doesn't overlap the trail
+- **Native caret kept** (default, same as the VS Code extension) — the trail is only overlaid while moving and fades out about 0.1s after the caret stops, so following is zero-latency and the caret still blinks
+- **Multi-caret** — every caret created by `Alt` + mouse-drag column selection, `Alt+Shift` + click, etc. gets its own trail
 
 Parameter semantics match the VS Code `neovide-cursor` extension, so configs stay portable across platforms (one deliberate exception — see [Configuration](#configuration)).
 
@@ -119,6 +120,9 @@ The good news: **lower bytecode loads fine on newer JBRs** — lowering the targ
 - **Switch trail model**: `Tools` menu → `Neovide 光标：残影模式（低帧率更稳）`
   - **Checked** = afterimage mode; **unchecked** = spring mode (the original Neovide effect)
   - **Takes effect immediately**, no restart needed
+- **Hide native caret**: `Tools` menu → `Neovide 光标：隐藏原生光标（常驻绘制）`
+  - **Unchecked (default)** = keep the native caret; the trail only shows while moving — **recommended**
+  - **Checked** = the plugin draws a permanent caret (no blinking, colored with `tailColor`), but following depends on EDT scheduling and the frame rate drops noticeably in practice
 - **Performance diagnostics**: `Tools` menu → `Neovide 光标：性能诊断（禁用重绘）`
   - Skips all drawing and runs only the physics. Use it to tell "slow drawing" apart from "slow scheduling" — **a genuinely useful troubleshooting tool**
 
@@ -140,6 +144,9 @@ Every parameter lives in `core/NeovideConfig.java`, named and behaving identical
 | `shortMoveThreshold` | `8` | Short-move threshold |
 | `trailFactors` | `1 / 0.9 / 0.5 / 0.3` | Per-corner lag factors (the heart of trail stretching) |
 | `useHardSnap` / `leadingSnapThreshold` | `true` / `0.5` | Hard snap for leading corners |
+| `snapAnimationLength` | `0` | Leading-corner snap duration; `0` = snaps instantly (matches the original v1.2.7 — see Lesson #20) |
+| `hideNativeCaret` | `false` | Whether to hide the native caret (the original's `hideNativeCursor` — see Lesson #19) |
+| `cursorDisappearDelay` / `cursorFadeOutDuration` | `50` ms / `0.075` s | Fade-out delay and duration of the overlay after the caret stops moving |
 | `maxTrailDistanceFactor` | `60` | Max trail length factor, matching the original (see Lesson #6) |
 | `glowLayers` / `glowOpacity` | `12` / `0.55` | Glow layer count and peak intensity (**layer count doesn't change brightness** — see "Simulating the glow" below) |
 
@@ -300,6 +307,9 @@ Accumulated over frames, the animation goes berserk.
 
 **To limit per-frame displacement, clamp the change in `position` *after* computing it.**
 
+> As of 0.5.0 even this after-the-fact clamp has been removed: clamping means the spring no longer follows a critically damped curve,
+> and motion turns sluggish at low frame rates. The spring now advances strictly by the original's closed-form solution — see #20.
+
 ### #5 Don't rely on the timing of `caretPositionChanged`
 
 In scenarios like deleting text, the caret event may fire **before** `visualPositionToXY()`'s data updates — so you read a stale position, and no further event arrives, leaving the trail **stuck at the old position forever**.
@@ -312,7 +322,8 @@ The original JS uses `maxTrailDistanceFactor = 60` (~1920px), which is fine when
 
 But a Swing overlay **must repaint partially** — the longer the trail, the larger the bounding box to repaint, degrading into a near-full-screen repaint on line jumps.
 
-**Tightened to 4 (~128px), normal movement is completely unaffected.**
+It was once tightened to 4 (~128px). **It's now back to the original 60**: the factor only matters on multi-line jumps,
+and everyday movement such as adjacent lines is completely unaffected. If jumps drop frames noticeably, lower it again (see #11).
 
 ### #7 Submit repaint regions separately, never unioned
 
@@ -485,31 +496,56 @@ Each IDE version keeps its own copy (`IntelliJIdea2025.2` / `IntelliJIdea2026.2`
 
 **Lesson**: when judging whether a change will persist, don't only ask **whether you wrote a file** — ask **whether the object has any other path to disk**. An in-memory global singleton can be carried off by the IDE's own save actions at any time.
 
+### #19 The trail shouldn't "be the caret" — keeping the native caret is what makes it feel like the original
+
+Early in the port, the native caret was hidden and the overlay quadrilateral acted as the caret. That made caret following depend entirely on
+EDT scheduling: the moment the editor got busy, the caret itself "couldn't keep up with your hands" — the **primary reason** the experience fell far short of the VS Code extension.
+
+A closer read of the original revealed it defaults to `hideNativeCursor: false`: **the native caret handles precise following,
+and the canvas only overlays the trail while moving, fading out 50ms after the caret stops**. The original's comments even point out
+that this is the look that has been validated over time.
+
+Switching to the same approach eliminated a whole chain of problems: no more modifying the global color scheme (the root of #18),
+no need to paint a caret in consoles (half of #8), and the caret blinks again.
+
+> **Lesson**: when porting, the most important thing to match isn't the parameters but the division of responsibilities — "who does what".
+
+### #20 "Low-frame-rate compensation" flattened the trail's stretch
+
+To keep short animations from being swallowed by `animationLength <= dt`, each corner's duration was once forced to be at least `6 × dt`.
+But the original's four corner durations are **graded** (for short moves: 0.05 / 0.045 / 0.025 / 0.015s) —
+after compensation they were all raised to about 0.06s, so the four corners moved at the same speed and **the caret just translated as a whole instead of stretching**.
+
+Reverted at the same time: the spring's per-frame displacement clamp (addendum to #4), and the leading-corner snap duration, 0.02 → 0
+(matching the original v1.2.7, which removes the "two carets" look caused by the leading edge lagging about 5px).
+
+> **Lesson**: at 60fps the original's shortest corner arrives in a single frame — that's **intended behavior**, not a defect.
+> Before "fixing" something, confirm it really is a bug.
+
+### #21 The fps counter counted idle time in the denominator
+
+The stats window only printed and reset "after more than 1 second, with active frames", so the window start didn't move during idle periods.
+After a brief movement followed by a pause of a few seconds, `frames / elapsed time` on the next movement came out far too low.
+The `fps=0.4–10.9` numbers in the old README's "Known Limitations" came from exactly this.
+
+**The fix**: if two active frames are more than 200ms apart, treat it as a new burst of motion and restart the stats window.
+
+> **Lesson**: before drawing conclusions from diagnostic data, verify the measurement method itself.
+
 ---
 
 ## Known Limitations
 
-### The frame-rate ceiling
+### Frame rate
 
-**This is the project's core unsolved problem.**
+**The pre-0.5.0 README conclusion that "even with no drawing it's only 2–4fps" has been overturned** —
+those numbers came from a stats bug: the fps window didn't reset while idle, so idle time was counted in the denominator.
+Press a key for a 10-frame animation, wait 2 seconds, press again, and the log reports `fps≈5` while the real frame rate is 100 (see Lesson #21).
 
-Measured frame rate fluctuates between **20–50fps** (peaking at 105fps).
-
-**The bottleneck is not drawing.** A decisive experiment: add a switch that **skips all drawing** and runs only the physics:
-
-```
-fps=10.9   (redraw fully skipped)
-fps=4.1
-fps=4.0
-fps=2.0
-fps=0.4
-```
-
-**With no drawing at all, the frame rate still sat at 2–43** — proving the bottleneck is **EDT scheduling**, unrelated to drawing.
-
-**The mechanism**: in AWT's `EventQueue`, **native input events (keyboard/mouse) take priority over tasks submitted via `invokeLater`**. When the caret moves quickly, keyboard events and the editor's own repaints saturate the EDT, and our render tasks queue up behind them.
-
-This also explains a counterintuitive observation: **"the editor itself isn't laggy, only the caret is"**.
+The fixed counter only includes frames of continuous motion. Frame rate is still affected by EDT load
+(in AWT's `EventQueue`, native input events take priority over `invokeLater` tasks), but in the default overlay mode
+**the caret itself is drawn natively by the IDE and follows with zero latency**, so an occasional dropped trail frame no longer affects how responsive it feels —
+which is exactly why the VS Code extension doesn't hide the native caret by default.
 
 ### Another counterintuitive observation
 
@@ -520,7 +556,8 @@ Two reasons:
 1. **Perceptual**: at the same frame count, larger displacements produce more visible change per frame, so stutter is less noticeable
 2. **Algorithmic**: at low frame rates `dt` is large, and short animation durations are close to it, so the early-exit condition `animationLength <= dt` at the top of `DampedSpring.update()` **swallows the animation entirely** — the caret snaps to the target with no animation at all
 
-Point 2 is fixed by **low-frame-rate animation compensation** (guaranteeing at least 6 frames are spanned).
+Point 2 was once compensated by "forcing at least 6 frames to be spanned", **which 0.5.0 reverted** — it raised all four corners' durations to the same value,
+erasing the trail's stretch, a cost far greater than the benefit (see Lesson #20).
 
 ---
 
@@ -531,11 +568,13 @@ Point 2 is fixed by **low-frame-rate animation compensation** (guaranteeing at l
 - [x] **Wider version compatibility** — 2024.2 – 2026.2+; see [Compatibility](#compatibility)
 - [x] **Console vs. terminal handling** — static caret in output areas, terminals skipped (Lesson #8)
 - [x] **Color-scheme pollution guard** — refuses to store fully-transparent as the original value (Lesson #18)
+- [x] **Overlay mode that keeps the native caret** — matches the original's default behavior (Lesson #19)
+- [x] **Multi-caret trails** — `Alt` + drag column selection, etc.; each caret gets its own trail (up to 64)
+- [x] **Merged multi-editor scheduling** — all editors share a single scheduler thread
 - [ ] **Settings UI**: `Settings | Editor | Neovide Cursor`, tune parameters without editing code
 - [ ] **Support 2023 and earlier**: requires lowering the compile target to Java 17 / 11
 - [ ] **Terminal support**: needs a separate adaptation to the terminal's caret model, plus solving its native block cursor
 - [ ] **Cross-platform verification**: so far only tested on Windows
-- [ ] **Multi-editor optimization**: finer scheduling for split/multi-tab scenarios
 
 ---
 
