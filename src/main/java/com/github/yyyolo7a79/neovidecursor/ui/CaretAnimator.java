@@ -341,6 +341,27 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 注意 skipNextIntervalMeasurement 只丢弃了「统计测量」，
             // 并不能阻止 dt 被算成整个空闲期。
             lastNanos = System.nanoTime();
+
+            // 【同样必须重置 smoothedDt —— 这是"卡一下"残留的真正来源】
+            //
+            // 空闲期间调度降频到 IDLE_DELAY_MS(120) / IDLE_UNFOCUSED(600)，
+            // 但 tick() 仍在跑：每次算出的 dt 都被 MAX_DT 截断成 1/30 ≈ 33.3ms，
+            // 而 tick() 里是无条件喂给平滑器的：
+            //
+            //     smoothedDt += (dt - smoothedDt) * 0.25;
+            //     double effectiveDt = Math.max(dt, smoothedDt);
+            //
+            // 于是停止操作的那几秒里，smoothedDt 被反复喂到 33.3ms 并停在那里。
+            // 只重置 lastNanos 只能让「瞬时 dt」恢复正常，effectiveDt 取的是
+            // max(dt, smoothedDt)，仍会取到那个被污染的 33.3ms，且要十几帧才降下来：
+            //
+            //     第 1 帧 0.0333 → 0.0270（仍是正常的 3.4 倍）
+            //     第 3 帧 0.0187 → 第 10 帧 0.0094 → 约 12 帧后才接近 8ms
+            //
+            // 12 帧 × 8ms ≈ 100ms 的异常 dt，正是「停顿后第一次删除，卡一下」的时长。
+            // 归位到一个典型帧长（1/125s，对应活跃档 8ms）即可，之后由正常的
+            // 平滑流程接管。
+            smoothedDt = 1.0 / 125.0;
         }
 
         Thread s = scheduler;
