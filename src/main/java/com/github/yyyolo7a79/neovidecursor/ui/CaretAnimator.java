@@ -315,6 +315,26 @@ public class CaretAnimator implements Disposable, CaretListener {
             smoothedIntervalMs = ACTIVE_DELAY_MS;
             // 紧随其后的那次测量跨越了整个空闲期，不是真实帧间隔，丢弃
             skipNextIntervalMeasurement = true;
+
+            // 【同样必须重置 lastNanos —— 它跨过的也是整个空闲期】
+            //
+            // tick() 开头有 dt = min((now - lastNanos)/1e9, MAX_DT)。
+            // 空闲期间 lastNanos 停在最后一次 tick，于是唤醒后的第一帧
+            // dt 直接拉满 MAX_DT = 1/30 ≈ 33.3ms（正常约 8ms，大 4 倍）。
+            //
+            // 而 dt 会原样喂给弹簧：DampedSpring.update() 里 c = exp(-(4/len)·dt)。
+            // 取 animationLength = 0.05s、o = 80 时：
+            //   dt = 0.008 → c ≈ 0.527（每帧衰减约 47%，动画跨多帧展开）
+            //   dt = 0.033 → c ≈ 0.070（一帧衰减 93%，等于"瞬移"）
+            //
+            // 观感上这就是「停几秒后第一次删除到上一行、下方文本并入原行时
+            // 卡一下」：位置突变本应由弹簧平滑展开，却被一个超大的 dt
+            // 在一帧内走完。而快速连续删除时 lastNanos 每 8ms 都在更新，
+            // dt 始终正常，所以反而流畅 —— 这个"越连续越顺"的反差正是佐证。
+            //
+            // 注意 skipNextIntervalMeasurement 只丢弃了「统计测量」，
+            // 并不能阻止 dt 被算成整个空闲期。
+            lastNanos = System.nanoTime();
         }
 
         Thread s = scheduler;
