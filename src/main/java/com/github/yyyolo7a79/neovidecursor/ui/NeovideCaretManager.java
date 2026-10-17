@@ -216,6 +216,26 @@ public class NeovideCaretManager implements EditorFactoryListener {
         return CONFIG.trailMode;
     }
 
+    // ==================== 常驻刷新 ====================
+
+    /**
+     * 开启 / 关闭「常驻刷新」。
+     *
+     * <p>关闭时恢复原有的自动降频策略（空闲降到 120ms / 600ms）。
+     * 切换后立即让所有调度线程按新间隔重新排程 —— 否则关闭后
+     * 最长要等一个空闲周期（600ms）才按新策略跑。
+     */
+    public static void setAlwaysHighFps(boolean on) {
+        CONFIG.alwaysHighFps = on;
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            animator.requestWakeUp();
+        }
+    }
+
+    public static boolean isAlwaysHighFps() {
+        return CONFIG.alwaysHighFps;
+    }
+
     // ==================== 启用 / 禁用 ====================
 
     /** 切换拖尾效果开关 */

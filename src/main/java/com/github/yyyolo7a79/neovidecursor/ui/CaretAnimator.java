@@ -370,6 +370,19 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
     }
 
+    /**
+     * 外部要求立即重排下一帧（切换「常驻刷新」开关时用）。
+     *
+     * <p>只打断调度线程的 sleep，让它按最新的 {@code currentDelayMs} 重新排程，
+     * 不改动任何动画状态 —— 因此不会引起视觉跳变。
+     */
+    public void requestWakeUp() {
+        Thread s = scheduler;
+        if (s != null) {
+            s.interrupt();
+        }
+    }
+
     // ==================== 光标监听 ====================
 
     /**
@@ -463,6 +476,13 @@ public class CaretAnimator implements Disposable, CaretListener {
      * </ol>
      */
     private int computeNextDelay(boolean active) {
+        // 常驻刷新：不区分有无动画，永远走活跃档。
+        // 这样停手后第一次操作也不会"冷启动"—— 下一帧最多 8ms 就到。
+        // 代价见 NeovideConfig#alwaysHighFps（会持续占用 EDT）。
+        if (config.alwaysHighFps) {
+            return ACTIVE_DELAY_MS;
+        }
+
         if (active) {
             int adaptive = (int) Math.round(smoothedIntervalMs * 0.85);
             return Math.max(ACTIVE_DELAY_MS, Math.min(adaptive, MAX_ADAPTIVE_DELAY_MS));

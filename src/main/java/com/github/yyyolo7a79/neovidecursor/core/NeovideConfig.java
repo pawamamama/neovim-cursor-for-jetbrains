@@ -64,6 +64,31 @@ public class NeovideConfig {
      */
     public float glowOpacity = 0.55f;
 
+    // ==================== 常驻刷新 ====================
+
+    /**
+     * 是否让调度器<b>永远保持高帧率</b>，不再在空闲时降频。
+     *
+     * <p><b>它解决的是什么</b>：默认策略下，光标停止后调度间隔会从 8ms 涨到
+     * {@code IDLE_DELAY_MS}(120ms) 甚至 {@code IDLE_UNFOCUSED_DELAY_MS}(600ms)。
+     * 这是省电设计，但代价是<b>停手后第一次操作会"冷启动"</b>：按下删除到真正
+     * 画出第一帧之间，最长可能要等一个空闲周期；即使随后的
+     * {@code lastNanos} / {@code smoothedDt} 都已归位，
+     * 那一帧的时序本身仍然是"久等一帧才动"。
+     *
+     * <p>开启后，无论有没有动画都按 {@code ACTIVE_DELAY_MS}(8ms, 约 125fps) 运行，
+     * 冷启动延迟被彻底消除 —— 任何时候按键，下一帧最多 8ms 就到。
+     *
+     * <p><b>代价（务必知悉）</b>：调度线程会每秒向 EDT 投递约 125 次任务，
+     * 且<b>永不停歇</b>。EDT 是单线程，编辑器繁忙时这些任务会和编辑器抢时间。
+     * 实测 EDT 上已有约 12.6% 被 {@code ScaledBlit} 等 IDE 自身绘制占用，
+     * 本插件占约 10.7%；常驻后这一份只增不减。
+     * <b>开标签页很多、或电脑较慢时，可能反而更卡。</b>
+     *
+     * <p>默认关闭（false = 原有的自动降频策略）。
+     */
+    public boolean alwaysHighFps = false;
+
     /** 光标停止移动后，延迟多久淡出（毫秒） */
     public int cursorDisappearDelay = 50;
 

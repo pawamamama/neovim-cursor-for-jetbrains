@@ -38,5 +38,21 @@
                 description="勾选切换到残影轨迹模型（记录真实历史位置，掉帧不失真）；取消则回到弹簧拉伸模型（Neovide 原版效果）">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+
+        <!--
+          常驻刷新 —— 消除"停手后第一次操作"的冷启动延迟。
+
+          默认策略下光标停止后调度间隔从 8ms 涨到 120ms（失焦 600ms），
+          所以停手一段时间后第一次按键，从按下到画出第一帧最长要等一个空闲周期。
+          勾选后无论有无动画都按 8ms 跑，该延迟消失。
+
+          代价：每秒约 125 次任务投递到 EDT 且永不停歇，标签页多时可能反而更卡。
+        -->
+        <action id="NeovideCursor.AlwaysHighFps"
+                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleAlwaysHighFpsAction"
+                text="Neovide 光标：常驻刷新（消除冷启动）"
+                description="勾选后不再空闲降频，永远按约 125fps 调度。可消除「停手后第一次操作卡一下」的冷启动延迟，代价是持续占用 EDT，标签页很多时可能反而更卡。">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>
