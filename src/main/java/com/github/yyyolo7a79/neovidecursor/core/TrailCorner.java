@@ -130,16 +130,25 @@ public class TrailCorner {
                 ? config.snapAnimationLength
                 : baseTime * clamp(factor, 0, 1);
 
-        // 【低帧率适配】保证动画至少跨越若干帧。
+        // 【低帧率适配】保证动画至少跨越若干帧 —— 但加两种保护。
         //
         // DampedSpring.update() 开头的短路条件 `animationLength <= dt` 本意是
         // "动画比一帧还短就没必要做"，但帧率降到 20~30fps 时 dt ≈ 0.03~0.05s，
-        // 恰好把相邻两行移动的短动画（0.015~0.05s）整体吃掉 ——
-        // 表现为光标瞬间闪到目标位置、看起来"卡住"。
+        // 恰好把相邻两行移动的短动画整体吃掉 —— 光标瞬间闪到目标、看起来"卡住"。
         //
-        // 硬吸附（useSnap）的角本就该瞬间到位，不做延长。
+        // 保护一：硬吸附（useSnap）的角本就该瞬间到位，不做延长。
+        //
+        // 保护二：<b>延长量不得超过原本的目标时长</b>。
+        // 这条是新加的，因为调度的 ACTIVE_DELAY_MS 已从 8ms 改成 12ms：
+        // frameDt * MIN_ANIMATION_FRAMES = 12ms * 6 = 72ms，会比
+        // shortAnimationLength(0.05s = 50ms) 还长 —— 原本"干脆"的短动画
+        // 反而被强行拉长，观感变得黏滞。
+        // 所以取 max(原时长, min(下限, 原时长 * 1.5))：既保留低帧率补偿，
+        // 又不会把动画拉长到原时长的 1.5 倍以上。
         if (!useSnap && frameDt > 0) {
-            animationLength = Math.max(animationLength, frameDt * MIN_ANIMATION_FRAMES);
+            double floor = frameDt * MIN_ANIMATION_FRAMES;
+            double cap = animationLength * 1.5;
+            animationLength = Math.max(animationLength, Math.min(floor, cap));
         }
 
         springX.setAnimationLength(animationLength);

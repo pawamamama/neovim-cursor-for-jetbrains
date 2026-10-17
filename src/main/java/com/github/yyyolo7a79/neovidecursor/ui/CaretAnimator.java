@@ -62,8 +62,24 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class CaretAnimator implements Disposable, CaretListener {
 
-    /** 运动时的调度间隔（毫秒）—— 叠加 Thread.sleep 的 ~1.5ms 误差后约 100fps */
-    private static final int ACTIVE_DELAY_MS = 8;
+    /**
+     * 运动时的调度间隔（毫秒）。
+     *
+     * <p><b>为什么是 12 而不是 8</b>：8ms(125fps) 虽然"响应快"，但每帧位移极小，
+     * 动画看起来不是"滑过去"而是"瞬移后微调"—— 用户形容为"傻快"。
+     * 而且每秒要往 EDT 投递 125 次任务，连续输入时与编辑器抢时间。
+     *
+     * <p>12ms(约 83fps) 是折中点：
+     * <ul>
+     *   <li>短动画 0.05s 能画约 4 帧、长动画 0.1s 能画约 8 帧 —— 足够形成运动感</li>
+     *   <li>EDT 投递频率从 125 次/秒降到 83 次/秒，负担减少约三分之一</li>
+     *   <li>人眼对 80fps 与 125fps 的差异已很难分辨，但每帧位移的差别看得出来</li>
+     * </ul>
+     *
+     * <p>输入 / 换行 / 删除统一用这一个间隔 —— 不按操作类型区分，
+     * 避免不同操作的观感不一致。
+     */
+    static final int ACTIVE_DELAY_MS = 12;
 
     /** 静止时的轮询间隔（低频看门狗） */
     private static final int IDLE_DELAY_MS = 120;
@@ -175,6 +191,9 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     private final Rectangle lastDirtyRegion = new Rectangle();
     private final Rectangle currentBounds = new Rectangle();
+
+    /** 合并两个重绘区域时的复用对象，避免每帧分配 */
+    private final Rectangle scratchUnion = new Rectangle();
 
     /** 上一次 tick 的时间戳（纳秒） */
     private long lastNanos;
@@ -844,8 +863,24 @@ public class CaretAnimator implements Disposable, CaretListener {
             return;
         }
 
-        repaintRegion(lastDirtyRegion);
-        repaintRegion(currentBounds);
+        // 【两个区域相交时合并成一次 repaint】
+        //
+        // 原来无条件提交两次（上一帧区域用于擦除 + 当前帧区域）。
+        // 但小位移时这两个矩形几乎完全重合 —— 同一块像素被交给 RepaintManager 两次，
+        // 而 addDirtyRegion 本身要向上遍历组件树，白白多付一次代价。
+        // 连续输入（每次只挪一个字符宽）正是这种"几乎重合"的典型场景。
+        //
+        // 大步跳转（删除到上一行、翻页）时两区域不相交，此时必须分开提交：
+        // 合并成并集会把中间那片从未画过内容的区域一起重绘（README 踩坑 #7）。
+        if (lastDirtyRegion.isEmpty() || currentBounds.isEmpty()
+                || lastDirtyRegion.intersects(currentBounds)) {
+            scratchUnion.setBounds(lastDirtyRegion);
+            scratchUnion.add(currentBounds);
+            repaintRegion(scratchUnion);
+        } else {
+            repaintRegion(lastDirtyRegion);
+            repaintRegion(currentBounds);
+        }
         lastDirtyRegion.setBounds(currentBounds);
     }
 
