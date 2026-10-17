@@ -78,6 +78,20 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final double MAX_DT = 1.0 / 30;
 
     /**
+     * 「恢复检测」阈值（秒）：本帧真实间隔超过它，就认为刚从长时间停顿中恢复。
+     *
+     * <p>触发场景：切到别的窗口再切回、系统休眠唤醒、EDT 被长时间阻塞。
+     * 这些情况下 AWT 会延迟派发 {@code invokeLater} 任务，{@code tick()} 整段不执行，
+     * 于是下一帧的 dt 等于离开的整个时长，被 {@link #MAX_DT} 截断成 33.3ms，
+     * 弹簧一帧走完约 93% —— 观感就是"回来卡一下"。
+     *
+     * <p>阈值取 100ms：正常帧约 8ms，偶发卡顿 20~50ms，都远小于它；
+     * 而真正的"离开"通常是几百毫秒到几分钟。取这个量级可以确保
+     * <b>日常打字与连续操作绝不会误触发</b>。
+     */
+    private static final double RECOVERY_GAP_SECONDS = 0.1;
+
+    /**
      * 辉光淡入淡出的偏移量区间（像素）。
      *
      * <p>辉光强度由四角相对目标的最大偏移量（即拖尾展开程度）驱动：
@@ -399,8 +413,37 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 每帧：重新读取光标位置 → 推进物理 → 局部重绘 */
     private void tick() {
         long now = System.nanoTime();
-        double dt = Math.min((now - lastNanos) / 1_000_000_000.0, MAX_DT);
+        double rawDt = (now - lastNanos) / 1_000_000_000.0;
+        double dt = Math.min(rawDt, MAX_DT);
         lastNanos = now;
+
+        // 【恢复检测：这一帧跨过了很长的时间】
+        //
+        // 与 wakeUp() 里的 fromIdleTier 是同一类问题的另一个入口。
+        // 那个判据看的是「刚才是否在空闲调度档」，但有两种情况它抓不到：
+        //
+        //   ① 开启常驻刷新（alwaysHighFps）时 currentDelayMs 恒为 8ms，
+        //      fromIdleTier 永远 false —— 切屏回来时三个修复全被跳过；
+        //   ② 即使不开常驻刷新，窗口失去前台焦点 / 系统休眠期间
+        //      AWT 会延迟派发 invokeLater 任务，tick() 整段不执行，
+        //      而 currentDelayMs 可能仍停在活跃档，判据同样是 false。
+        //
+        // 两种情况的结果相同：这一帧的 dt 等于「离开的整个时长」，
+        // 被 MAX_DT 截断成 33.3ms，弹簧一帧走完约 93% —— 看起来就是"卡一下"。
+        //
+        // 所以这里按「真实间隔」再兜一次：只要本帧跨了 100ms 以上，
+        // 就当作恢复正常处理，把 dt 与所有平滑量都归位。
+        //
+        // 阈值 100ms 的取法：正常帧 8ms，偶发卡顿 20~50ms，
+        // 超过 100ms 一定跨过了很长一段（切屏 / 休眠 / EDT 长阻塞），
+        // 因此正常打字与连续操作完全不会触发这条分支。
+        if (rawDt > RECOVERY_GAP_SECONDS) {
+            dt = ACTIVE_DELAY_MS / 1000.0;
+            smoothedDt = dt;
+            smoothedIntervalMs = ACTIVE_DELAY_MS;
+            // 紧随其后的那次"帧间隔测量"跨越了整段离开时间，不是真实帧间隔
+            skipNextIntervalMeasurement = true;
+        }
 
         // 测量真实帧间隔（指数平滑）。变快时快速跟随、变慢时缓慢跟随，
         // 避免偶发的一次卡顿把调度频率长期压低。
