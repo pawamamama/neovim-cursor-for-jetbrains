@@ -151,6 +151,12 @@ public class CaretAnimator implements Disposable, CaretListener {
     private int peakRepaintArea = 0;
     private long fpsWindowStart = 0L;
 
+    /** 上一次记账的时刻；0 表示本窗口还没有过第二帧 */
+    private long lastStatsNanos = 0L;
+
+    /** 本窗口内相邻两帧的最大间隔（纳秒）—— 用于区分"持续阻塞"与"统计口径失真" */
+    private long maxGapNanos = 0L;
+
     // ===== 重绘区域复用对象（避免每帧分配）=====
 
     private final Rectangle lastDirtyRegion = new Rectangle();
@@ -477,13 +483,37 @@ public class CaretAnimator implements Disposable, CaretListener {
             peakRepaintArea = area;
         }
 
+        // 【诊断：相邻两次记账的最大间隔】
+        //
+        // 起因：日志里出现过 fps=0.5 / delay=8ms 的组合，它有两种截然不同的含义，
+        // 必须区分，否则会朝错的方向优化：
+        //   (a) 真的 2 秒才画出一帧 → EDT 被占满，任务投递出去轮不到执行
+        //   (b) 统计口径失真        → 窗口起点久未重置，把空闲时间算进了分母
+        //                            （README 踩坑 #21 记录过同样的 bug）
+        //
+        // 判据：maxGap 远小于 window ⇒ fps 低是因为窗口里只有零星几帧、
+        // 其余时间是空的（属 b 或间歇性停顿）；
+        // maxGap 本身就达数百毫秒 ⇒ 属 (a)，是持续阻塞。
+        long gap = lastStatsNanos == 0L ? 0L : now - lastStatsNanos;
+        if (gap > maxGapNanos) {
+            maxGapNanos = gap;
+        }
+        lastStatsNanos = now;
+
         long elapsed = now - fpsWindowStart;
         if (elapsed >= 1_000_000_000L) {
             LOG.info(String.format(
-                    "neovide-cursor: fps=%.1f  peakRepaintArea=%dpx  delay=%dms",
-                    frameCount * 1_000_000_000.0 / elapsed, peakRepaintArea, currentDelayMs));
+                    "neovide-cursor: fps=%.1f  frames=%d  window=%.0fms  maxGap=%.0fms  "
+                            + "peakRepaintArea=%dpx  delay=%dms",
+                    frameCount * 1_000_000_000.0 / elapsed,
+                    frameCount,
+                    elapsed / 1_000_000.0,
+                    maxGapNanos / 1_000_000.0,
+                    peakRepaintArea,
+                    currentDelayMs));
             frameCount = 0;
             peakRepaintArea = 0;
+            maxGapNanos = 0L;
             fpsWindowStart = now;
         }
     }
