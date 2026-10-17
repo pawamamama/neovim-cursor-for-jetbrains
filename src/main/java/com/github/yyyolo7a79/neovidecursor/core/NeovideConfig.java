@@ -39,12 +39,24 @@ public class NeovideConfig {
 
     /**
      * 辉光层数：层数越多渐变越平滑。
-     * 层数太少会露出"硬边"，看起来像给光标套了个壳。
      *
-     * <p><b>层数不影响光晕整体亮度</b> —— 每层的独立不透明度会按层数反解，
-     * 保证叠加后峰值恒等于 {@link #glowOpacity}。加层只是让过渡更细腻。
+     * <p><b>层数不影响光晕整体亮度</b> —— 每层的独立不透明度会按层数反解
+     * （{@code A = 1 - (1-peak)^(1/N)}），保证 N 层叠加后峰值恒等于
+     * {@link #glowOpacity}。加层只让过渡更细腻，减层不会变暗。
+     *
+     * <p><b>为什么从 12 降到 6</b>：JFR 采样显示 {@code CaretTrailPanel.drawQuadGlow}
+     * 里的 {@code g2.fill(path)} 占 EDT 采样的 <b>9.3%</b>，是全插件最大热点。
+     * 每一层都要走 {@code AAShapePipe} 抗锯齿 + {@code MaskFill} alpha 混合，
+     * 而这两者都在 <b>CPU</b> 上完成 —— Java2D 的 GPU 管线不加速
+     * {@code fill(Path2D)}，所以只能靠减少层数来降成本。
+     *
+     * <p><b>观感代价极小</b>：辉光外扩半径 = {@code shadowBlurFactor × 行高}
+     * ≈ 0.2 × 32 = 6.4px。12 层时每层步进 0.53px，6 层时 1.07px ——
+     * 在 6.4px 的范围内，1px 的步进肉眼几乎无法分辨。
+     *
+     * <p>若确实看出硬边，调到 8 即可（成本仍比 12 低三分之一）。
      */
-    public int glowLayers = 12;
+    public int glowLayers = 6;
 
     /**
      * 辉光峰值不透明度（只影响光晕，不影响光标主体）。
