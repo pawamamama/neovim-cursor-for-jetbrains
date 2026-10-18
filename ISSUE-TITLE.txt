@@ -1,0 +1,1 @@
+结合一个用户两天的实测：CJK 短跳误判、hideNativeCaret 死字段、effectiveDt 空转链路
