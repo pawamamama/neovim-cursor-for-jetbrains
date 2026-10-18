@@ -6,6 +6,7 @@ import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.event.CaretEvent;
@@ -15,6 +16,7 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.JComponent;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
+import java.awt.FontMetrics;
 import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -63,23 +65,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class CaretAnimator implements Disposable, CaretListener {
 
     /**
-     * 运动时的调度间隔（毫秒）。
+     * 运动时的调度间隔（毫秒）—— 叠加 Thread.sleep 的 ~1.5ms 误差后约 100fps。
      *
-     * <p><b>为什么是 12 而不是 8</b>：8ms(125fps) 虽然"响应快"，但每帧位移极小，
-     * 动画看起来不是"滑过去"而是"瞬移后微调"—— 用户形容为"傻快"。
-     * 而且每秒要往 EDT 投递 125 次任务，连续输入时与编辑器抢时间。
+     * <p><b>保持原版的 8ms</b>。曾试过 12ms(83fps) 以减少 EDT 投递频率，
+     * 但用户实测反馈观感变差（动画拉长后不够跟手），因此回退。
+     * 这一项保持与上游一致，不再调整。
      *
-     * <p>12ms(约 83fps) 是折中点：
-     * <ul>
-     *   <li>短动画 0.05s 能画约 4 帧、长动画 0.1s 能画约 8 帧 —— 足够形成运动感</li>
-     *   <li>EDT 投递频率从 125 次/秒降到 83 次/秒，负担减少约三分之一</li>
-     *   <li>人眼对 80fps 与 125fps 的差异已很难分辨，但每帧位移的差别看得出来</li>
-     * </ul>
-     *
-     * <p>输入 / 换行 / 删除统一用这一个间隔 —— 不按操作类型区分，
-     * 避免不同操作的观感不一致。
+     * <p>输入 / 换行 / 删除统一用这一个间隔，不按操作类型区分。
      */
-    static final int ACTIVE_DELAY_MS = 12;
+    static final int ACTIVE_DELAY_MS = 8;
 
     /** 静止时的轮询间隔（低频看门狗） */
     private static final int IDLE_DELAY_MS = 120;
@@ -90,8 +84,20 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 自适应调度的间隔上限（毫秒） */
     private static final int MAX_ADAPTIVE_DELAY_MS = 40;
 
-    /** 单帧最大时间步长，防止 IDE 卡顿后弹簧"跳变" */
-    private static final double MAX_DT = 1.0 / 30;
+    /**
+     * 单帧最大时间步长，防止 IDE 卡顿后弹簧"跳变"。
+     *
+     * <p><b>【缺陷 1 —— 审计确认】必须 ≥ {@link #MAX_ADAPTIVE_DELAY_MS}。</b>
+     *
+     * <p>原值 {@code 1.0/30 ≈ 33.3ms}，比调度器的自适应上限 40ms 还小 ——
+     * 这意味着调度器自己会交付 33.3~40ms 的间隔，而物理步长被钳在 33.3ms，
+     * 中间那段（最多 6.7ms）每一帧都被丢掉，累计起来就是
+     * 「慢放 1.3~2.9 倍」。两个门限必须自洽。
+     *
+     * <p>取 {@code 1.0/20 = 50ms}：略大于调度上限 40ms，保证调度能交付的
+     * 任何间隔都能被物理完整推进，不再丢时间。
+     */
+    private static final double MAX_DT = 1.0 / 20;
 
     /**
      * 「恢复检测」阈值（秒）：本帧真实间隔超过它，就认为刚从长时间停顿中恢复。
@@ -106,6 +112,22 @@ public class CaretAnimator implements Disposable, CaretListener {
      * <b>日常打字与连续操作绝不会误触发</b>。
      */
     private static final double RECOVERY_GAP_SECONDS = 0.1;
+
+    /**
+     * 「分步推进」适用的最大停顿时长（秒）。超过它就一次性归位。
+     *
+     * <p>见 {@link #tick()} 里 recovery 分支的说明：
+     * <ul>
+     *   <li>≤ 本值：切成 ~8ms 小步推进，观感与常驻刷新一致
+     *       —— 这是「不开常驻刷新也别卡」要解决的区间</li>
+     *   <li>&gt; 本值：直接归位，不补放拖尾
+     *       —— 离开几秒后回来，用户期待「光标已在新位置」，
+     *          而不是补放一段几秒的动画；分步只会白白占用 EDT</li>
+     * </ul>
+     *
+     * <p>取 0.5s：步数上限约 62 步（0.5 / 0.008），单帧循环开销可忽略。
+     */
+    private static final double RECOVERY_STEP_CAP_SECONDS = 0.5;
 
     /**
      * 辉光淡入淡出的偏移量区间（像素）。
@@ -227,6 +249,18 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private int lastVisualLine = Integer.MIN_VALUE;
     private int lastVisualColumn = Integer.MIN_VALUE;
+
+    /**
+     * 上一帧的光标字符偏移（{@link com.intellij.openapi.editor.CaretModel#getOffset()}）。
+     *
+     * <p>用于算出「本次移动跨越了几个字符」，供短跳判定使用。
+     * 负数表示尚未初始化。
+     *
+     * <p><b>为什么用 offset 而不是像素</b>：offset 是编辑器的原生字符坐标，
+     * 差值是精确的字符个数，与字体、字号、全角半角、连字全部无关 ——
+     * 这正是「英文丝滑但中文卡」问题的根治法。详见 {@code TrailCorner#jump}。
+     */
+    private int lastCaretOffset = -1;
 
     // ===== 动画目标状态 =====
 
@@ -447,21 +481,46 @@ public class CaretAnimator implements Disposable, CaretListener {
         //      AWT 会延迟派发 invokeLater 任务，tick() 整段不执行，
         //      而 currentDelayMs 可能仍停在活跃档，判据同样是 false。
         //
-        // 两种情况的结果相同：这一帧的 dt 等于「离开的整个时长」，
-        // 被 MAX_DT 截断成 33.3ms，弹簧一帧走完约 93% —— 看起来就是"卡一下"。
+        // ==================== 空闲唤醒：按「一帧」推进，而不是整段 ====================
         //
-        // 所以这里按「真实间隔」再兜一次：只要本帧跨了 100ms 以上，
-        // 就当作恢复正常处理，把 dt 与所有平滑量都归位。
+        // 【历史与实测结论】
+        //   版本 A：dt = ACTIVE_DELAY_MS(8ms)
+        //     → 唤醒后拖尾正常展开（15 帧、峰值拉伸 5.51px），观感最好
+        //     → 唯一顾虑：停顿期间拖尾「定格」在旧偏移上
+        //   版本 B：dt = rawDt（真实间隔，0.7.0 起）
+        //     → 一帧就走完几乎全部位移（因 dt >= animationLength 直接短路归零）
+        //     → 用户感知「不开常驻刷新就卡爆」
+        //   版本 C：分步推进（0.7.3，已废弃）
+        //     → 【实测证明无效】闭式解对时间可加：一次 update(0.12) 与
+        //        update(0.008)×15 结果差 8.88e-16（完全等价）。
+        //        而 updateCorners / submitRepaint 在循环之外，
+        //        中间状态根本不渲染 —— 所以「分步」不产生任何中间帧，
+        //        只是绕开了短路。等效于版本 B，救不回拉伸。
         //
-        // 阈值 100ms 的取法：正常帧 8ms，偶发卡顿 20~50ms，
-        // 超过 100ms 一定跨过了很长一段（切屏 / 休眠 / EDT 长阻塞），
-        // 因此正常打字与连续操作完全不会触发这条分支。
+        // 【本版】采用版本 A 的做法，并区分两种停顿：
+        //
+        //   · 短停顿（≤ RECOVERY_STEP_CAP_SECONDS）：dt 取「一帧」= 8ms
+        //     → 拖尾从当前位置平滑展开 15 帧，与常驻刷新观感一致
+        //     → 停顿期间残留的偏移会在 ~120ms 内自然收拢，不是永久卡住
+        //
+        //   · 长停顿（> 上限）：dt 取真实间隔，触发短路一次性归位
+        //     → 离开几秒后回来，用户期待「光标已在新位置」，
+        //        而不是补放一段几秒钟的拖尾动画
         if (rawDt > RECOVERY_GAP_SECONDS) {
-            dt = ACTIVE_DELAY_MS / 1000.0;
-            smoothedDt = dt;
+            dt = (rawDt <= RECOVERY_STEP_CAP_SECONDS)
+                    ? ACTIVE_DELAY_MS / 1000.0     // 短停顿：按一帧推进 → 平滑展开
+                    : rawDt;                       // 长停顿：一次性归位
+            smoothedDt = ACTIVE_DELAY_MS / 1000.0;
             smoothedIntervalMs = ACTIVE_DELAY_MS;
             // 紧随其后的那次"帧间隔测量"跨越了整段离开时间，不是真实帧间隔
             skipNextIntervalMeasurement = true;
+
+            // 【诊断】确认缺陷 4：空闲唤醒那一拍是否读到旧坐标。
+            // 若这里有日志但紧接着没有动画帧，说明首拍扑空、掉回 120ms。
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(String.format(
+                        "neovide-cursor: recovery rawDt=%.0fms → dt=%.0fms", rawDt * 1000, dt * 1000));
+            }
         }
 
         // 测量真实帧间隔（指数平滑）。变快时快速跟随、变慢时缓慢跟随，
@@ -699,6 +758,32 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             double height = editor.getLineHeight();
             double width = config.cursorWidth;
+
+            // 【字符移动量】供 {@link TrailCorner#jump} 判定「短跳」用。
+            //
+            // 直接用编辑器的原生字符偏移，而不是从像素反推字符宽度。
+            // 这是 IntelliJ 平台的标准做法：offset 就是「第几个字符」，
+            // 差值天然是「移动了几个字符」，与字体、字号、全角半角完全无关 ——
+            // 中文、日文、韩文、阿拉伯文、emoji（代理对按 2 计）一视同仁。
+            //
+            // 早期版本曾用「像素 ÷ 字符宽度」反推，先后失败三次：
+            // 写死 16px（字号 20px 的中文约 20px 直接超出）、
+            // FontMetrics('m')（西文推进量，中文是 2 倍）、
+            // 第0列→第1列实测（取的是行首字符，光标在中文区时仍会翻倍）。
+            // 结果都是「英文丝滑、中文卡」。
+            int charsMoved = -1;
+            try {
+                int offset = editor.getCaretModel().getOffset();
+                if (lastCaretOffset >= 0) {
+                    charsMoved = Math.abs(offset - lastCaretOffset);
+                }
+                lastCaretOffset = offset;
+            } catch (Throwable ignored) {
+                // 取不到就保持 -1，jump() 会退回兼容分支
+            }
+            for (TrailCorner corner : corners) {
+                corner.setCharsMoved(charsMoved);
+            }
 
             double newCenterX = p.x + width / 2.0;
             double newCenterY = p.y + height / 2.0;
@@ -959,7 +1044,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         for (int i = 0; i < corners.length; i++) {
-            corners[i].jump(cursorWidth, cursorHeight, centerX, centerY, ranks[i], dt);
+            corners[i].jump(cursorWidth, cursorHeight, centerX, centerY, ranks[i]);
         }
     }
 

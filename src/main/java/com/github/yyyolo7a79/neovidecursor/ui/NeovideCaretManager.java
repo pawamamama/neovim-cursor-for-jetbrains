@@ -9,6 +9,7 @@ import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.event.EditorFactoryEvent;
 import com.intellij.openapi.editor.event.EditorFactoryListener;
+import com.intellij.ide.util.PropertiesComponent;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.Color;
@@ -75,6 +76,21 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     private static final Logger LOG = Logger.getInstance(NeovideCaretManager.class);
 
+    // ==================== 持久化 ====================
+
+    /**
+     * 「常驻刷新」在 PropertiesComponent 里的键名。
+     *
+     * <p>此前整个插件没有任何持久化机制，所有开关都只活在内存里，
+     * 重启 IDEA 后一律回到默认值 —— 对「常驻刷新」这种用户会长期开启的
+     * 开关来说是不可接受的（用户会以为"又变回去了"）。
+     *
+     * <p>这里用 {@code PropertiesComponent} 而不是让 {@link NeovideConfig}
+     * 实现 {@code PersistentStateComponent}：后者要连类一起改、还要注册服务，
+     * 而这里只需要记住一个布尔值，用前者代价最小、也不影响既有配置字段。
+     */
+    private static final String PROP_ALWAYS_HIGH_FPS = "neovide.cursor.alwaysHighFps";
+
     public static boolean isPaintDisabled() {
         return paintDisabled;
     }
@@ -107,9 +123,18 @@ public class NeovideCaretManager implements EditorFactoryListener {
             return;
         }
 
-        // 插件重启时，之前已打开的编辑器不会触发 editorCreated，
-        // 借第一次回调的机会把它们一并补建，避免"只有新开的文件才有拖尾"
+        // 【首次回调做两件事，顺序不能反】
+        //
+        // 1. 先恢复持久化设置。此时 IDEA 的 PropertiesComponent 已可用；
+        //    放在构造器里则可能过早。
+        //
+        // 2. 再把 initialScanDone 置位，然后补建已打开的编辑器。
+        //
+        // 历史 bug：恢复调用原本写在 install() 里判断 `if (!initialScanDone)`，
+        // 但置位发生在本方法更靠前的位置 —— 判据恒为 false，那段分支是死代码，
+        // 持久化的开关重启后永远回不到默认值以外。
         if (!initialScanDone) {
+            restorePersistedSettings();
             initialScanDone = true;
             for (Editor existing : EditorFactory.getInstance().getAllEditors()) {
                 install(existing);
@@ -151,7 +176,16 @@ public class NeovideCaretManager implements EditorFactoryListener {
             //
             // 注：终端（Terminal 工具窗口）的光标由终端模拟器自己绘制，不受
             // CARET_COLOR 影响，因此不在此列，也无需特殊处理。
-            applyNativeCaretHidden();
+            //
+            // 【上游踩坑 #19】必须尊重 hideNativeCaret 配置。
+            // 此前这里是无条件 applyNativeCaretHidden()，导致该配置是死字段：
+            // 设成 false 也照样隐藏原生光标（行为与配置相反）。
+            // 而隐藏原生光标会改写全局配色方案的 CARET_COLOR，是有落盘副作用的操作。
+            if (CONFIG.hideNativeCaret) {
+                applyNativeCaretHidden();
+            } else {
+                restoreNativeCaret();
+            }
 
             ANIMATORS.computeIfAbsent(editor, e -> new CaretAnimator(e, CONFIG));
         } catch (Throwable t) {
@@ -219,6 +253,36 @@ public class NeovideCaretManager implements EditorFactoryListener {
     // ==================== 常驻刷新 ====================
 
     /**
+     * 开启 / 关闭「隐藏原生光标（常驻绘制）」。
+     *
+     * <p><b>上游踩坑 #19</b>：
+     * <ul>
+     *   <li>不隐藏（默认）—— 原生光标零延迟跟随，覆盖层只叠加拖尾。
+     *       跟随不依赖我们的调度，所以空闲降频时也不会「卡」。</li>
+     *   <li>隐藏 —— 覆盖层就是光标本体，跟随完全取决于 EDT 调度；
+     *       空闲降频时会有明显延迟，通常需要配合「常驻刷新」。</li>
+     * </ul>
+     *
+     * <p>切换后立即对所有已打开的编辑器生效。
+     */
+    public static void setHideNativeCaret(boolean on) {
+        CONFIG.hideNativeCaret = on;
+        if (on) {
+            applyNativeCaretHidden();
+        } else {
+            restoreNativeCaret();
+        }
+        // 让每个编辑器立即重绘一帧，避免观感切换要等下一次输入
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            animator.clearTrail();
+        }
+    }
+
+    public static boolean isHideNativeCaret() {
+        return CONFIG.hideNativeCaret;
+    }
+
+    /**
      * 开启 / 关闭「常驻刷新」。
      *
      * <p>关闭时恢复原有的自动降频策略（空闲降到 120ms / 600ms）。
@@ -227,6 +291,13 @@ public class NeovideCaretManager implements EditorFactoryListener {
      */
     public static void setAlwaysHighFps(boolean on) {
         CONFIG.alwaysHighFps = on;
+        // 落盘：否则重启 IDEA 后又回到默认（关闭），用户会以为"又变回去了"
+        try {
+            PropertiesComponent.getInstance().setValue(PROP_ALWAYS_HIGH_FPS, on, false);
+        } catch (Throwable t) {
+            // 持久化失败不应影响本次运行
+            LOG.warn("neovide-cursor: 保存 alwaysHighFps 失败", t);
+        }
         for (CaretAnimator animator : ANIMATORS.values()) {
             animator.requestWakeUp();
         }
@@ -236,6 +307,20 @@ public class NeovideCaretManager implements EditorFactoryListener {
         return CONFIG.alwaysHighFps;
     }
 
+    /**
+     * 启动时从磁盘恢复「常驻刷新」的值。
+     *
+     * <p>在 {@link #install()} 里调用一次。读不到就用默认值 false。
+     */
+    public static void restorePersistedSettings() {
+        try {
+            CONFIG.alwaysHighFps = PropertiesComponent.getInstance()
+                    .getBoolean(PROP_ALWAYS_HIGH_FPS, false);
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: 读取 alwaysHighFps 失败，使用默认值", t);
+        }
+    }
+
     // ==================== 启用 / 禁用 ====================
 
     /** 切换拖尾效果开关 */
@@ -243,7 +328,12 @@ public class NeovideCaretManager implements EditorFactoryListener {
         enabled = on;
 
         if (on) {
-            applyNativeCaretHidden();
+            // 【上游踩坑 #19】尊重 hideNativeCaret：默认保留原生光标
+            if (CONFIG.hideNativeCaret) {
+                applyNativeCaretHidden();
+            } else {
+                restoreNativeCaret();
+            }
             // 为当前已打开的编辑器补建动画
             for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
                 install(editor);

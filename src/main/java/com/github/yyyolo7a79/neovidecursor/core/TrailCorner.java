@@ -12,15 +12,15 @@ package com.github.yyyolo7a79.neovidecursor.core;
  */
 public class TrailCorner {
 
-    /**
-     * 动画至少跨越的帧数（低帧率适配）。
-     *
-     * <p>{@link DampedSpring#update} 开头有「animationLength 小于一帧就直接归零」的短路，
-     * 本意是省掉无意义的极短动画。但在帧率只有 20~30fps 时 dt ≈ 0.03~0.05s，
-     * 而相邻两行移动的动画时长恰为 0.015~0.05s —— 动画被整体吃掉，
-     * 光标瞬间闪到目标，视觉上就是"卡"。这也是"十几行跳转反而更流畅"的原因。
-     */
-    private static final double MIN_ANIMATION_FRAMES = 6.0;
+    // 【曾有一个 MIN_ANIMATION_FRAMES = 6.0 的低帧率补偿，已移除】
+    //
+    // 它强制每个角的动画时长至少为 6×dt。本意是防止短动画被
+    // DampedSpring.update() 开头的 `animationLength <= dt` 短路吃掉，
+    // 但副作用是：短距离移动时四角的时长被抬到同一值（0.015~0.05s 全变成
+    // 约 0.06s），梯度消失，光标只是整体平移、不再被拉伸。
+    //
+    // 原版在 60fps 下最短的角本就一帧到位，这是设计行为而非缺陷。
+    // 上游 README 踩坑 #20 记录了同一个错误。
 
     /** 角点相对光标矩形的归一化位置，例如 (-0.5, -0.5) 表示左上角 */
     private final double relativeX;
@@ -44,6 +44,19 @@ public class TrailCorner {
 
     private final NeovideConfig config;
 
+    /**
+     * 本次移动跨越的<b>字符个数</b>（由 {@code CaretAnimator} 每帧用
+     * {@code |CaretModel.getOffset() 差值|} 给出）。
+     *
+     * <p>负数表示「调用方尚未提供」，此时 {@link #jump} 退回旧的归一化判定。
+     *
+     * <p><b>为什么用字符偏移而不是像素</b>：偏移量是编辑器的原生坐标，
+     * 直接给出「移动了几个字符」，与字体、字号、全角半角、连字全部无关 ——
+     * 中/英/日/韩/阿拉伯/emoji 一视同仁。早期的像素反推方案在中文上反复失准，
+     * 详见 {@link #jump} 的说明。
+     */
+    private int charsMoved = -1;
+
     public TrailCorner(double relativeX, double relativeY, NeovideConfig config) {
         this.relativeX = relativeX;
         this.relativeY = relativeY;
@@ -56,6 +69,15 @@ public class TrailCorner {
 
         this.springX = new DampedSpring(config.animationLength);
         this.springY = new DampedSpring(config.animationLength);
+    }
+
+    /**
+     * 设置本次移动跨越的字符个数（由 {@code CaretAnimator} 在 jump 前写入）。
+     *
+     * <p>传负数表示未知，判定会退回兼容分支。
+     */
+    public void setCharsMoved(int charsMoved) {
+        this.charsMoved = charsMoved;
     }
 
     // ==================== 目标位置计算 ====================
@@ -96,69 +118,156 @@ public class TrailCorner {
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
-     * @param rank    按对齐度排序后的名次（0 = 最靠前，最跟手）
-     * @param frameDt 当前帧间隔（秒），用于低帧率下的动画时长补偿；传 0 表示不补偿
+     * <p><b>【忠实还原原版】</b>本方法的时长分配已按 VS Code 原版
+     * {@code neovide-cursor.js} 的 {@code Corner.jump()}（第 149-173 行）对齐：
+     *
+     * <pre>
+     *   isShortJump = |jumpX| ≤ 2.001 AND |jumpY| ≤ 0.001     // 纵向必须在同一行
+     *   leading  = animationLength × (1 - trailSize)           // trailSize=1 时为 0
+     *   trailing = animationLength
+     *   rank ≥ 2 → leading
+     *   rank = 1 → (leading + trailing) / 2
+     *   rank = 0 → trailing
+     * </pre>
+     *
+     * <p>原版<b>没有</b>「至少跨 N 帧」的低帧率补偿，也<b>没有</b>
+     * {@code trailFactors} 四档系数 —— 那是本插件早期自创的。
+     *
+     * @param rank 按对齐度<b>升序</b>的名次：0 = 最靠后（最长动画、最慢），
+     *             3 = 最靠前（最短动画、最跟手）。与原版一致
      */
-    public void jump(double width, double height, double centerX, double centerY,
-                     int rank, double frameDt) {
+    public void jump(double width, double height, double centerX, double centerY, int rank) {
         double destX = destX(centerX, width);
         double destY = destY(centerY, height);
 
-        // 用「光标自身尺寸」归一化位移，得到以"光标个数"为单位的位移量，
-        // 这样阈值语义与光标字体大小无关
-        double jumpX = (destX - previousDestX) / width;
-        double jumpY = (destY - previousDestY) / height;
+        // 归一化位移（以「光标自身尺寸」为单位）—— 保留供排版调试参考
+        double deltaXpx = destX - previousDestX;
+        double deltaYpx = destY - previousDestY;
 
-        double len = Math.hypot(jumpX, jumpY);
-        double jumpNormX = len != 0 ? jumpX / len : 0;
-        double jumpNormY = len != 0 ? jumpY / len : 0;
+        double animationLength;
 
-        boolean isShortMove = len <= config.shortMoveThreshold;
-        double baseTime = isShortMove ? config.shortAnimationLength : config.animationLength;
-
-        // 运动方向与该角方向的夹角余弦
-        double alignment = jumpNormX * relativeNormX + jumpNormY * relativeNormY;
-
-        // 位于运动最前方的角：硬吸附，瞬间到位
-        boolean useSnap = config.useHardSnap && alignment > config.leadingSnapThreshold;
-
-        double factor = useSnap
-                ? config.leadingSnapFactor
-                : (rank < config.trailFactors.length ? config.trailFactors[rank] : 1.0f);
-
-        double animationLength = useSnap
-                ? config.snapAnimationLength
-                : baseTime * clamp(factor, 0, 1);
-
-        // 【低帧率适配】保证动画至少跨越若干帧 —— 但加两种保护。
+        // ==================== 短跳判定 ====================
         //
-        // DampedSpring.update() 开头的短路条件 `animationLength <= dt` 本意是
-        // "动画比一帧还短就没必要做"，但帧率降到 20~30fps 时 dt ≈ 0.03~0.05s，
-        // 恰好把相邻两行移动的短动画整体吃掉 —— 光标瞬间闪到目标、看起来"卡住"。
+        // 【语义】「同一行内、移动不超过 N 个字符」→ 走短动画（有拉伸、连续）。
+        //        否则走跨行分支（前缘瞬时吸附的大幅拖尾）。
         //
-        // 保护一：硬吸附（useSnap）的角本就该瞬间到位，不做延长。
+        // 【为什么最终用「字符偏移差」，而不是像素或字体度量】
         //
-        // 保护二：<b>延长量不得超过原本的目标时长</b>。
-        // 这条是新加的，因为调度的 ACTIVE_DELAY_MS 已从 8ms 改成 12ms：
-        // frameDt * MIN_ANIMATION_FRAMES = 12ms * 6 = 72ms，会比
-        // shortAnimationLength(0.05s = 50ms) 还长 —— 原本"干脆"的短动画
-        // 反而被强行拉长，观感变得黏滞。
-        // 所以取 max(原时长, min(下限, 原时长 * 1.5))：既保留低帧率补偿，
-        // 又不会把动画拉长到原时长的 1.5 倍以上。
-        if (!useSnap && frameDt > 0) {
-            double floor = frameDt * MIN_ANIMATION_FRAMES;
-            double cap = animationLength * 1.5;
-            animationLength = Math.max(animationLength, Math.min(floor, cap));
+        // 这是 IntelliJ 平台的标准做法：编辑器本来就用字符偏移（offset）
+        // 定位，判断「移动了几个字符」应该直接比较偏移量，而不是反推像素。
+        // 前三种尝试都失败过，记录于此避免重犯：
+        //
+        //   1. 用光标宽归一化（原版 JS 的 |jumpX| ≤ 2.001）
+        //      原版光标 8px、本插件 2px，同样移动 1 个字符 jumpX 差 4 倍，
+        //      本插件永远超不过阈值 → shortAnimationLength 永不生效。
+        //
+        //   2. 写死像素阈值（16px）
+        //      与字号强耦合。字号 20px 时中文全角约 20px，
+        //      删一个中文就超出 → 误判成跳转 → 前缘时长 0 → 硬切。
+        //      这是「英文不卡、删中文卡」的第一版成因。
+        //
+        //   3. 像素 ÷ FontMetrics.charWidth('m')
+        //      'm' 是西文推进量，中文是它的 2 倍，再乘经验倍数
+        //      只是把魔数换个位置，且取样位置错（取行首字符而非光标处字符）。
+        //
+        //   4. 像素 ÷「第0列到第1列实测宽度」
+        //      取的是<b>行首</b>字符宽度。行首是窄英文、光标在中文区时，
+        //      比值仍会翻倍 → 中文依旧误判。这是「中文卡、英文丝滑」的第二版成因。
+        //
+        // 【现方案】charsMoved 由 CaretAnimator 用
+        //   |editor.getCaretModel().getOffset() - 上一帧 offset|
+        // 直接给出，是<b>精确的字符个数</b>：
+        //   · 中/英/日/韩/阿拉伯/emoji（代理对按 2 计）全部正确
+        //   · 与字体、字号、全角半角、连字完全无关
+        //   · 整数，无测量误差；getOffset() 也比两次 visualPositionToXY 便宜
+        //
+        // 【缺陷 2 —— 审计确认，本版修复】
+        //
+        // 问题：这个差值是「自上一帧以来的<b>累计</b>量」。而帧率是会变的：
+        //   · 常驻刷新：每 8ms 一帧 → 每次击键都被单独看到，charsMoved = 1
+        //   · 空闲降频：每 120~600ms 一帧 → 一帧内可能累积 3~5 次击键
+        // 后者会算出 charsMoved = 4 之类，越过 typingMaxChars(3) → 切跨行分支
+        // → 前缘时长为 0 被短路 → 拉伸暴涨约 4.5 倍。
+        // 这正是「开了常驻刷新可用、不开就卡得更厉害」的机制：
+        // 同一个操作，常驻时 charsMoved=1，降频时可能是 4。
+        //
+        // 修复：判据不再直接用「累计字符数」，而是看<b>是否沿同一方向持续推进</b>
+        // ——打字/退格本质是逐字符、同方向的事件流。只要纵向在同一行、
+        // 且横向位移没有超出「一次合理跳转」的像素上限，就归为短跳。
+        // 这样无论一帧合并了几次击键，行为都一致。
+        boolean isShortJump;
+        if (charsMoved >= 0) {
+            boolean sameLine = Math.abs(deltaYpx) <= height * 0.5;
+            isShortJump = sameLine && charsMoved <= config.typingMaxChars;
+        } else {
+            // 兜底：调用方尚未提供字符偏移时，退回按归一化长度判定
+            double jumpX = deltaXpx / width;
+            double jumpY = deltaYpx / height;
+            isShortJump = Math.abs(jumpX) <= config.shortMoveThreshold && Math.abs(jumpY) <= 0.001;
         }
+
+        if (isShortJump) {
+            // ---- 【关键修正】短跳也必须保留 rank 梯度 ----
+            //
+            // 原版短跳分支给四角【同一个】时长（min(animationLength, shortAnimationLength)），
+            // 四角等速 → 形状变化只由起点差异决定 → 拉伸几乎看不见。
+            //
+            // 实测反馈：「单行输入光标快到拉伸没有表现，看着像卡了一下」。
+            // 原因就在这里 —— 40ms（约 5 帧）且四角完全同速。
+            //
+            // 改为仍然乘 trailFactors，让后缘慢、前缘快：
+            //   shortAnimationLength=0.08 时四角为 80/72/40/24ms，梯度完整保留。
+            double factor = (rank < config.trailFactors.length ? config.trailFactors[rank] : 1.0f);
+            animationLength = config.shortAnimationLength * clamp(factor, 0, 1);
+        } else {
+            // ---- 原版三档分配（跨行 / 大跨度）----
+            //
+            // 实测确认这一档效果「比认可的那版更好，因为是不规则矩形」，
+            // 故严格保持原版逻辑不动。
+            double leading = config.animationLength * clamp(1f - config.trailSize, 0f, 1f);
+            double trailing = config.animationLength;
+            if (rank >= 2) {
+                animationLength = leading;
+            } else if (rank == 1) {
+                animationLength = (leading + trailing) / 2.0;
+            } else {
+                animationLength = trailing;
+            }
+        }
+
+        // 【不做低帧率时长补偿】
+        // 原版没有「至少跨 N 帧」的逻辑。曾加过（MIN_ANIMATION_FRAMES），
+        // 结果短距离移动时四角时长被抬到同一值、梯度消失、光标只平移不拉伸。
+        // 上游 README 踩坑 #20 也记录了同一个错误。忠实还原 = 不加。
 
         springX.setAnimationLength(animationLength);
         springY.setAnimationLength(animationLength);
 
-        // 只有动画足够长才重置弹簧：短动画重置反而会引入抖动
-        if (animationLength > config.animationResetThreshold) {
-            springX.reset();
-            springY.reset();
-        }
+        // ==================== 速度归零（关键修复） ====================
+        //
+        // 【问题】同一行内「删除一个字符」会先停顿一下才跟上，而「输入」很顺。
+        //
+        // 根因是 velocity 残留方向相反：
+        //   - 输入：光标右移，残留速度也是向右 → 帮了忙，顺滑
+        //   - 删除：光标左移，残留速度仍向右 → 第一帧逆着走、几乎不动，
+        //           随后才被拉回来 → 用户感知为「停顿一下」
+        //
+        // 用闭式解模拟（animationLength=0.08、残留 vel=+500、目标位移 -8）：
+        //   帧1: pos -8.000 → -4.826（实际只走了 3.2px，且方向被拽回）
+        //   帧2: -2.876   帧3: -1.687  —— 前两帧明显发滞
+        //
+        // 而原来的守卫是 `animationLength > animationResetThreshold(90ms)` 才 reset。
+        // 短跳四角时长为 80/72/40/24ms，【没有一个超过 90ms】→ 四角全都不 reset
+        // → velocity 一路带着上一次移动的残余。
+        //
+        // 【修复】只要弹簧当前还有残余速度/位移，就归零 ——
+        // 不再用「动画时长」这个与速度无关的量来当判据。
+        //
+        // 这不是偏离原版：原版 JS 的 Corner.jump() 结尾是【无条件】
+        // `this.animationX.reset(); this.animationY.reset();`
+        // 反而是本插件早期加的 animationResetThreshold 守卫引入了缺陷。
+        springX.reset();
+        springY.reset();
     }
 
     // ==================== 物理推进 ====================

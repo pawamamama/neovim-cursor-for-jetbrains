@@ -40,18 +40,19 @@
         </action>
 
         <!--
-          常驻刷新 —— 消除"停手后第一次操作"的冷启动延迟。
+          隐藏原生光标（上游踩坑 #19）
 
-          默认策略下光标停止后调度间隔从 8ms 涨到 120ms（失焦 600ms），
-          所以停手一段时间后第一次按键，从按下到画出第一帧最长要等一个空闲周期。
-          勾选后无论有无动画都按 8ms 跑，该延迟消失。
+          默认不勾选 = 保留原生光标，拖尾只做叠加。
+          原生光标由 IDE 自己绘制、零延迟跟随，所以空闲降频时也不会「卡」——
+          这就是「不开常驻刷新也能用」的根本原因。
 
-          代价：每秒约 125 次任务投递到 EDT 且永不停歇，标签页多时可能反而更卡。
+          勾选后覆盖层充当光标本体，跟随完全取决于我们的调度：
+          空闲降频时会有明显延迟，通常需要配合「常驻刷新」一起用。
         -->
-        <action id="NeovideCursor.AlwaysHighFps"
-                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleAlwaysHighFpsAction"
-                text="Neovide 光标：常驻刷新（消除冷启动）"
-                description="勾选后不再空闲降频，永远按约 125fps 调度。可消除「停手后第一次操作卡一下」的冷启动延迟，代价是持续占用 EDT，标签页很多时可能反而更卡。">
+        <action id="NeovideCursor.HideNativeCaret"
+                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleHideNativeCaretAction"
+                text="Neovide 光标：隐藏原生光标（常驻绘制）"
+                description="默认不勾选：保留原生光标做零延迟跟随，拖尾只叠加。勾选后由覆盖层充当光标本体（不闪烁、颜色可自定义），但跟随依赖 EDT 调度，空闲降频时会有延迟。">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
     </actions>
