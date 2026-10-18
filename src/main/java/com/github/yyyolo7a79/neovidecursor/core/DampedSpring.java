@@ -12,21 +12,17 @@ package com.github.yyyolo7a79.neovidecursor.core;
  */
 public class DampedSpring {
 
-    /**
-     * 单帧最大位移比例（低帧率适配）。
-     *
-     * <p>弹簧的解析解决定了第一帧吃掉绝大部分位移：20fps（dt=0.05s）时
-     * 第一帧就完成 59%，视觉上是"闪一下再慢慢微调"。
-     * 限制单帧位移不超过剩余偏移的该比例，可让位移在几帧内均匀分布。
-     *
-     * <p>取值已通过独立程序验证：
-     * <ul>
-     *   <li>60fps — 每帧仅衰减约 15%，<b>不触发</b>（原版手感不受影响）</li>
-     *   <li>30fps — 6 帧中触发 3 次，序列更均匀</li>
-     *   <li>20fps — 全部触发，每帧稳定减半</li>
-     * </ul>
-     */
-    private static final double MAX_STEP_RATIO = 0.5;
+    // 【曾有一个 MAX_STEP_RATIO = 0.5 的单帧位移截断，已移除】
+    //
+    // 它本意是低帧率下让位移在几帧内均匀分布（防第一帧吃掉大部分位移），
+    // 但代价是把临界阻尼曲线切成锯齿：大位移时每帧都触发截断、每帧清零速度，
+    // 观感是「走到约二分之一处停顿一下」——那个"二分之一"正是 0.5。
+    //
+    // 触发条件恰好与卡顿场景重合：dt 越大越容易超限。
+    // 平时 dt≈8ms、animationLength=0.05 时单帧只走 13.6%（不触发）；
+    // 一旦 EDT 被抢占、dt 被 MAX_DT 钳到 33.3ms，单帧就要走 74.5% → 触发截断，
+    // 于是「越卡越锯齿」。而"删除到上一行"正是大位移 + 高延迟的组合。
+    // 上游 v0.5.0 同样移除了这一项（见其提交说明「撤销弹簧单帧位移截断」）。
 
     /** 当前相对位移（相对目标点的偏移量） */
     private double position = 0.0;
@@ -77,18 +73,15 @@ public class DampedSpring {
         double newPosition = (a + b * dt) * c;
         double newVelocity = c * (-a * o - b * dt * o + b);
 
-        // 【低帧率适配】限制单帧位移量。
+        // 【不做单帧位移截断 —— 曾用 MAX_STEP_RATIO = 0.5，已移除】
         //
-        // 注意：必须在算出结果后限制 position 的变化量，<b>绝不能改衰减因子 c</b> ——
-        // c 还参与速度积分（b 里已含"速度带来的位移"），改它会让位置被反向放大
-        // （实测 100 → 150），逐帧累积后动画直接鬼畜。
-        double delta = newPosition - a;
-        double maxDelta = Math.abs(a) * MAX_STEP_RATIO;
-        if (Math.abs(delta) > maxDelta) {
-            newPosition = a + Math.signum(delta) * maxDelta;
-            // 截断发生后，速度已不再反映真实运动状态，清零避免下一帧突变
-            newVelocity = 0.0;
-        }
+        // 曾经的写法：把单帧位移限制为「当前偏移的 50%」，超了就截断并把速度清零。
+        // 副作用很隐蔽：大位移时每帧都触发截断、速度被反复清零，临界阻尼曲线
+        // 被切成「走一半、停一下、再走一半」的锯齿 ——
+        // 用户实测描述为「删除到上一行，走到约二分之一处会停顿一下」。
+        //
+        // 注意仍<b>绝不能改衰减因子 c</b>：c 参与速度积分（b 里已含速度位移），
+        // 改它会让位置被反向放大（实测 100 → 150），逐帧累积后动画鬼畜（踩坑 #4）。
 
         position = newPosition;
         velocity = newVelocity;

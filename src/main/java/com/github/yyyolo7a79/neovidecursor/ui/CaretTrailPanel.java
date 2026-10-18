@@ -145,6 +145,15 @@ public class CaretTrailPanel extends JComponent {
         this.glowStrength = strength < 0f ? 0f : (strength > 1f ? 1f : strength);
     }
 
+    /**
+     * 当前是否已有可绘制的四边形。
+     *
+     * <p>供 {@code CaretAnimator.tickStaticCaret} 做「没移动就不重绘」的判断用：
+     * 已经画过一次且光标没动，就没必要再提交一次 repaint。
+     */
+    public boolean hasQuad() {
+        return hasQuad;
+    }
     /** 清除全部绘制数据（光标不可见 / 模式切换时调用） */
     public void clearCorners() {
         hasQuad = false;

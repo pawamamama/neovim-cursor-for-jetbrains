@@ -56,7 +56,7 @@ public class NeovideConfig {
      *
      * <p>若确实看出硬边，调到 8 即可（成本仍比 12 低三分之一）。
      */
-    public int glowLayers = 6;
+    public int glowLayers = 8;
 
     /**
      * 辉光峰值不透明度（只影响光晕，不影响光标主体）。

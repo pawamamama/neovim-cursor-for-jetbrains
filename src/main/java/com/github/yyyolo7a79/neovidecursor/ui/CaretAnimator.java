@@ -157,6 +157,17 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 本窗口内相邻两帧的最大间隔（纳秒）—— 用于区分"持续阻塞"与"统计口径失真" */
     private long maxGapNanos = 0L;
 
+    /**
+     * 空闲超过该时长（纳秒）即视为一段新的运动，统计窗口重新开始。
+     *
+     * <p>200ms 的取法：正常运动帧间隔 8~40ms，偶发卡顿也就在 100ms 内；
+     * 超过 200ms 一定是真的停手了。见 {@link #recordFrameStats}（上游踩坑 #21）。
+     */
+    private static final long FPS_IDLE_GAP_NANOS = 200_000_000L;
+
+    /** 上一次「活动帧」的时刻，用于判断是否已停手、需要重开统计窗口 */
+    private long lastActiveFrameNanos = 0L;
+
     // ===== 重绘区域复用对象（避免每帧分配）=====
 
     private final Rectangle lastDirtyRegion = new Rectangle();
@@ -437,7 +448,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         boolean anyAnimating;
         if (staticCaret) {
             // 控制台编辑器：只补画静止光标，不参与拖尾
-            anyAnimating = tickStaticCaret();
+            anyAnimating = tickStaticCaret(moved);
         } else if (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE) {
             anyAnimating = tickAfterimage(now, moved);
         } else {
@@ -494,9 +505,26 @@ public class CaretAnimator implements Disposable, CaretListener {
         if (!active) {
             return;
         }
-        if (fpsWindowStart == 0L) {
+
+        // 【Bug 修复：空闲时间不能算进分母】—— 上游 README 踩坑 #21
+        //
+        // 修复前只在「窗口满 1 秒」时重置 fpsWindowStart，空闲期间它不动。
+        // 于是按一下键、停 2 秒、再按一下，日志会报 fps≈5，
+        // 而真实帧率是 100 —— 空闲的那 2 秒被算进了分母。
+        //
+        // 那组 fps=0.4~10.9 的"低帧率证据"就是这么做出来的，
+        // 曾导致把优化方向完全搞错（以为是绘制慢，实际是统计口径失真）。
+        //
+        // 修正：两次活动帧间隔超过 FPS_IDLE_GAP_NANOS 即视为「新的一段运动」，
+        // 重开统计窗口，把中间的空闲整段排除。
+        if (fpsWindowStart == 0L || now - lastActiveFrameNanos > FPS_IDLE_GAP_NANOS) {
             fpsWindowStart = now;
+            frameCount = 0;
+            peakRepaintArea = 0;
+            maxGapNanos = 0L;
+            lastStatsNanos = 0L;
         }
+        lastActiveFrameNanos = now;
         frameCount++;
 
         int area = currentBounds.width * currentBounds.height;
@@ -662,8 +690,19 @@ public class CaretAnimator implements Disposable, CaretListener {
      *
      * <p>返回值恒为 false，让调度器保持在空闲频率：控制台光标不需要高帧率，
      * 仅在 caret 事件唤醒时才会短暂提速。
+     *
+     * <p><b>【Bug 修复】只在光标移动（或布局变化）时重绘。</b>
+     * 修复前每个 tick 都无条件重绘 —— 每个控制台每 120ms 画一次、
+     * 光标不动也照画，永不停止。标签页与工具窗口一多，
+     * 就是一堆无意义的 repaint 挤在 EDT 队列里跟编辑器抢时间。
+     * （与上游 v0.5.0 的同类修复等效，但不引入其调度器重构。）
      */
-    private boolean tickStaticCaret() {
+    private boolean tickStaticCaret(boolean moved) {
+        // 没移动、且上一帧画面还在 —— 无需重绘，直接返回
+        if (!moved && panel.hasQuad()) {
+            return false;
+        }
+
         for (TrailCorner corner : corners) {
             corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
         }
