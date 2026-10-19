@@ -15,6 +15,34 @@
     <extensions defaultExtensionNs="com.intellij">
         <!-- 拖尾光标主入口：为每个编辑器挂载动画覆盖层 -->
         <editorFactoryListener implementation="com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager"/>
+
+        <!--
+          持久化服务（application 级）
+
+          它是 16 个可调参数的唯一持久化真相，落在
+          <config>/options/NeovideCursorSettings.xml（roamingType = DISABLED：
+          alwaysHighFps / glowLayers / shadowBlurFactor 是性能相关设置，不该跨机器同步）。
+
+          注意：本文件里没有 version / idea-version 标签 —— 它们由
+          build/offline-build.ps1 在打包时注入，手工往源码里加会让两处打架。
+        -->
+        <applicationService
+            serviceImplementation="com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings"/>
+
+        <!--
+          设置页（application 级，挂在 Settings | Tools 下）
+
+          parentId="tools" 是第三方插件设置的约定位置；id 必须带插件 id 前缀
+          （官方原话 "The FQN should be based on the plugin id"）。
+
+          displayName 必须写在 XML 里：Configurable.getDisplayNameFast 会优先读它，
+          写不全平台为了取名字不得不先实例化类（官方原文警告 "degrades UI responsiveness"）。
+        -->
+        <applicationConfigurable
+            parentId="tools"
+            id="com.github.yyyolo7a79.neovidecursor.settings"
+            displayName="Neovide Cursor"
+            instance="com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable"/>
     </extensions>
 
     <actions>
