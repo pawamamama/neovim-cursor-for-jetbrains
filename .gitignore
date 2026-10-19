@@ -23,3 +23,12 @@ image*.png
 # ===== 内部资料（含本机路径等个人信息，不公开）=====
 需求/
 jetbrains-neovide-cursor-prompt.md
+
+# ===== AgentTeams 运行时状态（临时，不入库）=====
+.agent-teams/
+
+# ===== 构建产物 / 调试取证（体积大，不入库；jar 已在 dist 另行管理）=====
+dist/
+diag/
+_backup-*/
+_probe/

@@ -97,12 +97,6 @@ public class NeovideConfig {
      */
     public boolean alwaysHighFps = true;
 
-    /** 光标停止移动后，延迟多久淡出（毫秒） */
-    public int cursorDisappearDelay = 50;
-
-    /** 光标淡出时长（秒） */
-    public float cursorFadeOutDuration = 0.075f;
-
     /** 常规动画时长（秒）—— 数值越大拖尾越长。原版：0.10 */
     public float animationLength = 0.1f;
 
@@ -192,25 +186,6 @@ public class NeovideConfig {
      */
     public float typingMaxChars = 3f;
 
-    // ==================== 以下为历史遗留，保留字段避免破坏引用 ====================
-
-    /** @deprecated 已被 {@link #typingMaxChars} 取代 */
-    @Deprecated
-    public float shortJumpMaxChars = 2.0f;
-
-    /** @deprecated 已被 {@link #typingMaxChars} 取代 */
-    @Deprecated
-    public float typingMergeChars = 6.0f;
-
-
-    /** @deprecated 原版无硬吸附，改由 trailSize 让前缘时长为 0 */
-    @Deprecated
-    public boolean useHardSnap = true;
-
-    /** @deprecated 原版无此系数 */
-    @Deprecated
-    public float leadingSnapFactor = 0.1f;
-
     /** 动画重置阈值：时长小于该值时不重置弹簧，避免抖动 */
     public float animationResetThreshold = 0.09f;
 
@@ -228,9 +203,6 @@ public class NeovideConfig {
      * 代价是跨行拖尾会被截断，正常移动观感不受影响）。
      */
     public float maxTrailDistanceFactor = 60f;
-
-    /** 硬吸附时的动画时长（秒） */
-    public float snapAnimationLength = 0.02f;
 
     /** 光标宽度（像素）—— IntelliJ 默认光标较细 */
     public float cursorWidth = 2f;

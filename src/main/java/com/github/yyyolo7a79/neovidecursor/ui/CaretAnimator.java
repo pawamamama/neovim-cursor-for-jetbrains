@@ -183,14 +183,42 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     // ===== 渲染调度 =====
 
-    /** 调度线程：以高精度 sleep 驱动渲染节奏 */
-    private Thread scheduler;
-
-    /** 是否有尚未执行的渲染任务（用于跳过积压帧） */
-    private final AtomicBoolean framePending = new AtomicBoolean(false);
+    /**
+     * 是否有尚未执行的渲染任务（用于跳过积压帧）。
+     *
+     * <p><b>每个 animator 各自一个</b>：投递前由 {@link RenderScheduler} 的调度线程
+     * {@code compareAndSet(false, true)}，EDT 任务一开始就复位。绝不能换成全局单一标志 ——
+     * 那会让"一个 animator 还没画完"连带拖住其它 animator 的投递（契约 T1-1 红线）。
+     */
+    final AtomicBoolean framePending = new AtomicBoolean(false);
 
     /** 当前调度间隔：EDT 侧更新，调度线程读取 */
     private volatile int currentDelayMs = IDLE_DELAY_MS;
+
+    /**
+     * 下一次希望被 tick 的时刻（{@code System.nanoTime()}）：<b>EDT 写、调度线程读</b>。
+     *
+     * <p><b>T1-1</b>：原来是"每个 animator 一条调度线程，各自 sleep 到自己的下一个到期
+     * 时刻"，现在由全局唯一的 {@link RenderScheduler} 线程按本字段统一排程。
+     *
+     * <p>初值 = 现在 + {@link #IDLE_DELAY_MS}：与基线的首帧时机对齐 —— 基线新线程先
+     * {@code sleep(currentDelayMs)} 再投递，而 {@code currentDelayMs} 的初值就是
+     * {@link #IDLE_DELAY_MS}。**不得**初始化成 {@code System.nanoTime()}（那会让注册瞬间
+     * 就多投一帧，早于基线的首次 tick）。
+     */
+    volatile long nextDueNanos = System.nanoTime() + IDLE_DELAY_MS * 1_000_000L;
+
+    /**
+     * 最近一次投递时 {@link #nextDueNanos} 的值（仅 {@link RenderScheduler} 的调度线程读写）。
+     *
+     * <p>用途：到期时刻由 EDT 在 tick <b>结束</b>时改写，而 {@link #framePending} 在 EDT
+     * 任务<b>开始</b>时就复位了 —— 于是"tick 正在执行"的这段时间里，调度线程会读到
+     * 「已经过期、且没有在途任务」的假象。只靠 framePending 的话，一次耗时超过 1ms 的 tick
+     * 会被反复投递（调度线程 1ms 一轮），在 EDT 本就繁忙时形成恶性堆积。
+     * 本字段记住"这个到期值已经投递过了"：值没变 = 上一帧尚未落地，直接跳过，
+     * 从而保证每个到期周期 ≤1 次 {@code invokeLater}。
+     */
+    volatile long lastDispatchedDueNanos = Long.MIN_VALUE;
 
     /** 是否已销毁 */
     private volatile boolean disposed = false;
@@ -198,6 +226,19 @@ public class CaretAnimator implements Disposable, CaretListener {
     // ===== 性能统计（每秒输出一次，用于客观定位卡顿来源）=====
 
     private static final Logger LOG = Logger.getInstance(CaretAnimator.class);
+
+    /**
+     * fps 统计窗口（纳秒）。
+     *
+     * <p><b>T0-1（零观感优化·批次1）</b>：原为 {@code 1_000_000_000L}（1s），现取 5s。
+     * 常驻刷新下约 125fps，1s 窗口每秒都往 idea.log 写一行（实测占日志 7.24%）；
+     * 5s 窗口把写入频率降到约 1/5，而统计口径
+     * （{@code frameCount / maxGapNanos / peakRepaintArea} 的计算与重置时机）一字未改 ——
+     * 变的只是窗口长度，不是算法。
+     *
+     * <p>口径提醒：窗口变长后单行 {@code fps} 是 5s 均值，不可与旧的 1s 窗口数据直接比较。
+     */
+    private static final long STATS_WINDOW_NANOS = 5_000_000_000L;
 
     private int frameCount = 0;
     private int peakRepaintArea = 0;
@@ -233,14 +274,6 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 实际是整个空闲期的长度，并非真实帧间隔，喂给平滑器会再次污染估计量。
      */
     private boolean skipNextIntervalMeasurement = false;
-
-    /**
-     * 平滑后的帧间隔（秒），用于低帧率下的动画补偿。
-     *
-     * <p>低帧率时瞬时 dt 波动很大（15~40fps 意味着 0.025~0.067s），
-     * 若直接用它计算动画时长，弹簧的时间常数会每帧跳变，运动就不连续了。
-     */
-    private double smoothedDt = 1.0 / 60.0;
 
     /**
      * 上次记录的视觉位置，用于低成本地判断光标是否移动。
@@ -322,41 +355,77 @@ public class CaretAnimator implements Disposable, CaretListener {
     // ==================== 渲染调度 ====================
 
     /**
-     * 启动渲染调度线程。
+     * 启动渲染调度：注册到<b>全局唯一</b>的 {@link RenderScheduler} 线程。
      *
-     * <p>用后台线程 {@code Thread.sleep} 控制节奏，再通过 {@code invokeLater}
-     * 把绘制切回 EDT —— 绕开了 {@code javax.swing.Timer} 的 15.6ms 精度天花板。
+     * <p><b>T1-1</b>：原来是"每个 animator 一条 {@code Thread.sleep} 线程"，现在是
+     * "全局一条共享线程按 {@link #nextDueNanos} 统一排程" —— 空闲线程数从 N 降到 1。
+     * 但 EDT 任务粒度<b>不变</b>：每个到期 animator 仍由调度线程<b>各自</b>投递一次
+     * {@code invokeLater}（见 {@link RenderScheduler} 的类注释）。
      */
     private void startScheduler() {
-        scheduler = new Thread(() -> {
-            while (!disposed) {
-                try {
-                    Thread.sleep(Math.max(1, currentDelayMs));
-                } catch (InterruptedException e) {
-                    // 被 wakeUp() 主动唤醒：立即进入下一轮，不退出线程
-                    if (disposed) {
-                        return;
-                    }
-                }
-                if (disposed) {
-                    return;
-                }
+        RenderScheduler.register(this);
+    }
 
-                // 上一帧还没渲染完就跳过本次调度，避免任务在 EDT 队列里堆积
-                if (!framePending.compareAndSet(false, true)) {
-                    continue;
-                }
+    /**
+     * 共享调度线程投递到 EDT 的单帧任务（由 {@link RenderScheduler} 调用）。
+     *
+     * <p><b>EDT 任务粒度</b>：一个 EDT 任务只服务<b>一个</b> animator。严禁把它改成
+     * "批量 tick 多个 animator"的那种任务（契约 P0-1）。
+     */
+    void runTick() {
+        // 复位时机与基线一致：EDT 任务开始即复位（置位由调度线程在投递前完成）
+        framePending.set(false);
+        if (disposed) {
+            return;
+        }
+        try {
+            tick();
+        } finally {
+            scheduleNextDue();
+        }
+    }
 
-                SwingUtilities.invokeLater(() -> {
-                    framePending.set(false);
-                    if (!disposed) {
-                        tick();
-                    }
-                });
-            }
-        }, "neovide-cursor-render");
-        scheduler.setDaemon(true);
-        scheduler.start();
+    /**
+     * 登记下一次到期时刻（tick 结束时调用）。
+     *
+     * <p><b>为什么不能写成 {@code now + currentDelayMs}</b>（本批 r2 修复的核心）：
+     * 基线是「<i>先 sleep(currentDelayMs)，再 invokeLater</i>」，节拍由 sleep 主导 ——
+     * 当单帧 EDT 耗时（例如卡顿时 25ms）<b>大于</b> delay 时，基线不会再多等一个 delay，
+     * 有效周期就是单帧耗时本身（EDT 极限）。
+     *
+     * <p>若从「tick 结束的 now」起算，有效周期会变成 {@code 单帧耗时 + delay}，
+     * 比基线多等整整一个 delay。实测（1500ms 窗口，单帧 25ms）：
+     * <pre>
+     *   R2 常驻刷新     基线 59 帧 → 旧写法 44 帧（−25%）
+     *   R4 自适应       基线 59 帧 → 旧写法 37 帧（−37%）
+     *   R5/R6 打字场景  基线 59/58  → 旧写法 48/48（−19%/−17%）
+     * </pre>
+     * 而 tick=0ms 的常态场景反而是新版略高（171→178），说明差异只出在"单帧超过 delay"。
+     *
+     * <p><b>修法</b>：从「本次 tick 的<b>应到期时刻</b>」往后累加 delay，即
+     * {@code lastDispatchedDueNanos + currentDelayMs}；若该时刻已经过去（单帧超时），
+     * 取 {@code max(·, now)} 使其"立即到期"，EDT 一空就接着投递 —— 与基线「不再多等
+     * 一个 delay」的语义一致。这样稳态下周期恒为 delay（与基线相同），
+     * 超时下自动退化为 EDT 极限（也与基线相同）。
+     */
+    private void scheduleNextDue() {
+        long now = System.nanoTime();
+        long dispatched = lastDispatchedDueNanos;
+        long next;
+        if (dispatched == Long.MIN_VALUE) {
+            // 从未被调度线程投递过（理论上 runTick 只由投递触发，这里仅防御）：
+            // 不能拿 MIN_VALUE 去加，否则溢出成极大负数 → 立刻疯狂投递。
+            next = now + currentDelayMs * 1_000_000L;
+        } else {
+            next = dispatched + currentDelayMs * 1_000_000L;
+        }
+        // 单帧耗时已超过 delay：立即到期（追赶），不额外等一个 delay —— 对齐基线
+        nextDueNanos = Math.max(next, now);
+    }
+
+    /** 供 {@link RenderScheduler} 在投递前判断是否已销毁（{@code dispose()} 与本字段置位之间只有极短窗口） */
+    boolean isDisposed() {
+        return disposed;
     }
 
     /**
@@ -408,33 +477,12 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 注意 skipNextIntervalMeasurement 只丢弃了「统计测量」，
             // 并不能阻止 dt 被算成整个空闲期。
             lastNanos = System.nanoTime();
-
-            // 【同样必须重置 smoothedDt —— 这是"卡一下"残留的真正来源】
-            //
-            // 空闲期间调度降频到 IDLE_DELAY_MS(120) / IDLE_UNFOCUSED(600)，
-            // 但 tick() 仍在跑：每次算出的 dt 都被 MAX_DT 截断成 1/30 ≈ 33.3ms，
-            // 而 tick() 里是无条件喂给平滑器的：
-            //
-            //     smoothedDt += (dt - smoothedDt) * 0.25;
-            //     double effectiveDt = Math.max(dt, smoothedDt);
-            //
-            // 于是停止操作的那几秒里，smoothedDt 被反复喂到 33.3ms 并停在那里。
-            // 只重置 lastNanos 只能让「瞬时 dt」恢复正常，effectiveDt 取的是
-            // max(dt, smoothedDt)，仍会取到那个被污染的 33.3ms，且要十几帧才降下来：
-            //
-            //     第 1 帧 0.0333 → 0.0270（仍是正常的 3.4 倍）
-            //     第 3 帧 0.0187 → 第 10 帧 0.0094 → 约 12 帧后才接近 8ms
-            //
-            // 12 帧 × 8ms ≈ 100ms 的异常 dt，正是「停顿后第一次删除，卡一下」的时长。
-            // 归位到一个典型帧长（1/125s，对应活跃档 8ms）即可，之后由正常的
-            // 平滑流程接管。
-            smoothedDt = 1.0 / 125.0;
         }
 
-        Thread s = scheduler;
-        if (s != null) {
-            s.interrupt();
-        }
+        // 【T1-1】把本 animator 置为"立即到期"并打断共享调度线程的睡眠。
+        // 顺序由 RenderScheduler#wakeUp 内部保证（先置到期、后打断），调用点写不反：
+        // 只打断而不置到期，会让"停手后第一次操作"重新多等一个空闲周期（最长 600ms）。
+        RenderScheduler.wakeUp(this);
     }
 
     /**
@@ -442,12 +490,13 @@ public class CaretAnimator implements Disposable, CaretListener {
      *
      * <p>只打断调度线程的 sleep，让它按最新的 {@code currentDelayMs} 重新排程，
      * 不改动任何动画状态 —— 因此不会引起视觉跳变。
+     *
+     * <p><b>T1-1</b>：与 {@link #wakeUp()} 同样先把该 animator 的
+     * {@link #nextDueNanos} 置为"现在"再打断共享线程 —— 与基线"interrupt 醒来后
+     * 直接落到投递"的时序等价；不涉及任何动画状态。
      */
     public void requestWakeUp() {
-        Thread s = scheduler;
-        if (s != null) {
-            s.interrupt();
-        }
+        RenderScheduler.wakeUp(this);
     }
 
     // ==================== 光标监听 ====================
@@ -510,7 +559,6 @@ public class CaretAnimator implements Disposable, CaretListener {
             dt = (rawDt <= RECOVERY_STEP_CAP_SECONDS)
                     ? ACTIVE_DELAY_MS / 1000.0     // 短停顿：按一帧推进 → 平滑展开
                     : rawDt;                       // 长停顿：一次性归位
-            smoothedDt = ACTIVE_DELAY_MS / 1000.0;
             smoothedIntervalMs = ACTIVE_DELAY_MS;
             // 紧随其后的那次"帧间隔测量"跨越了整段离开时间，不是真实帧间隔
             skipNextIntervalMeasurement = true;
@@ -558,16 +606,6 @@ public class CaretAnimator implements Disposable, CaretListener {
             forceResync = true;
         }
 
-        // 目标点刚变化：按运动方向重新分配四个角点的滞后名次
-        // 平滑帧间隔：低帧率下 dt 波动大，直接用于计算动画时长会让弹簧的
-        // 时间常数每帧跳变、运动不连续。
-        //
-        // 但必须取「平滑值」与「瞬时值」的较大者：平滑需要好几帧才收敛，
-        // 而动画本身可能就只有 4~6 帧 —— 若直接用平滑值，
-        // 开头几帧的补偿会严重不足，动画照样被 dt 吃掉（实测帧数反而更少）。
-        smoothedDt += (dt - smoothedDt) * 0.25;
-        double effectiveDt = Math.max(dt, smoothedDt);
-
         boolean anyAnimating;
         if (staticCaret) {
             // 控制台编辑器：只补画静止光标，不参与拖尾
@@ -575,7 +613,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         } else if (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE) {
             anyAnimating = tickAfterimage(now, moved);
         } else {
-            anyAnimating = tickSpring(dt, effectiveDt);
+            anyAnimating = tickSpring(dt);
         }
 
         currentDelayMs = computeNextDelay(moved || anyAnimating);
@@ -663,16 +701,31 @@ public class CaretAnimator implements Disposable, CaretListener {
         lastStatsNanos = now;
 
         long elapsed = now - fpsWindowStart;
-        if (elapsed >= 1_000_000_000L) {
-            LOG.info(String.format(
-                    "neovide-cursor: fps=%.1f  frames=%d  window=%.0fms  maxGap=%.0fms  "
-                            + "peakRepaintArea=%dpx  delay=%dms",
-                    frameCount * 1_000_000_000.0 / elapsed,
-                    frameCount,
-                    elapsed / 1_000_000.0,
-                    maxGapNanos / 1_000_000.0,
-                    peakRepaintArea,
-                    currentDelayMs));
+        if (elapsed >= STATS_WINDOW_NANOS) {
+            // 【T0-1】日志门控：Debug Log 未开时连 String.format 都不求值。
+            // 编辑器标识只在"窗口到期 + Debug 开启"时才计算（每帧绝不计算），
+            // 且必须追加在行尾 —— build/analyze-log.ps1:8 与 diag/extract.py:6
+            // 用固定顺序的正则解析前面六个字段，中间插字段会让既有证据链失效。
+            if (LOG.isDebugEnabled()) {
+                String editorTag;
+                try {
+                    editorTag = editor.getEditorKind().name();
+                } catch (Throwable t) {
+                    // 编辑器正在销毁时取不到 kind，退化为 UNKNOWN（不得影响统计口径）
+                    editorTag = "UNKNOWN";
+                }
+                LOG.debug(String.format(
+                        "neovide-cursor: fps=%.1f  frames=%d  window=%.0fms  maxGap=%.0fms  "
+                                + "peakRepaintArea=%dpx  delay=%dms  editor=%s#%d",
+                        frameCount * 1_000_000_000.0 / elapsed,
+                        frameCount,
+                        elapsed / 1_000_000.0,
+                        maxGapNanos / 1_000_000.0,
+                        peakRepaintArea,
+                        currentDelayMs,
+                        editorTag,
+                        System.identityHashCode(editor)));
+            }
             frameCount = 0;
             peakRepaintArea = 0;
             maxGapNanos = 0L;
@@ -735,6 +788,15 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /**
+     * {@link #refreshTarget()} 耗时埋点阈值（纳秒）= 2ms。
+     *
+     * <p><b>T0-5（零观感优化·批次1）</b>：用于确认/排除「软换行的
+     * {@code visualPositionToXY} 换算是否昂贵」。2ms 是正常帧预算（8ms）的 1/4，
+     * 越过它才值得记一行 —— 只决定是否写 debug 日志，<b>不参与任何行为分支</b>。
+     */
+    private static final long REFRESH_TARGET_SLOW_NANOS = 2_000_000L;
+
+    /**
      * 重新读取光标位置并更新动画目标点。
      *
      * @return true 表示位置确实发生了变化
@@ -751,6 +813,10 @@ public class CaretAnimator implements Disposable, CaretListener {
                 return false;
             }
             forceResync = false;
+
+            // 【T0-5】耗时埋点起点：必须在快速路径提前返回"之后" ——
+            // 否则等于给 125fps 的每帧路径加两次 nanoTime，与本批目标相反。
+            long startedNanos = System.nanoTime();
 
             Point p = editor.visualPositionToXY(vp);
             lastVisualLine = vp.line;
@@ -789,6 +855,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             double newCenterY = p.y + height / 2.0;
 
             if (newCenterX == centerX && newCenterY == centerY && height == cursorHeight) {
+                logSlowRefresh(startedNanos, false);
                 return false;
             }
 
@@ -811,11 +878,28 @@ public class CaretAnimator implements Disposable, CaretListener {
             } else {
                 jumped = true;
             }
+            logSlowRefresh(startedNanos, true);
             return true;
 
         } catch (Throwable t) {
             // 编辑器正在销毁或重绘中：本次跳过，下一帧会自动重试
             return false;
+        }
+    }
+
+    /**
+     * T0-5 埋点：仅当本次坐标换算耗时超过 {@link #REFRESH_TARGET_SLOW_NANOS} 才写一行 debug。
+     *
+     * <p>只在未命中快速路径的那一次 {@link #refreshTarget()} 调用上执行，且日志文本被
+     * {@code LOG.isDebugEnabled()} 短路 —— Debug Log 关闭时没有任何字符串拼接。
+     * 两种「未命中快速路径」的返回（中心点未变 / 已更新）各调用一次，单次调用最多一行。
+     */
+    private void logSlowRefresh(long startedNanos, boolean moved) {
+        long costNanos = System.nanoTime() - startedNanos;
+        if (LOG.isDebugEnabled() && costNanos > REFRESH_TARGET_SLOW_NANOS) {
+            LOG.debug(String.format(
+                    "neovide-cursor: refreshTarget %.1fms  moved=%b  vp=%d:%d",
+                    costNanos / 1_000_000.0, moved, lastVisualLine, lastVisualColumn));
         }
     }
 
@@ -850,9 +934,9 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
-    private boolean tickSpring(double dt, double effectiveDt) {
+    private boolean tickSpring(double dt) {
         if (jumped) {
-            assignRanks(effectiveDt);
+            assignRanks();
             jumped = false;
         }
 
@@ -1024,7 +1108,7 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 它在 {@link TrailCorner#jump} 中拿到的滞后系数越大 —— 于是前缘紧跟、
      * 后缘拖沓，矩形被拉长成拖尾形状。
      */
-    private void assignRanks(double dt) {
+    private void assignRanks() {
         double[] alignment = new double[corners.length];
         for (int i = 0; i < corners.length; i++) {
             alignment[i] = corners[i].calculateDirectionAlignment(
@@ -1064,10 +1148,10 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void dispose() {
         disposed = true;
 
-        Thread s = scheduler;
-        if (s != null) {
-            s.interrupt();
-        }
+        // 【T1-1】从共享调度器注销：集合空了调度线程自行退出。
+        // 必须在 disposed 置位之后 —— 已经投递、还没执行的 EDT 任务会先看到 disposed
+        // 直接返回（基线的 dispose 保护语义不变）。
+        RenderScheduler.unregister(this);
 
         try {
             editor.getCaretModel().removeCaretListener(this);

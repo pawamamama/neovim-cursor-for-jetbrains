@@ -47,6 +47,20 @@ public class CaretTrailPanel extends JComponent {
     /** 是否已有可绘制的四边形 */
     private boolean hasQuad = false;
 
+    // ===== 辉光绘制复用对象（避免每帧分配，见 drawQuadGlow）=====
+
+    /** 辉光路径 —— 复用同一个 Path2D，每层覆盖前必须 reset */
+    private final Path2D.Double glowPath = new Path2D.Double();
+
+    /**
+     * 四个角点的外扩方向向量（复用字段，避免每帧分配）。
+     *
+     * <p>{@link #computeOffsetDirections} 的第二个循环对 {@code j = 0..3}
+     * <b>无条件完整覆写</b>这两个数组，因此复用不会读到上一帧的残留方向。
+     */
+    private final double[] dirX = new double[4];
+    private final double[] dirY = new double[4];
+
     // ===== 残影模式数据 =====
 
     /**
@@ -248,28 +262,24 @@ public class CaretTrailPanel extends JComponent {
                 glowColor.getBlue(), argb));
 
         // 角点的外扩方向：沿该方向平移 radius，即"四边形向外偏移 radius"
-        double[] dirX = new double[4];
-        double[] dirY = new double[4];
         computeOffsetDirections(polygon, dirX, dirY);
-
-        Path2D.Double path = new Path2D.Double();
 
         // 从最外层向内绘制，半径线性分布
         for (int i = layers; i >= 1; i--) {
             double radius = glowWidth * (double) i / layers;
 
-            path.reset();
+            glowPath.reset();
             for (int j = 0; j < 4; j++) {
                 double x = polygon.xpoints[j] + dirX[j] * radius;
                 double y = polygon.ypoints[j] + dirY[j] * radius;
                 if (j == 0) {
-                    path.moveTo(x, y);
+                    glowPath.moveTo(x, y);
                 } else {
-                    path.lineTo(x, y);
+                    glowPath.lineTo(x, y);
                 }
             }
-            path.closePath();
-            g2.fill(path);
+            glowPath.closePath();
+            g2.fill(glowPath);
         }
     }
 

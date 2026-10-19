@@ -29,6 +29,36 @@
 | 10-18 15:32 | `0.7.0-auditfix` | ✅ | 8ms | 8 | 无 | 归一化 | `48D4C046` |
 | **10-18 15:44** | **`0.7.1-offset`** | ✅ | 8ms | 8 | 无 | **offset** | **`EA2DC457`** |
 | 10-18 15:53 | `0.7.2-fps-indep` | ✅ | 8ms | 8 | 无 | 像素+字符 | `E9884321` |
+| **10-18 21:32** | **`0.9.1-zeroopt`** | **✅** | **8ms** | **8** | **无** | **offset** | **`C718675E046CAB82`** |
+
+> ⚠️ **本表 0.7.3 ～ 0.9.0 未记录**（那些构建发生在记录习惯中断期间）。
+> 不要为了"补齐"而编造内容；需要追溯请直接看 `dist\` 里的 jar 文件名与时间戳。
+> `0.9.0-ahf-default`（`FA161E4F77C8C999`）是当前基线 / 回退目标，它未列入上表但确实存在。
+
+### `0.9.1-zeroopt` 改动摘要（零观感优化·批次1）
+
+**目标：不改变任何影响手感的常量、几何算法与调度语义，只降开销。**
+
+Tier 0（五项）：
+1. **fps 日志门控** —— `LOG.info` → `LOG.isDebugEnabled()` 门控的 `LOG.debug`；统计窗口 1s → 5s；行尾追加编辑器标识（`editor=<Kind>#<hash>`，必须留在行尾以免破坏 `build/analyze-log.ps1` 与 `diag/extract.py` 的固定顺序正则）
+2. **每帧分配复用** —— `drawQuadGlow` 的 `Path2D` 与两个 `double[4]` 提为字段（几何算式一字未改）
+3. **删空转链路** —— `smoothedDt` / `effectiveDt`（`assignRanks` 从未使用该形参）
+4. **删 7 个零引用字段** —— `cursorDisappearDelay`、`cursorFadeOutDuration`、`snapAnimationLength`、`useHardSnap`、`leadingSnapFactor`、`shortJumpMaxChars`、`typingMergeChars`
+5. **`refreshTarget()` 耗时埋点** —— 仅 >2ms 且 Debug 开启时记一行
+
+Tier 1（一项）：
+6. **全局共享调度线程** `ui/RenderScheduler.java` —— N 条 per-editor 调度线程 → 1 条；**EDT 任务粒度不变**（每个到期 animator 各自一次 `invokeLater`，未照搬上游的批量 `runDue`）；每 animator 保留自己的 `framePending`
+
+修复 r2（t4 验证发现的真实回退）：
+7. **`nextDueNanos` 推算基准** —— 从「tick 结束的 `now` + delay」改为「上次投递的到期值 + delay」并 `Math.max(·, now)` 追赶。否则 EDT 繁忙（单帧 > delay）时比基线多等一个 delay：实测 R2 59→44、R4 59→37。修复后回到 56/57/60/60
+
+**验证证据**（可复现）：
+- 物理/几何 **逐位一致**：三份 parity harness 的 base 与 new 输出字节完全相同（含退化四边形与零长边用例）
+- 19 项观感常量 **DIFF = 0**
+- 帧率矩阵（3 轮取最大值）：R1 175→188、R2 58→56、R3 176→188、R4 59→57、R5 59→60、R6 58→60
+- 详见 `VERIFY-BATCH1.md` / `REVIEW-BATCH1.md` / 契约 `OPTIM-BATCH1.md`
+
+**⚠️ 未验证项**：真机 IDEA 内的主观手感（探针是 headless + 伪造 Editor）。代码层面有证据，手感需实机确认。
 
 ---
 
@@ -96,9 +126,21 @@
 ## 当前安装
 
 ```
-uni (0.5.2-unified)
-哈希: B4C8A2840C4627AE
+v0.9.0-ahf-default
+哈希: FA161E4F77C8C99992381DD489F7C172A38F56BB62DC3C2D45D8856AD8C95CD5
 路径: %APPDATA%\JetBrains\IntelliJIdea2026.1\plugins\jetbrains-neovide-cursor\lib\
       jetbrains-neovide-cursor-0.5.0.jar
-源码: git 3a7b0a9（已与 jar 同步）
+注意: 文件名仍是 0.5.0.jar（安装脚本固定此名），实际内容是 0.9.0-ahf-default
+```
+
+## 待安装：`0.9.1-zeroopt`
+
+```
+dist\jetbrains-neovide-cursor-0.9.1-zeroopt.jar
+大小: 42,079 B
+SHA256: C718675E046CAB820E7EC6F5AEEE1B647C06DDF829BCF5837B185AD2BE29CB62
+前16位: C718675E046CAB82
+
+安装：先完全退出 IDEA → Move-Item 旧 jar → Copy-Item 新 jar → 重启 IDEA
+回退：build\rollback-0.9.1.ps1
 ```
