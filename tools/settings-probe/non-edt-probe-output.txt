@@ -1,0 +1,44 @@
+=== 探针 D：非 EDT 分支专项（R-01 / R-02 / R-03）===
+
+--- D1 / R-01：state.enabled=false 时首次 editorCreated ---
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by NonEdtProbe (file:/D:/deepseekwork/neovim-cursor-pr/build/non-edt-probe/out/)
+WARNING: Please consider reporting this to the maintainers of class NonEdtProbe
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+  改后： ANIMATORS.size() = 0，CONFIG.enabled = false，isEnabled() = false
+  PASS  R-01 修后：state.enabled=false 时 editorCreated 后 ANIMATORS 为空   实际 size=0
+  PASS  R-01 修后：CONFIG.enabled 已被同步为 false（同步早于早退）   实际 false
+  对照： state.enabled=true 时 ANIMATORS.size() = 1
+  PASS  对照：state.enabled=true 时 editorCreated 后 ANIMATORS 有 1 个（功能未被误关）   实际 size=1
+
+--- D2 / R-02：非 EDT 调 applyConfig() ---
+  调用前： CONFIG.alwaysHighFps=false overlayFadeOut=false；state 里两者都是 true → 应触发两个 setter
+  调用 applyConfig()（当前线程 isDispatchThread()=false）…
+  排队后立刻： edtQueue.size()=1，CONFIG.alwaysHighFps=true（应已同步为新值），saveSettingsCalls=0
+  PASS  非 EDT 调用后 invokeLater 真的入队了   实际队列 1
+  PASS  非 EDT 调用后 CONFIG 立刻可见新值（读取契约不变）   实际 alwaysHighFps=true
+  EDT 执行后： saveSettingsCalls 从 0 增至 2
+  PASS  R-02 修后：EDT 执行完时 setter 链真的跑过（saveSettings ≥ 1）   实际本次新增 2
+  PASS  R-02 修后：SETTER 链确实把 alwaysHighFps 落了盘（说明 changed() 为真）   新增 2 次（alwaysHighFps / overlayFadeOut 两个 setter 都会落盘）
+
+--- D3 / R-03：非 EDT 下的旧键迁移 ---
+  [刷盘将成功] 排队后： stateVersion=1，旧键 present=true，队列=1
+  PASS  R-03：DEFERRED 阶段 stateVersion 前进到 1（不再回退，保证收敛）   实际 1
+  PASS  R-03：DEFERRED 阶段**不删**旧键（删键必须等确认落盘）   旧键仍在 = true
+  PASS  R-03：旧键的值已被搬进 state（alwaysHighFps=false 保留）   实际 false
+  [刷盘将成功] EDT 执行后： 旧键 present=false，stateVersion=1
+  PASS  R-03：EDT 刷盘成功后旧键被删除   剩余 keys=[]
+  PASS  R-03：收敛后 stateVersion 仍为 1   实际 1
+WARN: neovide-cursor: 延迟刷盘失败，旧键保留，下次启动重试迁移
+java.lang.IllegalStateException: 模拟刷盘失败
+	at NonEdtProbe.lambda$installFakePlatform$0(NonEdtProbe.java:321)
+	at jdk.proxy1/jdk.proxy1.$Proxy0.saveSettings(Unknown Source)
+	at com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings.lambda$persistQuietly$0(NeovideCursorSettings.java:454)
+	at NonEdtProbe.drainEdt(NonEdtProbe.java:283)
+	at NonEdtProbe.d3_migrationOffEdt(NonEdtProbe.java:249)
+	at NonEdtProbe.main(NonEdtProbe.java:74)
+  [刷盘失败] EDT 执行后： 旧键 present=true
+  PASS  R-03：EDT 刷盘失败时旧键**保留**（下次启动可重试）   旧键仍在 = true
+
+=== 结果：通过 13，失败 0 ===
+ALL OK

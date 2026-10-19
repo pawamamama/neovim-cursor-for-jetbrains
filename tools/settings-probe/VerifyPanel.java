@@ -1,0 +1,373 @@
+import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager;
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
+import com.intellij.ide.util.PropertiesComponent;
+import com.intellij.openapi.application.Application;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.options.Configurable;
+import com.intellij.openapi.ui.DialogPanel;
+import com.intellij.ui.ColorPanel;
+
+import javax.swing.AbstractButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JEditorPane;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JSlider;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Container;
+import java.lang.reflect.Field;
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * verifier 自建探针 U —— 面板在「无 Project / 无 Editor」环境下能否实例化并跑通
+ * createComponent / reset / isModified / apply。
+ *
+ * <p>这是真实的崩溃点：IntelliJ 的 buildSearchableOptions 与 TraverseUIStarter 会
+ * **在没有打开项目的情况下**实例化每一个 Configurable 并调用 createComponent()。
+ * 这一步炸了 = 真机启动时设置页直接崩。
+ *
+ * <p>驱动的是 verifier 自己编译的 {@link NeovideCursorConfigurable}。
+ */
+public final class VerifyPanel {
+
+    private static int pass = 0;
+    private static int fail = 0;
+
+    private static NeovideCursorSettings svc;
+    private static FakeProps pc = new FakeProps();
+    private static int saves = 0;
+
+    public static void main(String[] args) throws Exception {
+        System.out.println("=== verifier 探针 U：面板在无 Project / 无 Editor 环境下的实例化与往返 ===");
+        svc = new NeovideCursorSettings();
+        installFakeApp();
+
+        NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
+        check("U1 构造器不创建 Swing 组件即可成功（无参构造）", conf != null, conf.getClass().getName());
+        check("U2 getId() 是插件 id 前缀", NeovideCursorConfigurable.ID.startsWith("com.github.yyyolo7a79.neovidecursor"),
+                NeovideCursorConfigurable.ID);
+        check("U3 实现 SearchableConfigurable", conf instanceof com.intellij.openapi.options.SearchableConfigurable,
+                "ok");
+        check("U4 实现 Configurable", conf instanceof Configurable, "ok");
+
+        long t0 = System.nanoTime();
+        JComponent comp;
+        try {
+            comp = conf.createComponent();
+        } catch (Throwable t) {
+            System.out.println("  createComponent 抛异常：" + t);
+            t.printStackTrace(System.out);
+            comp = null;
+        }
+        long ms = (System.nanoTime() - t0) / 1_000_000L;
+        check("U5 createComponent() 在无 Project / 无 Editor 下不抛异常且返回非 null", comp != null,
+                comp == null ? "null" : comp.getClass().getName() + "，耗时 " + ms + " ms");
+        check("U6 返回的是 DialogPanel", comp instanceof DialogPanel,
+                comp == null ? "null" : comp.getClass().getName());
+
+        List<JComponent> all = new ArrayList<>();
+        collect(comp, all);
+        int sliders = 0, checks = 0, combos = 0, colors = 0, labels = 0;
+        for (JComponent c : all) {
+            if (c instanceof JSlider) sliders++;
+            else if (c instanceof JCheckBox) checks++;
+            else if (c instanceof JComboBox) combos++;
+            else if (c instanceof ColorPanel) colors++;
+            else if (c instanceof JLabel) labels++;
+        }
+        System.out.println("  组件统计： 总数=" + all.size() + " slider=" + sliders + " checkbox=" + checks
+                + " combo=" + combos + " colorPanel=" + colors + " label=" + labels);
+        check("U7 8 个滑块（cursorDisappearDelay / cursorFadeOutDuration / tailOpacity / glowOpacity / glowLayers / shadowBlurFactor / trailSize / 拉伸强度）",
+                sliders == 8, "实际 " + sliders);
+        check("U8 5 个复选框（enabled / hideNativeCaret / alwaysHighFps / overlayFadeOut / useShadow）",
+                checks == 5, "实际 " + checks);
+        check("U9 1 个下拉（trailMode）", combos == 1, "实际 " + combos);
+        check("U10 2 个 ColorPanel（tailColor / shadowColor）", colors == 2, "实际 " + colors);
+
+        // reset 回显
+        svc.getState().tailColor = "#12AB34";
+        svc.getState().shadowColor = "#ABCDEF";
+        svc.getState().glowLayers = 9;
+        svc.getState().trailSize = 0.5f;
+        conf.reset();
+        System.out.println("  reset 后 state=" + svc.getState());
+        ColorPanel[] cps = new ColorPanel[2];
+        int ci = 0;
+        for (JComponent c : all) {
+            if (c instanceof ColorPanel && ci < 2) {
+                cps[ci++] = (ColorPanel) c;
+            }
+        }
+        check("U11 reset() 把 tailColor 回显进 ColorPanel",
+                cps[0] != null && hex(cps[0].getSelectedColor()).equals("#12AB34"),
+                cps[0] == null ? "null" : hex(cps[0].getSelectedColor()));
+        check("U12 reset() 把 shadowColor 回显进 ColorPanel",
+                cps[1] != null && hex(cps[1].getSelectedColor()).equals("#ABCDEF"),
+                cps[1] == null ? "null" : hex(cps[1].getSelectedColor()));
+        check("U13 reset() 之后 isModified() = false", !conf.isModified(), String.valueOf(conf.isModified()));
+
+        // 只改非绑定控件（ColorPanel）→ isModified 必须为 true
+        cps[0].setSelectedColor(new Color(0x65, 0x43, 0x21));
+        check("U14 只改 ColorPanel 时 isModified() = true（DialogPanel 追踪不到它）",
+                conf.isModified(), String.valueOf(conf.isModified()));
+
+        // apply：颜色写回 state，并经 applyConfig 进 CONFIG
+        conf.apply();
+        System.out.println("  apply 后 state=" + svc.getState());
+        check("U15 apply() 把 ColorPanel 的值写回 state.tailColor",
+                "#654321".equals(svc.getState().tailColor), svc.getState().tailColor);
+        check("U16 apply() 走到了 applyConfig()（CONFIG.tailColor 同步）",
+                "#654321".equals(NeovideCaretManager.getConfig().tailColor),
+                NeovideCaretManager.getConfig().tailColor);
+        check("U17 apply() 之后 isModified() = false", !conf.isModified(), String.valueOf(conf.isModified()));
+
+        // 契约 §2.2 的七条警告文案必须逐字出现在面板里
+        // 注释文案在 DSL 里是 DslLabel（继承 JEditorPane，不是 JLabel），下拉文案是 JComboBox 的 item，
+        // 三者都要收，否则会误判成"文案缺失"。
+        StringBuilder text = new StringBuilder();
+        for (JComponent c : all) {
+            if (c instanceof JEditorPane) {
+                String s = ((JEditorPane) c).getText();
+                if (s != null) {
+                    text.append(s).append('\n');
+                }
+            }
+            if (c instanceof JLabel) {
+                String s = ((JLabel) c).getText();
+                if (s != null) {
+                    text.append(s).append('\n');
+                }
+            }
+            if (c instanceof AbstractButton) {
+                String s = ((AbstractButton) c).getText();
+                if (s != null) {
+                    text.append(s).append('\n');
+                }
+            }
+            if (c instanceof JComboBox) {
+                JComboBox<?> box = (JComboBox<?>) c;
+                for (int i = 0; i < box.getItemCount(); i++) {
+                    Object it = box.getItemAt(i);
+                    if (it != null) {
+                        text.append(it).append('\n');
+                    }
+                }
+            }
+        }
+        // DSL 的 comment 是 HTML JEditorPane 文本：中文被转成 &#NNNNN; 数字实体，
+        // 比较前必须解码，否则会把"文案写对了"误判成缺失。
+        String blob = unescapeHtml(text.toString());
+        System.out.println("  [调试] 解码后的文案片段（含 &#NNNNN; 解码，前 12 行）：");
+        String[] dbg = blob.split("\n");
+        for (int i = 0; i < Math.min(12, dbg.length); i++) {
+            System.out.println("    " + i + ": " + (dbg[i].length() > 120 ? dbg[i].substring(0, 120) + "…" : dbg[i]));
+        }
+        String[] required = {
+                "常驻刷新 = 调度线程每秒向 EDT 投递约 125 次任务，且永不停歇",
+                "隐藏原生光标 = 把全局配色方案的 CARET_COLOR 改成全透明",
+                "「隐藏原生光标」勾选时覆盖层就是唯一的「光标」",
+                "层数越多渐变越平滑",
+                "0.6 是原版 JS 的夸张光雾（约 40px）",
+                "只调整后缘与前缘的时长比（拉伸倍率）",
+                "辉光淡出关闭时不使用这两个值",
+                "弹簧拉伸（Neovide 原版效果）",
+                "残影轨迹（低帧率更稳）",
+                "rank0 最拖、rank3 最跟手"
+        };
+        int missing = 0;
+        for (String r : required) {
+            boolean ok = blob.contains(r);
+            if (!ok) {
+                missing++;
+            }
+            System.out.println("  " + (ok ? "PASS  " : "FAIL  ") + "文案存在: " + r);
+        }
+        check("U18 契约 §2.2 的警告文案 + §2.4 的下拉文案全部出现在面板中", missing == 0,
+                "缺失 " + missing + " 条");
+
+        System.out.println();
+        System.out.printf("=== 结果：通过 %d，失败 %d ===%n", pass, fail);
+        System.out.flush();
+        if (fail > 0) {
+            System.out.println("HAS FAILURES");
+            System.exit(1);
+        }
+        System.out.println("ALL OK");
+        System.exit(0);
+    }
+
+    private static void collect(Component c, List<JComponent> out) {
+        if (c == null) {
+            return;
+        }
+        if (c instanceof JComponent) {
+            out.add((JComponent) c);
+        }
+        if (c instanceof Container) {
+            for (Component child : ((Container) c).getComponents()) {
+                collect(child, out);
+            }
+        }
+    }
+
+    /** 把 &#NNNNN; / &amp; / &lt; / &gt; / &quot; / &nbsp; 解码成字符。 */
+    private static String unescapeHtml(String s) {
+        StringBuilder out = new StringBuilder(s.length());
+        int i = 0;
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == '&') {
+                int semi = s.indexOf(';', i);
+                if (semi > i && semi - i <= 10) {
+                    String ent = s.substring(i + 1, semi);
+                    String rep = null;
+                    if (ent.startsWith("#x") || ent.startsWith("#X")) {
+                        try {
+                            rep = new String(Character.toChars(Integer.parseInt(ent.substring(2), 16)));
+                        } catch (Exception ignored) {
+                            // 保持原样
+                        }
+                    } else if (ent.startsWith("#")) {
+                        try {
+                            rep = new String(Character.toChars(Integer.parseInt(ent.substring(1))));
+                        } catch (Exception ignored) {
+                            // 保持原样
+                        }
+                    } else if (ent.equals("amp")) {
+                        rep = "&";
+                    } else if (ent.equals("lt")) {
+                        rep = "<";
+                    } else if (ent.equals("gt")) {
+                        rep = ">";
+                    } else if (ent.equals("quot")) {
+                        rep = "\"";
+                    } else if (ent.equals("nbsp")) {
+                        rep = " ";
+                    }
+                    if (rep != null) {
+                        out.append(rep);
+                        i = semi + 1;
+                        continue;
+                    }
+                }
+            }
+            out.append(c);
+            i++;
+        }
+        return out.toString();
+    }
+
+    private static String hex(Color c) {
+        if (c == null) {
+            return "null";
+        }
+        return String.format("#%02X%02X%02X", c.getRed(), c.getGreen(), c.getBlue());
+    }
+
+    /**
+     * DSL 的 comment 标签会向平台要 ExperimentalUI（决定字体）。真机里它是平台自带服务，
+     * 离线探针里必须补一个桩，否则 comment(...) 一建就抛
+     * "Cannot find service com.intellij.ui.ExperimentalUI" —— 那是**探针环境缺失**，
+     * 不是被测代码的缺陷。
+     */
+    private static final com.intellij.ui.ExperimentalUI EXPERIMENTAL_UI =
+            new com.intellij.ui.ExperimentalUI() {
+                @Override
+                public void saveCurrentValueAndReapplyDefaultLaf() {
+                    // 探针里没有 LaF 可保存
+                }
+            };
+
+    private static void installFakeApp() {
+        Application proxy = (Application) Proxy.newProxyInstance(
+                VerifyPanel.class.getClassLoader(),
+                new Class<?>[]{Application.class},
+                (p, m, args) -> {
+                    switch (m.getName()) {
+                        case "getService":
+                            if (args != null && args.length == 1) {
+                                Class<?> c = (Class<?>) args[0];
+                                if (c == NeovideCursorSettings.class) {
+                                    return svc;
+                                }
+                                if (c == PropertiesComponent.class) {
+                                    return pc;
+                                }
+                                if (c == com.intellij.ui.ExperimentalUI.class) {
+                                    return EXPERIMENTAL_UI;
+                                }
+                            }
+                            return null;
+                        case "isDispatchThread":
+                            return true;
+                        case "saveSettings":
+                            saves++;
+                            return null;
+                        case "invokeLater":
+                            ((Runnable) args[0]).run();
+                            return null;
+                        case "toString":
+                            return "FakeApp";
+                        case "hashCode":
+                            return 1;
+                        case "equals":
+                            return p == args[0];
+                        default:
+                            return defaultValue(m.getReturnType());
+                    }
+                });
+        ApplicationManager.setApplication(proxy, () -> { });
+    }
+
+    static final class FakeProps extends PropertiesComponent {
+        final Map<String, String> map = new HashMap<>();
+        @Override public void unsetValue(String name) { map.remove(name); }
+        @Override public boolean isValueSet(String name) { return map.containsKey(name); }
+        @Override public String getValue(String name) { return map.get(name); }
+        @Override public void setValue(String name, String value) { map.put(name, value); }
+        @Override public void setValue(String name, String value, String def) { map.put(name, value); }
+        @Override public void setValue(String name, float value, float def) { }
+        @Override public void setValue(String name, int value, int def) { }
+        @Override public void setValue(String name, boolean value, boolean def) { }
+        @Override public String[] getValues(String name) { return new String[0]; }
+        @Override public void setValues(String name, String[] values) { }
+        @Override public List<String> getList(String name) { return new ArrayList<>(); }
+        @Override public void setList(String name, Collection<String> values) { }
+        @Override public boolean updateValue(String name, boolean value) { return true; }
+    }
+
+    private static Object defaultValue(Class<?> t) {
+        if (!t.isPrimitive()) {
+            return null;
+        }
+        if (t == boolean.class) return false;
+        if (t == int.class) return 0;
+        if (t == long.class) return 0L;
+        if (t == double.class) return 0d;
+        if (t == float.class) return 0f;
+        if (t == short.class) return (short) 0;
+        if (t == byte.class) return (byte) 0;
+        if (t == char.class) return (char) 0;
+        return null;
+    }
+
+    private static void check(String name, boolean cond, String detail) {
+        if (cond) {
+            pass++;
+            System.out.println("  PASS  " + name + (detail == null || detail.isEmpty() ? "" : "   " + detail));
+        } else {
+            fail++;
+            System.out.println("  FAIL  " + name + "   " + detail);
+        }
+    }
+}
