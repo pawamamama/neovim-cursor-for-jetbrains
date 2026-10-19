@@ -32,7 +32,7 @@
 | **10-18 21:32** | **`0.9.1-zeroopt`** | **✅** | **8ms** | **8** | **无** | **offset** | **`C718675E046CAB82`** |
 | 10-19 12:29 | `0.9.2-imetime-fade` | ✅ | 8ms | 8 | 无 | offset | `7AC9D80E58CD8567` |
 | **10-19 13:05** | **`0.9.3-imegeom`** | **✅** | **8ms** | **8** | **无** | **offset + 几何判据** | **`610AE7E9676E2392`** |
-| **10-19 23:40** | **`0.9.4-settings`** | **✅** | **8ms** | **8** | **无** | **offset + 几何判据**（未改） | **`D7DC6665ADE902BE`** |
+| **10-19 23:40** | **`0.9.4-settings`** | **✅** | **8ms** | **8** | **无** | **offset + 几何判据**（未改） | **`plugin.xml 7D5CDEF493B4DFA6`**（见注） |
 
 > ⚠️ **本表 0.7.3 ～ 0.9.0 未记录**（那些构建发生在记录习惯中断期间）。
 > 不要为了"补齐"而编造内容；需要追溯请直接看 `dist\` 里的 jar 文件名与时间戳。
@@ -236,9 +236,15 @@ v0.9.3-imegeom
 
 ```
 dist\jetbrains-neovide-cursor-0.9.4-settings.jar
-大小: 70,056 B
-SHA256: D7DC6665ADE902BEC6DBF74DBF9F959522C1F085CAAC0B8B7DDE0A5A9B0641EE
-前16位: D7DC6665ADE902BE
+大小: 70,056 B（每次构建都是这个数，字节级确定）
+内容指纹: META-INF/plugin.xml = 7D5CDEF493B4DFA6（稳定，见 VERIFY-SETTINGS.md §12.2）
+
+⚠️ **本 jar 的整体 SHA256 每次重建都会变** —— jar 工具把当前时间写进 zip 条目头。
+   t6 实测连续构建三次：BA324F7A… / 2F6E99A4… / 629B2E26…，但**解包后 27 个条目逐字节一致**
+   （Compare-Object 逐条比对，差异 0）。
+   所以整体哈希只能验「你手上这个文件没被替换」，不能验「内容有没有变」。
+   要判断内容是否相同，请比对 VERIFY-SETTINGS.md §12 的 27 条稳定指纹表
+   （复现命令也附在那里）。
 
 安装：先完全退出 IDEA → Move-Item 旧 jar 到 .bak → Copy-Item 新 jar → 重启 IDEA
 回退：build\rollback-0.9.4.ps1（回 0.9.3-imegeom / 610AE7E9676E2392）

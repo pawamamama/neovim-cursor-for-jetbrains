@@ -1071,3 +1071,72 @@ captain 已裁决采纳新增的 refreshGlowPadding()。建议在契约 v2 里�
 
 **判定：PASS。** 四条脚本全部 exit 0；工作区改动集合与开工时一致，我只新增了
 `VERIFY-SETTINGS.md`、`tools/settings-probe/`、`tools/frame-probe/` 三项。
+---
+
+## 12. 交付 jar 的稳定内容指纹（t6 集成交付）
+
+### 12.1 为什么需要这一节
+
+`dist\jetbrains-neovide-cursor-0.9.4-settings.jar` 的**整体 SHA256 每次重建都会变** —— `jar` 工具会把
+当前时间写进 zip 条目头。t6 实测：连续构建两次得到 `BA324F7A…` 与 `2F6E99A4…`，但**解包后 27 个条目
+逐字节一致**（用 `Compare-Object` 逐条比对解包后的 SHA256，差异数 0）。
+
+因此：**整体哈希只能验「你手上这个文件没被替换」，不能验「内容有没有变」**。
+要判断内容一致，请比对下表（解包后每个条目的 SHA256 前 16 位）。
+
+### 12.2 稳定内容指纹（27 个条目）
+
+| 条目 | 字节数 | SHA256 前16位 |
+|---|---|---|
+| `com/github/yyyolo7a79/neovidecursor/core/AfterimageTrail.class` | 3735 | `A4EC6A2196E2BDBB` |
+| `com/github/yyyolo7a79/neovidecursor/core/AfterimageTrail$Ghost.class` | 744 | `ACF024BBB95969D3` |
+| `com/github/yyyolo7a79/neovidecursor/core/DampedSpring.class` | 1346 | `03575D280FB5FA02` |
+| `com/github/yyyolo7a79/neovidecursor/core/NeovideColors.class` | 2358 | `8FC6974E6B96BB57` |
+| `com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.class` | 1777 | `5C66EAC1978847AF` |
+| `com/github/yyyolo7a79/neovidecursor/core/NeovideConfig$TrailMode.class` | 1437 | `7B9DC63699A03778` |
+| `com/github/yyyolo7a79/neovidecursor/core/TrailCorner.class` | 4740 | `3D95600C88C283FA` |
+| `com/github/yyyolo7a79/neovidecursor/settings/NeovideCursorSettings.class` | 12126 | `D1853D22763ED87C` |
+| `com/github/yyyolo7a79/neovidecursor/settings/NeovideCursorSettings$PersistResult.class` | 1611 | `1754D26AB6B6D31D` |
+| `com/github/yyyolo7a79/neovidecursor/settings/NeovideCursorSettings$State.class` | 2971 | `0AA93D36852B52C7` |
+| `com/github/yyyolo7a79/neovidecursor/ui/CaretAnimator.class` | 19431 | `6F61042FEE1D19D0` |
+| `com/github/yyyolo7a79/neovidecursor/ui/CaretTrailPanel.class` | 8382 | `C2BCA9BFCE0DAA2C` |
+| `com/github/yyyolo7a79/neovidecursor/ui/NeovideCaretManager.class` | 14462 | `344E6718E3062A91` |
+| `com/github/yyyolo7a79/neovidecursor/ui/NeovideCaretManager$Snapshot.class` | 839 | `B7A36DECE917E508` |
+| `com/github/yyyolo7a79/neovidecursor/ui/RenderScheduler.class` | 4064 | `84F1353CB06DB9B8` |
+| `com/github/yyyolo7a79/neovidecursor/ui/settings/NeovideCursorConfigurable.class` | 27893 | `39AA2DA02C3E172D` |
+| `com/github/yyyolo7a79/neovidecursor/ui/settings/NeovideCursorConfigurable$1.class` | 2193 | `A5D85C7FBEE923AB` |
+| `com/github/yyyolo7a79/neovidecursor/ui/settings/NeovideCursorConfigurable$2.class` | 1669 | `A15298365E2EE48A` |
+| `com/github/yyyolo7a79/neovidecursor/ui/ToggleAlwaysHighFpsAction.class` | 1072 | `E51807A9016A82F7` |
+| `com/github/yyyolo7a79/neovidecursor/ui/ToggleFadeOutAction.class` | 1056 | `E616C57B97156476` |
+| `com/github/yyyolo7a79/neovidecursor/ui/ToggleHideNativeCaretAction.class` | 1082 | `1F190C3B7D677FAF` |
+| `com/github/yyyolo7a79/neovidecursor/ui/ToggleNeovideAction.class` | 1042 | `9114F7256150670C` |
+| `com/github/yyyolo7a79/neovidecursor/ui/TogglePaintDiagAction.class` | 1454 | `22D1EF5C92542CFE` |
+| `com/github/yyyolo7a79/neovidecursor/ui/ToggleTrailModeAction.class` | 1542 | `BE8EFB23031C072C` |
+| `META-INF/MANIFEST.MF` | 389 | `4A07FDAFB1C4C13B` |
+| `META-INF/plugin.xml` | 5292 | `7D5CDEF493B4DFA6` |
+| `OffsetTest.class` | 4835 | `649DB9A22D1265F2` |
+
+### 12.3 复现命令
+
+```powershell
+$repoRoot = 'D:\deepseekwork\neovim-cursor-pr'
+$tmpRoot  = Join-Path $repoRoot 'build\_entries'
+if (Test-Path $tmpRoot) { Remove-Item -Recurse -Force $tmpRoot }
+New-Item -ItemType Directory $tmpRoot | Out-Null
+Push-Location $tmpRoot
+jar --extract --file "$repoRoot\dist\jetbrains-neovide-cursor-0.9.4-settings.jar"
+Pop-Location
+Get-ChildItem -Recurse -File $tmpRoot | Sort-Object FullName | ForEach-Object {
+    "{0,7} B  {1}  {2}" -f $_.Length,
+        (Get-FileHash $_.FullName -Algorithm SHA256).Hash.Substring(0,16), $_.Name
+}
+```
+
+### 12.4 本次交付记录（2026-10-19 23:40）
+
+```
+dist\jetbrains-neovide-cursor-0.9.4-settings.jar
+字节数: 70,056 B
+SHA256: 1CA71944C2D19B50FDBC861556E15D75AD7D6C4F59C74B832B0716314C03DF7F
+（该值只对应 t6 那一次构建产生的文件；重建会变，见 §12.1）
+```
