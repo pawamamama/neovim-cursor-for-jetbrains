@@ -66,9 +66,20 @@ foreach ($it in $items) {
 # ---------------------------------------------------------------- B
 Hdr 'B. git diff -U0 HEAD -- src/ 中所有含数字的 +/- 行（每条需归属）'
 $diffTxt = Join-Path $Work 'srcdiff-u0.txt'
-& git -C $Repo diff -U0 HEAD -- src/ | Set-Content -Encoding UTF8 $diffTxt
-"文件 = $diffTxt  行数 = $((Get-Content $diffTxt).Count)"
-Get-Content $diffTxt | Select-String '^[+-].*[0-9]' | ForEach-Object { $_.Line }
+# 【不要把 git diff 直接管道给 Set-Content】diff 为空时管道无输入，Set-Content
+# 根本不创建文件，紧接着的 Get-Content 会抛「找不路径」把整个脚本打成 exit 1
+# —— 看上去像审计失败，实际是「没有任何改动」这个正常状态。
+# 先落到变量再判空写入，两种情况都能继续往下走。
+$diffLines = @(& git -C $Repo diff -U0 HEAD -- src/)
+if ($diffLines.Count -eq 0) {
+    Set-Content -Path $diffTxt -Value '' -Encoding UTF8
+    "文件 = $diffTxt  行数 = 0"
+    '  （git diff HEAD -- src/ 为空：本工作区相对 HEAD 没有未提交的源码改动）'
+} else {
+    Set-Content -Path $diffTxt -Value $diffLines -Encoding UTF8
+    "文件 = $diffTxt  行数 = $((Get-Content $diffTxt).Count)"
+    Get-Content $diffTxt | Select-String '^[+-].*[0-9]' | ForEach-Object { $_.Line }
+}
 
 # ---------------------------------------------------------------- C
 Hdr 'C. RenderScheduler.java 数字字面量清单（W3 归属）'
