@@ -1,6 +1,8 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.EditorFactory;
@@ -9,7 +11,6 @@ import com.intellij.openapi.editor.colors.EditorColorsManager;
 import com.intellij.openapi.editor.colors.EditorColorsScheme;
 import com.intellij.openapi.editor.event.EditorFactoryEvent;
 import com.intellij.openapi.editor.event.EditorFactoryListener;
-import com.intellij.ide.util.PropertiesComponent;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.Color;
@@ -47,8 +48,6 @@ public class NeovideCaretManager implements EditorFactoryListener {
     /** 全局配置（后续可接入 Settings 持久化） */
     private static final NeovideConfig CONFIG = new NeovideConfig();
 
-    private static volatile boolean enabled = true;
-
     /** 保存改动前的光标颜色，用于恢复；为 null 表示当前未隐藏 */
     private static volatile Color savedCaretColor = null;
 
@@ -76,28 +75,21 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     private static final Logger LOG = Logger.getInstance(NeovideCaretManager.class);
 
+    /** 是否已完成「持久化 → 运行期」的首次同步（只做一次） */
+    private static volatile boolean settingsSynced = false;
+
     // ==================== 持久化 ====================
 
     /**
-     * 「常驻刷新」在 PropertiesComponent 里的键名。
+     * 持久化真相已在本批集中到 {@link NeovideCursorSettings}（application service，
+     * {@code @State} + {@code PersistentStateComponent}，文件
+     * {@code <config>/options/NeovideCursorSettings.xml}）。
      *
-     * <p>此前整个插件没有任何持久化机制，所有开关都只活在内存里，
-     * 重启 IDEA 后一律回到默认值 —— 对「常驻刷新」这种用户会长期开启的
-     * 开关来说是不可接受的（用户会以为"又变回去了"）。
-     *
-     * <p>这里用 {@code PropertiesComponent} 而不是让 {@link NeovideConfig}
-     * 实现 {@code PersistentStateComponent}：后者要连类一起改、还要注册服务，
-     * 而这里只需要记住一个布尔值，用前者代价最小、也不影响既有配置字段。
+     * <p><b>本类不再自己存任何东西</b>：历史上「常驻刷新」与「辉光淡出」各自在平台的
+     * 属性存储里存了一份，与 {@link NeovideConfig} 的字段默认值并立，
+     * 于是有三个真相源。那两个旧键已由 {@code NeovideCursorSettings.migrateIfNeeded()}
+     * 一次性搬进新 state 并删除，本类的相关常量与读写代码同步删除。
      */
-    private static final String PROP_ALWAYS_HIGH_FPS = "neovide.cursor.alwaysHighFps";
-
-    /**
-     * 「辉光淡出」在 PropertiesComponent 里的键名（F2 / 批次2）。
-     *
-     * <p>与 {@code alwaysHighFps} 同样走 PropertiesComponent 而不是
-     * {@link NeovideConfig} 的持久化机制 —— 理由见 {@link #PROP_ALWAYS_HIGH_FPS} 上方注释。
-     */
-    private static final String PROP_OVERLAY_FADE_OUT = "neovide.cursor.overlayFadeOut";
 
     public static boolean isPaintDisabled() {
         return paintDisabled;
@@ -120,36 +112,91 @@ public class NeovideCaretManager implements EditorFactoryListener {
     }
 
     public static boolean isEnabled() {
-        return enabled;
+        return CONFIG.enabled;
     }
 
     // ==================== 编辑器生命周期 ====================
 
     @Override
     public void editorCreated(@NotNull EditorFactoryEvent event) {
-        if (!enabled) {
-            return;
-        }
-
-        // 【首次回调做两件事，顺序不能反】
+        // 【首次回调：先同步持久化设置，再判断 enabled —— 顺序不能反】
         //
-        // 1. 先恢复持久化设置。此时 IDEA 的 PropertiesComponent 已可用；
-        //    放在构造器里则可能过早。
-        //
-        // 2. 再把 initialScanDone 置位，然后补建已打开的编辑器。
-        //
-        // 历史 bug：恢复调用原本写在 install() 里判断 `if (!initialScanDone)`，
-        // 但置位发生在本方法更靠前的位置 —— 判据恒为 false，那段分支是死代码，
-        // 持久化的开关重启后永远回不到默认值以外。
+        // 同步必须排在 enabled 早退【之前】。原来写的是
+        //     if (!CONFIG.enabled) return;            ← 早退
+        //     if (!initialScanDone) { syncStateToConfig(); ... }
+        // 于是「用户关掉插件 → 重启 IDEA」这条路径永远不会同步：
+        // CONFIG.enabled 停在编译期默认 true，而持久化的 state.enabled 是 false。
+        // 后果有二：
+        //   ① 关掉插件的用户重启后覆盖层又回来了（设置被无视）；
+        //   ② initialScanDone 永远不置位，每次 editorCreated 都重新扫一遍。
+        // 现在把同步提到最前面，用 initialScanDone 兜住「只做一次」。
         if (!initialScanDone) {
-            restorePersistedSettings();
+            syncStateToConfig();
             initialScanDone = true;
+
+            // 同步可能把 enabled 由默认 true 改成持久化的 false —— 必须重新判一次，
+            // 否则"用户关掉了插件"这件事要等到下一次 editorCreated 才生效。
+            if (!CONFIG.enabled) {
+                LOG.info("neovide-cursor: 持久化设置为「已关闭」，跳过全部安装");
+                return;
+            }
+
             for (Editor existing : EditorFactory.getInstance().getAllEditors()) {
                 install(existing);
             }
         }
 
+        if (!CONFIG.enabled) {
+            return;
+        }
+
         install(event.getEditor());
+    }
+
+    // ==================== 持久化 → 运行期 ====================
+
+    /**
+     * 把 {@link NeovideCursorSettings} 的 State 同步进 {@link #CONFIG}（run-time 唯一快照）。
+     *
+     * <p><b>幂等且无副作用</b>：纯字段拷贝，不调 setter、不改配色方案、不重绘。
+     * 它可以在任何时刻安全调用；需要"改完立刻生效"的场景请用 {@link #applyConfig()}。
+     */
+    public static void syncStateToConfig() {
+        try {
+            NeovideCursorSettings svc = NeovideCursorSettings.getInstance();
+            if (svc == null) {
+                LOG.warn("neovide-cursor: NeovideCursorSettings 服务不可用，沿用 NeovideConfig 默认值");
+                return;
+            }
+            svc.syncStateToConfig();
+            settingsSynced = true;
+            LOG.info("neovide-cursor: 已从设置服务同步 CONFIG；alwaysHighFps=" + CONFIG.alwaysHighFps
+                    + "，overlayFadeOut=" + CONFIG.overlayFadeOut
+                    + "，enabled=" + CONFIG.enabled
+                    + "，hideNativeCaret=" + CONFIG.hideNativeCaret);
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: 同步设置服务失败，沿用 NeovideConfig 默认值", t);
+        }
+    }
+
+    /** 运行期 → 持久化：把 {@link #CONFIG} 里能持久化的 15 项回写进 State 并落盘。 */
+    private static void syncConfigToStateAndPersist() {
+        try {
+            NeovideCursorSettings svc = NeovideCursorSettings.getInstance();
+            if (svc == null) {
+                return;
+            }
+            svc.syncConfigToState();
+            svc.persistQuietly();
+        } catch (Throwable t) {
+            // 持久化失败不应影响本次运行
+            LOG.warn("neovide-cursor: 保存设置失败", t);
+        }
+    }
+
+    /** 是否已经做过一次「持久化 → 运行期」同步（探针与排障用） */
+    public static boolean isSettingsSynced() {
+        return settingsSynced;
     }
 
     /** 为单个编辑器挂载拖尾动画（含各项过滤条件） */
@@ -249,6 +296,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
     /** 切换拖尾渲染模式（弹簧 / 残影），并重置所有编辑器的动画状态 */
     public static void setTrailMode(NeovideConfig.TrailMode mode) {
         CONFIG.trailMode = mode;
+        syncConfigToStateAndPersist();
         for (CaretAnimator animator : ANIMATORS.values()) {
             animator.onModeChanged();
         }
@@ -275,6 +323,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
      */
     public static void setHideNativeCaret(boolean on) {
         CONFIG.hideNativeCaret = on;
+        syncConfigToStateAndPersist();
         if (on) {
             applyNativeCaretHidden();
         } else {
@@ -299,12 +348,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
      */
     public static void setOverlayFadeOut(boolean on) {
         CONFIG.overlayFadeOut = on;
-        // 落盘：否则重启 IDEA 后又回到默认值
-        try {
-            PropertiesComponent.getInstance().setValue(PROP_OVERLAY_FADE_OUT, on, false);
-        } catch (Throwable t) {
-            LOG.warn("neovide-cursor: 保存 overlayFadeOut 失败", t);
-        }
+        // 落盘：否则重启 IDEA 后又回到默认值。
+        // 走 NeovideCursorSettings（唯一持久化真相），不再写第二处。
+        syncConfigToStateAndPersist();
         for (CaretAnimator animator : ANIMATORS.values()) {
             animator.requestWakeUp();
         }
@@ -323,13 +369,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
      */
     public static void setAlwaysHighFps(boolean on) {
         CONFIG.alwaysHighFps = on;
-        // 落盘：否则重启 IDEA 后又回到默认（关闭），用户会以为"又变回去了"
-        try {
-            PropertiesComponent.getInstance().setValue(PROP_ALWAYS_HIGH_FPS, on, false);
-        } catch (Throwable t) {
-            // 持久化失败不应影响本次运行
-            LOG.warn("neovide-cursor: 保存 alwaysHighFps 失败", t);
-        }
+        // 落盘：否则重启 IDEA 后又回到默认，用户会以为"又变回去了"。
+        // 走 NeovideCursorSettings（唯一持久化真相），不再写第二处。
+        syncConfigToStateAndPersist();
         for (CaretAnimator animator : ANIMATORS.values()) {
             animator.requestWakeUp();
         }
@@ -339,32 +381,196 @@ public class NeovideCaretManager implements EditorFactoryListener {
         return CONFIG.alwaysHighFps;
     }
 
+    // ==================== 全局生效编排 ====================
+
     /**
-     * 启动时从磁盘恢复「常驻刷新」的值。
+     * 把 {@link NeovideCursorSettings} 的 State（<b>已是最新值</b>）编排成
+     * 「写字段 → 调 setter → 刷新缓存」的完整生效链。
      *
-     * <p>在 {@link #install()} 里调用一次。读不到就用默认值 false。
+     * <p><b>它不是一个"再写一遍字段"的便利方法，而是唯一的全局生效入口</b>：
+     * 设置面板 {@code apply()}、以及以后任何"批量改配置"都必须走它。
+     * 已有的单点 setter（{@link #setTrailMode} 等）继续为 Tools 菜单服务，语义不变。
+     *
+     * <p><b>顺序即契约</b>（每一步都有反例，见下）：
+     * <pre>
+     *   S0  取快照：记下"改之前"的 5 个关键值（用于支路判断与幂等；必须在写 CONFIG 之前）
+     *   S1  syncStateToConfig()        15 个字段一次性写到位 + 重建 trailFactors
+     *   S2  setTrailMode / S3 setHideNativeCaret / S4 setAlwaysHighFps
+     *   S5  setOverlayFadeOut / S6 setEnabled      —— 仅当该值真的变了
+     *   S7  遍历 ANIMATORS 调 onModeChanged()      —— 刷新三类被缓存的值
+     *   S8  遍历 ANIMATORS 调 requestWakeUp()      —— 无害加固
+     * </pre>
+     *
+     * <p><b>为什么 S1 必须最先</b>：后面所有 setter 与刷新都读 {@link #CONFIG}。
+     * {@code setEnabled(true)} 内部要读 {@code CONFIG.hideNativeCaret}，
+     * {@code onModeChanged()} 要读 {@code shadowBlurFactor} / {@code afterimageLifetime} / 颜色。
+     * 先调 setter 再写字段 → 新建的 animator 会用旧字段构造，{@code glowPadding}
+     * 还要等下一次慢路径才正确。
+     *
+     * <p><b>为什么 S6（enabled）必须最后</b>：开 → 对所有编辑器 {@code install()}，
+     * 新 {@code CaretAnimator} 在构造器里一次性算 {@code glowPadding} 并
+     * {@code setLifetime}，所以必须在字段就位之后；关 → dispose 全部并清空集合，
+     * 之后 S7/S8 空转无害。
+     *
+     * <p><b>为什么 S3 在 S6 之前</b>：{@code setHideNativeCaret} 有全局配色副作用并
+     * {@code clearTrail()}。若在 {@code setEnabled(false)} 之后调，
+     * 后者已经把光标恢复成原生可见，S3 刚隐藏的又会被覆盖。
+     *
+     * <p><b>为什么 S7 不可省</b>：S2~S6 都没碰三类"构造时算一次 / 缓存"的值 ——
+     * {@code glowPadding}、{@code CaretTrailPanel.fillColor/glowColor}、
+     * {@code AfterimageTrail.lifetime}。{@code onModeChanged()} 是现成的全量刷新入口：
+     * 它调 {@code panel.refreshStyles()}（重新 parse 颜色）、
+     * 调 {@code afterimageTrail.setLifetime(...)}、并置 {@code forceResync = true}。
+     * 但 <b>{@code forceResync} 单独不足以刷新 {@code glowPadding}</b>：
+     * 慢路径在算 padding 之前还有一条「光标中心与高度都没变就 return」的早退
+     * （{@code CaretAnimator:1007}），静态光标编辑器更是整体跳过 {@code refreshTarget}。
+     * 所以 S7 的循环里还要显式调 {@code refreshGlowPadding()}。
+     * 不做 S7 → 改颜色 / 改 {@code shadowBlurFactor} 后画面不变。
+     *
+     * <p><b>幂等性</b>：连调两次，第二次的 S2–S6 全部跳过（值没变），S7/S8 仍执行。
+     *
+     * <p><b>EDT 约束</b>：各 setter 与 {@code onModeChanged()} 都会碰 Swing 组件
+     * （配色方案、面板字段、重绘），必须在 EDT 上跑。本方法若不在 EDT，会
+     * <b>先取 S0 快照 → 同步 CONFIG（让读者立刻看到新值）→ 带着快照 {@code invokeLater}</b>。
+     * 带快照是必须的：EDT 侧若自己现拍 S0，拍到的是已经同步过的新值，
+     * S2..S6 的 changed() 全为 false，setter 链一个都不会执行。
      */
-    public static void restorePersistedSettings() {
-        try {
-            CONFIG.alwaysHighFps = PropertiesComponent.getInstance()
-                    .getBoolean(PROP_ALWAYS_HIGH_FPS, false);
-        } catch (Throwable t) {
-            LOG.warn("neovide-cursor: 读取 alwaysHighFps 失败，使用默认值", t);
+    public static void applyConfig() {
+        com.intellij.openapi.application.Application app = ApplicationManager.getApplication();
+        if (app == null) {
+            // 没有平台（离线探针）：直接同步执行，无处排队
+            applyConfigOnEdt(snapshot());
+            return;
         }
-        try {
-            // 默认 true：与 NeovideConfig.overlayFadeOut 的默认值保持一致
-            CONFIG.overlayFadeOut = PropertiesComponent.getInstance()
-                    .getBoolean(PROP_OVERLAY_FADE_OUT, true);
-        } catch (Throwable t) {
-            LOG.warn("neovide-cursor: 读取 overlayFadeOut 失败，使用默认值", t);
+        if (!app.isDispatchThread()) {
+            // ---------- S0 必须在任何写 CONFIG 之前取 ----------
+            // 这里先拍快照、再同步字段、再把快照传给 EDT 侧。
+            //
+            // 【曾经的写法错在哪】原来这里是 invokeLater(applyConfigOnEdt) 之后立刻
+            // syncStateToConfig()：CONFIG 当场变成新值，等 EDT 侧跑起来时它自己的 S0
+            // 拍到的已经是【新】值 → S2..S6 的 changed() 全为 false → setter 链一个都不调。
+            // 结果是非 EDT 调用 applyConfig() 只会写字段，颜色/辉光/淡出这些被缓存的副作用
+            // 永不执行（而且原 javadoc 还写着"副作用链尚未执行完"，实际是"永不完"）。
+            //
+            // 【为什么不干脆不在非 EDT 分支同步】那会让"调用完立即读 CONFIG"的调用方
+            // 读到旧值，与既有语义不符。传快照则两个诉求同时满足。
+            Snapshot old = snapshot();
+            syncStateToConfig();          // 让非 EDT 的读者立刻看到新配置
+            app.invokeLater(() -> applyConfigOnEdt(old));
+            return;
         }
+        applyConfigOnEdt(snapshot());
+    }
+
+    /** S0 改前快照。**必须**在任何 {@code syncStateToConfig()} 之前采集。 */
+    private static Snapshot snapshot() {
+        Snapshot s = new Snapshot();
+        s.trailMode = CONFIG.trailMode;
+        s.hideNativeCaret = CONFIG.hideNativeCaret;
+        s.alwaysHighFps = CONFIG.alwaysHighFps;
+        s.overlayFadeOut = CONFIG.overlayFadeOut;
+        s.enabled = CONFIG.enabled;
+        return s;
+    }
+
+    /** S0 的载体：只装 S2..S6 需要比较的 5 个字段。 */
+    private static final class Snapshot {
+        NeovideConfig.TrailMode trailMode;
+        boolean hideNativeCaret;
+        boolean alwaysHighFps;
+        boolean overlayFadeOut;
+        boolean enabled;
+    }
+
+    /** {@link #applyConfig()} 的 EDT 侧实现（S1..S8），{@code old} 是 S0 快照。 */
+    private static void applyConfigOnEdt(@NotNull Snapshot old) {
+        final NeovideConfig.TrailMode oldTrailMode = old.trailMode;
+        final boolean oldHideNativeCaret = old.hideNativeCaret;
+        final boolean oldAlwaysHighFps = old.alwaysHighFps;
+        final boolean oldOverlayFadeOut = old.overlayFadeOut;
+        final boolean oldEnabled = old.enabled;
+
+        // ---------- S1：字段一次性写到位 ----------
+        NeovideCursorSettings svc = null;
+        try {
+            svc = NeovideCursorSettings.getInstance();
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: applyConfig 取不到设置服务", t);
+        }
+        if (svc != null) {
+            svc.syncStateToConfig();
+        }
+
+        // ---------- S2..S6：只在值真的变了时才调 setter ----------
+        // 每个 setter 都带持久化与结构性副作用，无条件调用既慢又会清掉正在画的拖尾。
+        try {
+            if (CONFIG.trailMode != oldTrailMode) {
+                setTrailMode(CONFIG.trailMode);
+            }
+            if (CONFIG.hideNativeCaret != oldHideNativeCaret) {
+                setHideNativeCaret(CONFIG.hideNativeCaret);
+            }
+            if (CONFIG.alwaysHighFps != oldAlwaysHighFps) {
+                setAlwaysHighFps(CONFIG.alwaysHighFps);
+            }
+            if (CONFIG.overlayFadeOut != oldOverlayFadeOut) {
+                setOverlayFadeOut(CONFIG.overlayFadeOut);
+            }
+            if (CONFIG.enabled != oldEnabled) {
+                setEnabled(CONFIG.enabled);
+            }
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: applyConfig 的 setter 链失败", t);
+        }
+
+        // ---------- S7：刷新三类被缓存的值 ----------
+        // ANIMATORS 为空是合法状态（没有编辑器 / 刚被 setEnabled(false) 清空），
+        // 遍历空集合不会出错；编辑器已 dispose 时各自的 try 兜底。
+        //
+        // onModeChanged() 覆盖：fillColor/glowColor（refreshStyles）、
+        // AfterimageTrail.lifetime、forceResync（→ 下一帧慢路径重算 glowPadding）。
+        // 但 forceResync 那条路在「光标静止」时走不到（refreshTarget 在 :1007 早退），
+        // 静态光标编辑器更是整体跳过 refreshTarget —— 所以 glowPadding 必须再主动算一次。
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            try {
+                animator.onModeChanged();
+            } catch (Throwable t) {
+                // 单个 animator 刷新失败不应影响其他编辑器
+                LOG.warn("neovide-cursor: 刷新 animator 缓存失败（编辑器可能已销毁）", t);
+            }
+            try {
+                animator.refreshGlowPadding();
+            } catch (Throwable t) {
+                LOG.warn("neovide-cursor: 重算 glowPadding 失败（编辑器可能已销毁）", t);
+            }
+        }
+
+        // ---------- S8：重排调度（无害加固）----------
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            try {
+                animator.requestWakeUp();
+            } catch (Throwable ignored) {
+                // 调度唤醒失败不影响正确性：下一次正常 tick 会自己接上
+            }
+        }
+
+        LOG.info("neovide-cursor: applyConfig 完成（animators=" + ANIMATORS.size()
+                + "，trailMode=" + CONFIG.trailMode
+                + "，hideNativeCaret=" + CONFIG.hideNativeCaret
+                + "，alwaysHighFps=" + CONFIG.alwaysHighFps
+                + "，overlayFadeOut=" + CONFIG.overlayFadeOut
+                + "，enabled=" + CONFIG.enabled + "）");
     }
 
     // ==================== 启用 / 禁用 ====================
 
     /** 切换拖尾效果开关 */
     public static void setEnabled(boolean on) {
-        enabled = on;
+        // 【§3.1.4】enabled 只有一个运行期真相：CONFIG.enabled。
+        // 历史上这里还有一个独立的静态布尔字段（volatile）与 CONFIG.enabled 并立 ——
+        // 那正是"三真相源"的来源，已删除。
+        CONFIG.enabled = on;
+        syncConfigToStateAndPersist();
 
         if (on) {
             // 【上游踩坑 #19】尊重 hideNativeCaret：默认保留原生光标

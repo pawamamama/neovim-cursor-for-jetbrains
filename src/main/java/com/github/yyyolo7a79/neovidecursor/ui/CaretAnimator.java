@@ -1368,6 +1368,29 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /**
+     * 立刻按当前 {@code shadowBlurFactor} 重算辉光外扩量 {@link #glowPadding}。
+     *
+     * <p><b>为什么 onModeChanged() 不够</b>：它只置 {@code forceResync}，指望下一次
+     * {@link #refreshTarget()} 走慢路径去更新 {@code glowPadding}（:1018-1019）。
+     * 但慢路径在算 padding <b>之前</b>还有一条早退：
+     * {@code if (newCenterX == centerX && newCenterY == centerY && height == cursorHeight) return false;}
+     * —— 光标静止时这条恒成立，于是「改了 shadowBlurFactor、光标没动」的场景下
+     * padding 永远算不到。静态光标编辑器（控制台）更是<b>整体跳过</b> refreshTarget
+     * （见 {@code staticCaret}），它连慢路径都进不去，只能靠这里。
+     *
+     * <p>padding 偏小会让重绘包围盒切掉光晕边缘（脏像素残留），偏大只是多画一点。
+     * 设置面板 apply() 之后用户会立刻盯着画面看，所以这里选择<b>主动算一次</b>，
+     * 而不是等下一次光标移动。
+     */
+    void refreshGlowPadding() {
+        if (disposed || staticCaret) {
+            return;
+        }
+        panel.updateGlowRadius(cursorWidth, cursorHeight);
+        glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
+    }
+
+    /**
      * 按「运动方向对齐度」给四个角点名次。
      *
      * <p>对齐度越高说明该角越位于运动前方，名次越靠前（rank 越小），
