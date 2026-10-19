@@ -143,6 +143,22 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final double GLOW_FADE_START = 0.5;
     private static final double GLOW_FADE_END = 2.5;
 
+    /**
+     * IME 组合中间态最多连续跳过的帧数（F1-b 的冻结上界）。
+     *
+     * <p><b>为什么必须有上界</b>：F1-b 判定「offset 不变但 column 变」为中间态并跳过重算，
+     * 且按契约要求**不更新** lastVisualColumn —— 于是若该条件在正常场景下也持续成立
+     * （inlay 提示出现、代码折叠展开、软换行/tab 宽度切换等），拦截会变成**无限期冻结**：
+     * 坐标永远不更新，光标停在错误位置。
+     *
+     * <p>验证方用反射 harness 实测：连续 200 帧全被拦，centerX 停在 101.0 而正确值 133.0
+     * （偏差 30px ≈ 1.5 个字符）。
+     *
+     * <p>取 15 帧（8ms × 15 ≈ 120ms）：足够覆盖一次 IME 组合的中间态，
+     * 又短到肉眼无法察觉"冻结了 120ms"。超过即强制放行一次，避免永久卡死。
+     */
+    private static final int IME_MAX_SKIP_FRAMES = 15;
+
     /** 四个角点的相对位置（左上 → 右上 → 右下 → 左下，顺时针） */
     private static final double[][] CORNER_RELATIVE = {
             {-0.5, -0.5},
@@ -219,6 +235,32 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 从而保证每个到期周期 ≤1 次 {@code invokeLater}。
      */
     volatile long lastDispatchedDueNanos = Long.MIN_VALUE;
+
+    /**
+     * 最近一次「仍在运动」的时刻（纳秒）；{@code 0} 表示自创建以来从未运动过。
+     *
+     * <p><b>F2 / 批次2</b>：只用于辉光淡出计时（{@link #glowFade}）。
+     * 只在 {@code anyAnimating == true} 的帧里更新，<b>不是每帧更新</b> ——
+     * 否则「停止后开始计时」就永远起不来。
+     */
+    private long lastAnimatingNanos = 0L;
+
+    /**
+     * 辉光最后一次可见时的强度（0~1），与 {@link #lastAnimatingNanos} 配套。
+     *
+     * <p><b>F-1 修复的关键</b>：{@code glowStrength} 归零之后，需要以「归零前的那个亮度」
+     * 为起点做淡出。若没有这个字段，淡出就只能从一个已经是 0 的亮度开始 —— 像素上不可见
+     * （这正是第一版被验证方实测否定的原因）。
+     */
+    private float lastGlowStrength = 0f;
+
+    /**
+     * IME 组合态连续跳过的帧数（F1-b）。
+     *
+     * <p>与 {@link #IME_MAX_SKIP_FRAMES} 配合使用：连续跳过达到上界后强制放行一次，
+     * 防止「offset 不变但 column 变」长期成立时坐标被无限期冻结。
+     */
+    private int imeSkipFrames = 0;
 
     /** 是否已销毁 */
     private volatile boolean disposed = false;
@@ -507,6 +549,18 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     @Override
     public void caretPositionChanged(@NotNull CaretEvent event) {
+        // 【F1-a / 批次2】让坐标缓存立即失效。
+        //
+        // 为什么需要：CaretAnimator 依赖「每帧主动读光标位置」，但 refreshTarget()
+        // 有快速路径 —— 视觉位置（line, column）没变就直接跳过 visualPositionToXY。
+        // 于是当平台给的列值停在某个中间态时，插件会认定「光标没动」，永久沿用
+        // 可能错误的像素坐标。实测触发场景：中文输入法组合态（详见 FIX-BATCH2.md F1）。
+        //
+        // 加这一行后，滚动 / 切换标签页 / 点击等任何引发 caret 事件的操作都会
+        // 强制重算一次坐标，不必再等「下一次输入」才自愈。
+        //
+        // 代价：只在光标事件时多做一次 visualPositionToXY，不在每帧热路径上。
+        forceResync = true;
         wakeUp();
     }
 
@@ -613,7 +667,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         } else if (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE) {
             anyAnimating = tickAfterimage(now, moved);
         } else {
-            anyAnimating = tickSpring(dt);
+            anyAnimating = tickSpring(dt, now);
         }
 
         currentDelayMs = computeNextDelay(moved || anyAnimating);
@@ -812,6 +866,44 @@ public class CaretAnimator implements Disposable, CaretListener {
             if (!forceResync && vp.line == lastVisualLine && vp.column == lastVisualColumn) {
                 return false;
             }
+
+            // 【F1-b / 批次2】IME 组合态识别：offset 没变但视觉列变了 ⇒ 中间态。
+            //
+            // 背景：中文输入法组合期间，getVisualPosition().column 可能指向组合串
+            // 内部，而真实插入点（getOffset()）并未移动。此时按 vp 换算出的像素
+            // 位置会偏出半个字宽（用户观察：「光标卡在中字的竖笔画上」）。
+            //
+            // 判据：真实插入点没动、但视觉列变了 → 判定为平台中间态，本帧不重算坐标，
+            // 也【不更新】lastVisualColumn —— 这样下一帧若 offset 恢复一致仍能正确重算。
+            //
+            // 边界（契约 §2.3 要求逐条满足）：
+            //   · forceResync 优先：布局变化（窗口缩放等）必须重算，不被本判据拦截
+            //   · lastCaretOffset < 0（首次调用）不得误判
+            //   · 正常移动光标时 offset 与 vp 同时变 → 正常放行
+            //
+            // 注意：offset 只读一次，供本判据与下方 charsMoved 共用（契约 P0-5）。
+            int caretOffset = -1;
+            try {
+                caretOffset = editor.getCaretModel().getOffset();
+            } catch (Throwable ignored) {
+                // 取不到就保持 -1：F1-b 不介入，charsMoved 也退回兼容分支
+            }
+
+            // 【F-3 修复】必须有上界：否则一旦条件持续成立（inlay 提示、折叠展开等
+            // 场景也可能出现「offset 不变但 column 变」），拦截会变成**无限期冻结** ——
+            // 验证方实测连续 200 帧全被拦、中心点偏差 30px（约 1.5 个字符）。
+            // 超过 GLOW_IME_MAX_SKIP_FRAMES 后强制放行一次，避免永久卡死。
+            if (!forceResync
+                    && lastCaretOffset >= 0
+                    && caretOffset == lastCaretOffset
+                    && vp.column != lastVisualColumn
+                    && imeSkipFrames < IME_MAX_SKIP_FRAMES) {
+                // 平台处于组合/重排中间态：本帧不采信 vp 的像素换算
+                imeSkipFrames++;
+                return false;
+            }
+            imeSkipFrames = 0;
+
             forceResync = false;
 
             // 【T0-5】耗时埋点起点：必须在快速路径提前返回"之后" ——
@@ -838,14 +930,12 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 第0列→第1列实测（取的是行首字符，光标在中文区时仍会翻倍）。
             // 结果都是「英文丝滑、中文卡」。
             int charsMoved = -1;
-            try {
-                int offset = editor.getCaretModel().getOffset();
+            if (caretOffset >= 0) {
+                // 【F1-b】复用上面已经读到的 offset，不重复调用（契约 P0-5）
                 if (lastCaretOffset >= 0) {
-                    charsMoved = Math.abs(offset - lastCaretOffset);
+                    charsMoved = Math.abs(caretOffset - lastCaretOffset);
                 }
-                lastCaretOffset = offset;
-            } catch (Throwable ignored) {
-                // 取不到就保持 -1，jump() 会退回兼容分支
+                lastCaretOffset = caretOffset;
             }
             for (TrailCorner corner : corners) {
                 corner.setCharsMoved(charsMoved);
@@ -934,7 +1024,7 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
-    private boolean tickSpring(double dt) {
+    private boolean tickSpring(double dt, long now) {
         if (jumped) {
             assignRanks();
             jumped = false;
@@ -954,8 +1044,46 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         // 辉光只在拖尾展开时点亮 —— 静止的光标顶着一圈光晕并不好看，
         // 那是"运动中"才该有的效果。强度由最大偏移量映射，边界见 GLOW_FADE_*。
-        panel.setGlowStrength((float) ((maxOffset - GLOW_FADE_START)
-                / (GLOW_FADE_END - GLOW_FADE_START)));
+        float glowStrength = (float) ((maxOffset - GLOW_FADE_START)
+                / (GLOW_FADE_END - GLOW_FADE_START));
+        if (glowStrength < 0f) {
+            glowStrength = 0f;
+        } else if (glowStrength > 1f) {
+            glowStrength = 1f;
+        }
+
+        // 【F2 / 批次2】辉光淡出（方案 B：只淡辉光，光标本体始终不透明）。
+        //
+        // ==================== 为什么用「辉光最后可见时刻」而不是 anyAnimating ====================
+        //
+        // 第一版用 anyAnimating 当计时起点，验证方用逐帧位模式实测发现：淡出**在像素上
+        // 完全不可见**（`gs>0 且 gf<1` 的帧数 = 0），因为两者是同一条曲线上的读数 ——
+        //   anyAnimating 为 false 的时刻 ≈ glowStrength 归零的时刻（maxOffset 跌破 0.5），
+        // 于是淡出计时刚开始，已经没有辉光可淡了。
+        //
+        // 正确做法：以「glowStrength 最后一次 > 0 的时刻」为计时起点，并把那一帧的
+        // glowStrength 记住（lastGlowStrength）。glowStrength 归零后，用
+        // `lastGlowStrength × fade` 作为有效强度 —— 这才是真正的"从当前亮度淡出"。
+        //
+        // 效果：停止移动后辉光保持 50ms（cursorDisappearDelay），
+        // 再从原亮度线性熄灭 75ms（cursorFadeOutDuration）。
+        if (glowStrength > 0f) {
+            lastGlowStrength = glowStrength;
+            lastAnimatingNanos = now;
+        }
+
+        float fade = glowFade(now);
+        float effectiveGlow = (glowStrength > 0f) ? glowStrength : lastGlowStrength * fade;
+        panel.setGlowStrength(effectiveGlow);
+        panel.setGlowFade(fade);
+
+        // 淡出未完成时必须继续 tick，否则最后一帧不刷新 → 辉光残留。
+        //
+        // 【F-2 修复】必须同时要求 fade > 0：fade 到 0 意味着淡出已经结束，
+        // 若仍把 fading 置 true，tickSpring() 会恒返回 true →
+        // computeNextDelay(active=true) → EDT 永不降频（空闲也在 8ms 空转）。
+        // 这一条在 alwaysHighFps=true 的默认档被掩盖，干净安装（默认 false）时会暴露。
+        boolean fading = config.overlayFadeOut && fade > 0f && fade < 1f;
 
         panel.updateCorners(
                 corners[0].getCurrentX(), corners[0].getCurrentY(),
@@ -965,7 +1093,38 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         computeTrailBounds(currentBounds);
         submitRepaint();
-        return anyAnimating;
+        return anyAnimating || fading;
+    }
+
+    /**
+     * 辉光淡出系数（0~1）：拖尾停止后先保持 delay，再线性淡出到 0。
+     *
+     * <p><b>只作用于辉光层</b>（{@code drawQuadGlow} 的峰值 alpha），
+     * 光标本体（{@code fillPolygon}）始终不透明 —— 详见 FIX-BATCH2.md §3。
+     *
+     * <p>开关 {@code config.overlayFadeOut} 关闭时恒返回 1f，行为与 0.9.1 一致。
+     */
+    private float glowFade(long now) {
+        if (!config.overlayFadeOut) {
+            return 1f;                              // 开关关闭：不淡出，等价 0.9.1
+        }
+        if (lastAnimatingNanos == 0L) {
+            // 尚未出现过可见辉光：没有可淡的东西。
+            // 注意：这里返回 0f（契约 §3.3 原文），因为调用方只在 glowStrength>0 时
+            // 才用 fade 参与乘法；glowStrength==0 时有效强度由 lastGlowStrength(0) 决定，
+            // 行为与返回 1f 完全等价（0 × 1 = 0 × 0）。
+            return 0f;
+        }
+        double sinceStop = (now - lastAnimatingNanos) / 1_000_000_000.0
+                - config.cursorDisappearDelay / 1000.0;
+        if (sinceStop <= 0) {
+            return 1f;                              // 停止后 delay 内：保持满强度
+        }
+        double fade = config.cursorFadeOutDuration;
+        if (fade <= 0 || sinceStop >= fade) {
+            return 0f;                              // 淡出完毕
+        }
+        return (float) (1.0 - sinceStop / fade);
     }
 
     /**

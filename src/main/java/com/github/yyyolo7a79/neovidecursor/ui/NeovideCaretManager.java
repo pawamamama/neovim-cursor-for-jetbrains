@@ -91,6 +91,14 @@ public class NeovideCaretManager implements EditorFactoryListener {
      */
     private static final String PROP_ALWAYS_HIGH_FPS = "neovide.cursor.alwaysHighFps";
 
+    /**
+     * 「辉光淡出」在 PropertiesComponent 里的键名（F2 / 批次2）。
+     *
+     * <p>与 {@code alwaysHighFps} 同样走 PropertiesComponent 而不是
+     * {@link NeovideConfig} 的持久化机制 —— 理由见 {@link #PROP_ALWAYS_HIGH_FPS} 上方注释。
+     */
+    private static final String PROP_OVERLAY_FADE_OUT = "neovide.cursor.overlayFadeOut";
+
     public static boolean isPaintDisabled() {
         return paintDisabled;
     }
@@ -283,6 +291,30 @@ public class NeovideCaretManager implements EditorFactoryListener {
     }
 
     /**
+     * 开启 / 关闭「辉光淡出」（F2 / 批次2）。
+     *
+     * <p>开启：拖尾停止后辉光先保持 {@code cursorDisappearDelay}(50ms)，
+     * 再用 {@code cursorFadeOutDuration}(75ms) 线性熄灭 —— 只淡辉光，光标本体不淡。
+     * <p>关闭：行为与 0.9.1 一致（辉光瞬时归零）。
+     */
+    public static void setOverlayFadeOut(boolean on) {
+        CONFIG.overlayFadeOut = on;
+        // 落盘：否则重启 IDEA 后又回到默认值
+        try {
+            PropertiesComponent.getInstance().setValue(PROP_OVERLAY_FADE_OUT, on, false);
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: 保存 overlayFadeOut 失败", t);
+        }
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            animator.requestWakeUp();
+        }
+    }
+
+    public static boolean isOverlayFadeOut() {
+        return CONFIG.overlayFadeOut;
+    }
+
+    /**
      * 开启 / 关闭「常驻刷新」。
      *
      * <p>关闭时恢复原有的自动降频策略（空闲降到 120ms / 600ms）。
@@ -318,6 +350,13 @@ public class NeovideCaretManager implements EditorFactoryListener {
                     .getBoolean(PROP_ALWAYS_HIGH_FPS, false);
         } catch (Throwable t) {
             LOG.warn("neovide-cursor: 读取 alwaysHighFps 失败，使用默认值", t);
+        }
+        try {
+            // 默认 true：与 NeovideConfig.overlayFadeOut 的默认值保持一致
+            CONFIG.overlayFadeOut = PropertiesComponent.getInstance()
+                    .getBoolean(PROP_OVERLAY_FADE_OUT, true);
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: 读取 overlayFadeOut 失败，使用默认值", t);
         }
     }
 

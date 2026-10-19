@@ -40,19 +40,33 @@
         </action>
 
         <!--
-          隐藏原生光标（上游踩坑 #19）
+          隐藏原生光标（批次2 / F3 起默认勾选）
 
-          默认不勾选 = 保留原生光标，拖尾只做叠加。
-          原生光标由 IDE 自己绘制、零延迟跟随，所以空闲降频时也不会「卡」——
-          这就是「不开常驻刷新也能用」的根本原因。
+          批次2 起默认勾选 = 覆盖层充当光标本体。
+          理由：本插件 alwaysHighFps 默认 true，调度恒 8ms，上游担心的
+          「空闲降频导致跟随滞后」不存在；而保留原生光标时两套绘制叠加反而更重
+          （用户实测「取消勾选之后卡一点」）。此处有意偏离上游踩坑 #19。
 
-          勾选后覆盖层充当光标本体，跟随完全取决于我们的调度：
-          空闲降频时会有明显延迟，通常需要配合「常驻刷新」一起用。
+          取消勾选后回到叠加模式：原生光标由 IDE 自己绘制、零延迟跟随，
+          拖尾只在移动时叠加。
         -->
         <action id="NeovideCursor.HideNativeCaret"
                 class="com.github.yyyolo7a79.neovidecursor.ui.ToggleHideNativeCaretAction"
                 text="Neovide 光标：隐藏原生光标（常驻绘制）"
-                description="默认不勾选：保留原生光标做零延迟跟随，拖尾只叠加。勾选后由覆盖层充当光标本体（不闪烁、颜色可自定义），但跟随依赖 EDT 调度，空闲降频时会有延迟。">
+                description="默认勾选：由覆盖层充当光标本体（不闪烁、颜色可自定义）。取消勾选则保留原生光标负责零延迟跟随，拖尾只做叠加。">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <!--
+          辉光淡出（批次2 / F2）
+
+          只淡辉光，光标本体始终不透明 —— 因为默认档原生光标已隐藏，
+          整体淡出会变成「光标自己消失」。
+        -->
+        <action id="NeovideCursor.FadeOut"
+                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleFadeOutAction"
+                text="Neovide 光标：辉光淡出（停止后柔和熄灭）"
+                description="默认勾选：拖尾停止后辉光先保持 50ms，再用 75ms 线性熄灭（只淡辉光，光标不淡）。取消勾选则辉光瞬时归零，行为与 0.9.1 一致。">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
     </actions>

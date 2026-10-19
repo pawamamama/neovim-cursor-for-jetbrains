@@ -89,6 +89,29 @@ public class CaretTrailPanel extends JComponent {
      */
     private float glowStrength = 1f;
 
+    /**
+     * 辉光淡出系数（0~1），由 animator 每帧写入（F2 / 批次2）。
+     *
+     * <p><b>只作用于辉光层</b>：在 {@link #drawQuadGlow} 里乘到峰值 alpha 上，
+     * 光标本体（{@code fillPolygon}）始终不透明。
+     *
+     * <p>为什么不把它做成整体 {@code AlphaComposite}：那样会连光标本体一起淡出。
+     * 默认档（{@code hideNativeCaret = true}，原生光标已隐藏）下，覆盖层就是肉眼
+     * 看到的"光标"，整体淡出会变成"光标自己消失"。
+     */
+    private float glowFade = 1f;
+
+    /**
+     * 设置辉光淡出系数（0~1，超出范围截断）。
+     *
+     * <p>由 animator 按「距离上次运动的时长」写入：运动中为 1（满强度），
+     * 停止后先保持 1 一段时间（{@code cursorDisappearDelay}），
+     * 再线性降到 0（历时 {@code cursorFadeOutDuration}）。
+     */
+    public void setGlowFade(float fade) {
+        this.glowFade = fade < 0f ? 0f : (fade > 1f ? 1f : fade);
+    }
+
     public CaretTrailPanel(@NotNull NeovideConfig config) {
         this.config = config;
         setOpaque(false);
@@ -246,7 +269,12 @@ public class CaretTrailPanel extends JComponent {
         int layers = config.glowLayers;
 
         // 峰值再乘上强度：光标静止时 glowStrength 为 0，此处直接返回，光晕完全不绘制
-        float peak = config.glowOpacity * (glowColor.getAlpha() / 255f) * glowStrength;
+        //
+        // 【F2 / 批次2】再乘上 glowFade：拖尾停止后辉光淡出，光标本体不受影响。
+        // 这是本批唯一改动的算式位置 —— 其余几何算法（角点、外扩方向、层数、
+        // 半序、Math.pow 反解）一字未改。
+        float peak = config.glowOpacity * (glowColor.getAlpha() / 255f)
+                * glowStrength * glowFade;
         if (peak <= 0f) {
             return;
         }
