@@ -1,7 +1,8 @@
 # LESSONS.md —— 踩坑记录与经验总结（权威汇总）
 
-> 生成：2026-10-19
-> 当前 HEAD：`8906609`　当前安装：`0.9.3-imegeom`（`610AE7E9676E2392`）
+> 生成：2026-10-19　更新：2026-10-20
+> 当前 HEAD：`3c3944d`　当前安装：`0.9.4-settings`（内容指纹 `7D5CDEF493B4DFA6`）
+> 第八部分是 0.9.4 批次新增的 6 条教训（坑 11–16），**尤其坑 16：用户实测 > 我的推断**。
 > 本文取代此前散落在各处的踩坑记录。**遇到问题先查这里**，再查对应的批次契约。
 >
 > 写作原则：**每条都要有可复现的证据**。没有数据的结论一律标注"推断"。
@@ -387,7 +388,7 @@ Get-ChildItem -Recurse -Filter *.java <目录> | Select-String -Pattern '<正则
 |---|---|---|
 | `BUSY_RETRY_MS=1` 造成 EDT 繁忙时 −3.4% | 小 | 改 0 引入空转，收益不值；已提 issue #8 |
 | 多光标无拖尾 | 中（Alt 列选用户） | 需移植 `SpringTrail`，工作量大 |
-| 设置界面 | 中 | 参数需改代码重编译 |
+| ~~设置界面~~ | — | **0.9.4 已做**，但 4 个缺陷待修（见 `START-HERE.md` §6.5） |
 | 空闲时仍往 EDT 交脏区 | **可能最大** | P0 待做：8 编辑器 ≈ 1000 次/秒重画已正确的画面 |
 | 隐藏标签页仍 8ms 调度 | 中 | P1 待做：`isShowing()` 只是不画，每帧仍换算坐标 |
 | 控制台光标由 `tickStaticCaret` 补画 | 低 | 与上游"跳过 CONSOLE"不同，本批按契约未碰 |
@@ -420,3 +421,95 @@ Get-ChildItem -Recurse -Filter *.java <目录> | Select-String -Pattern '<正则
 
 这一路三个真问题（淡出 no-op、`fading` 永不终止、`nextDueNanos` 慢 25%）
 全部是**代码"看起来对"但数值不对**，全部由独立验证用逐帧证据抓出。
+
+---
+
+## 第八部分：0.9.4-settings 批次新增的教训（2026-10-20）
+
+### 坑 11：**测试探针的假设会成为盲区** —— 三个探针同时 return true，两个 high 就这样漏过去
+
+0.9.4 的 t3/t4 跑了 100+ 条断言全绿，但审查（t5）抓出两个 high。根因：
+
+```java
+// 五个探针（ApplyConfigProbe:111 / PanelProbe:421 / VerifyApplyConfig:376 /
+// VerifyPanel:311 / VerifyPersistence:347）的假 Application：
+case "isDispatchThread": return true;   // ← 全部恒 true
+```
+
+于是**非 EDT 分支零覆盖**。而面板 `apply()` 本身在 EDT 上跑，**真机手测也发现不了**。
+
+**教训**：探针不仅要覆盖"正常路径"，还要**主动构造反常环境**（非 EDT、无 Project、已 dispose）。
+判断探针是否有效，唯一标准是 **"把修复回滚，它会不会变红"**（变异测试）。
+
+### 坑 12：变异必须**忠实**，否则会得出错误结论
+
+t8 复现 R-01 时，第一次只"在顶部插早退"、**保留了同步后的重判**，探针仍然全绿。
+改成删掉重判的**忠实还原**才变红。
+
+**教训**："我回滚了"和"我真的回到了修复前的形态"是两件事。变异后要先 diff 确认形态一致。
+
+### 坑 13：`forceResync` 不是万能的 —— 它绕不过**位置未变**的早退
+
+契约原本假定 `onModeChanged()` 置 `forceResync=true` 就能让下一帧慢路径重算 `glowPadding`。
+**实测不成立**：`CaretAnimator:1007` 有一条早退：
+
+```java
+if (newCenterX == centerX && newCenterY == centerY && height == cursorHeight) {
+    return false;   // ← 在 :1018-1019 重算 glowPadding 之前
+}
+```
+
+光标静止时它恒成立；静态光标编辑器更是整体跳过 `refreshTarget`。
+
+**教训**：说"某标志能让代码走到某处"之前，要**逐条数清中间有几个早退**。
+`forceResync` 只绕过了 `:871` 的视觉位置早退，绕不过 `:1007` 的中心/高度早退。
+
+### 坑 14：设置界面的"数值不跟手"—— `bindValue` 不注册 ChangeListener
+
+0.9.4 交付后用户实测反馈"拉参数时候数值不会改变"。实机复现：
+
+```
+滑块[0] 上的 ChangeListener 数量 = 0
+拖动后 pending.cursorDisappearDelay = 50（拖动前也是 50）
+标签跟随变化的滑块数 = 0 / 8
+```
+
+`SliderKt.bindValue(cell, getter, setter)` 只在 `DialogPanel.apply()` 时取组件值，
+**拖动过程中不回调 setter**。所以 "右标签实时显示" 必须自己 `addChangeListener`。
+
+**教训**：DSL 的"双向绑定"是**面板级**（apply/reset 时同步），不是**控件级**（拖动时同步）。
+这两者不是一回事，别想当然。
+
+### 坑 15：切主题会**丢掉**透明的 CARET_COLOR，而插件有早退导致不会重新隐藏
+
+全仓库搜 `EditorColorsListener` / `schemeChanged` → **零命中**。而：
+
+```java
+// NeovideCaretManager:606
+if (savedCaretColor != null) {
+    return;   // 以为"已经隐藏过"
+}
+```
+
+后果：插件隐藏原生光标 → 用户切主题（scheme 整个换掉，透明色丢失）→ 原生光标复活 →
+但插件以为还隐藏着 → **两套绘制叠加**（表现为"更卡"、"双光标"）。
+
+**教训**：任何"改全局可变状态"的操作，都要问一句 **"别人把它改回去怎么办"**。
+这里没监听 scheme 变更，就必然要重新隐藏，而早退让这件事不发生。
+
+### 坑 16：用户实测 > 我的推断（这条要写在最前面）
+
+我曾断言「关常驻刷新 + 隐藏原生光标」会"卡到没法用"，建议从 UI 上禁止。
+**用户反驳，真机日志证明他是对的**：
+
+```
+23:29:21  applyConfig 完成（animators=11, hideNativeCaret=true, alwaysHighFps=false, ...）
+```
+
+他关常驻刷新 + 保留隐藏原生，连用 6 次都正常。原因：`caretPositionChanged` 每次光标移动
+都调 `wakeUp()` **立刻拉回 8ms**，只有完全静止才降到 120ms —— 那时也不需要响应。
+
+**所以那其实是"单套绘制 + 省电"的最优组合，我却想禁掉它。**
+
+**教训**：涉及观感的判断，**用户的实测优先于我的代码推断**。断言的边界要想清楚：
+我错在把"完全静止时降到 120ms"当成"卡"，而静止时人根本不需要光标响应。

@@ -1,211 +1,240 @@
 # REVIEW-SETTINGS.md —— 设置界面（0.9.4-settings）契约逐条裁决 + SHA256 绑定审查
 
-> **审查者**：reviewer（t5 首轮 / **t8 第二轮复审**）
-> **被审对象**：t7 修复（对 t5 六条 findings 的处置）；t2/t3 实现承前
-> **裁决依据**：`SETTINGS-CONTRACT.md` **v2**（v1 冻结 + §8 修订记录；修订由 t5 的 R-04/R-06 触发）
+> **审查者**：reviewer（t5 首轮 / t8 第二轮 / **t9 第三轮**）
+> **本轮性质**：**verdict 重新绑定到当前字节**。t8 之后 t6 集成交付又改了文档（契约 v2→v2.1、验证报告新增 §12），
+> 门控判定 t8 覆盖的 revision 已不存在。本轮在同一实现上重做审查，并**独立核验 t6 新增、此前未经任何审查的内容**。
+> **裁决依据**：`SETTINGS-CONTRACT.md` **v2.1**
 > **工作目录**：`D:\deepseekwork\neovim-cursor-pr`
-> **审查纪律**：只审查，**未改 `src/` 任何字符**；未装 jar、未重启 IDEA。所有数字都是我自己重跑/自算得到的。
+> **审查纪律**：只审查，**未改 `src/` 任何字符**（`git diff HEAD -- src/` 输出 0 字符）；未改任何交付物；未装 jar、未重启 IDEA。
 
 ---
 
-## 0. 最终裁决（第二轮）
+## 0. 最终裁决（第三轮）
 
 | 项 | 值 |
 |---|---|
 | **verdict** | **pass** |
-| 六条 findings 状态 | **R-01…R-06 全部关闭** |
-| blocker / high / medium | 0 / 0 / 0 |
-| 本轮新发现 | 1 条 **low**（N-1，三方均未提及；不影响验收） |
-| 契约条文 | 全部 PASS（v2 正文与 §8 修订记录一致） |
-| 三件套 + 探针 | 全部 exit 0（我独立重跑） |
+| 六条 findings（R-01…R-06） | **保持关闭** |
+| 绑定 | **当前字节已绑定**（§1 全表为我重算） |
+| t6 新增内容独立核验 | **§12.2 的 27 条指纹 27/27 一致**；§9.5 波动表 50/50 一致 |
+| 新发现 | 2 条 **low**（N3-1、N3-2，均为文档口径问题，不影响交付） |
+| 全部判据 | parity / audit / IME / verify-t4 / non-edt **全部 exit 0**（我独立重跑） |
 
-**结论**：t5 提出的 2 high / 1 medium / 3 low **全部按契约要求关闭**，且我把三条真 bug 的修复做了**反向验证**（把修复回滚 → 断言变红），证明新增探针真的有效，而不是"探针通过"。契约 v2 的 R1–R7 修订已在正文落实、未越界改实现。唯一新发现是一条 low 级交互边界，不构成阻塞。
+**结论**：当前字节已绑定，六条 findings 保持关闭，**t6 新增内容经独立核验一致**。
+§12.2 那张 27 行的哈希表**没有任何编造**（全量 27/27 逐格命中）。唯一需要留意的是 §12.1 的一句**归因**不准确、
+§12.4 记录的交付哈希与当前 dist 文件不同 —— 两者都不影响"内容指纹"这套做法的正确性与可用性，故判 low。
 
 ---
 
-## 1. SHA256 绑定表（本轮全部重算）
+## 1. SHA256 绑定表（**全部我自己 Get-FileHash / git 计算**，与 captain 给的值一致，无差异）
 
-| # | 对象 | SHA256 | 大小 | 说明 |
+| # | 对象 | SHA256 | 大小 | 与 captain 通报 |
 |---|---|---|---|---|
-| 1 | `SETTINGS-CONTRACT.md`（**v2**） | `8A5C10698563799037BF21DE9B3EF1579C4D3D53721B48AB98C77D2E12A49A6B` | 71,944 B / 779 行 | **v1 冻结值 `4EAD982A…` → v2 已变更**，变更范围见 §4 |
-| 2 | `VERIFY-SETTINGS.md`（本轮证据） | `DFA8651971C1A629CA790FAB52207E49299D9CF1EE1F6B7DDCA4254F2E4EA179` | 61,965 B / 1,073 行 | v1 时为 `68C059BB…`（59,603 B / 1,046 行） |
-| 3 | `LESSONS.md`（方法论） | `E9515FA7DF525F0BBFAB5B94FD040A5FB961AFCD63BDEE6EA8A68B087475FC7C` | 16,263 B / 422 行 | 未变 |
-| 4 | `REVIEW-SETTINGS.md`（本文，首轮） | `0F8782B40A1BE77DA82FDDA1FBBA74039D92D878E1EA663799C4ED5962072ED4` | 39,229 B / 335 行 | 首轮版，本轮已更新 |
-| 5 | **构建产物** `dist\settings-ui-smoke.jar` | `32DB05D8CB1384206A691AE4F3424D5BA1507983942FF1435FC39E2CD7A6D7C8` | 70,056 B | mtime 2026-10-19 22:42:40（t7 重建；首轮为 `E04B4D31…` / 67,883 B） |
-| 6 | **git diff SHA256**（`git diff HEAD` 全量） | `FEBE531378FC84985572D2EA71123F22D196416096A3EF4D95B99C02B6AF9FFB` | 7 files, +2315/−59 | 首轮为 `9F923080…` / 5 files +1626/−52 |
-| 7 | **HEAD** | `ba67ed383614ca865f1395be1a0a2eede94da28f` | — | 与契约 §0 记录一致，**未变** |
+| 1 | `SETTINGS-CONTRACT.md`（**v2.1**） | `A42BF7D60BF8CC24C6C2729F9F1C01F4652F2C8F6BE918DC73619C289534B0D5` | 77,758 B / 837 行 | **一致** |
+| 2 | `VERIFY-SETTINGS.md` | `BF58CC7A5E099574CADCDBF2A666375CB5F915BA88374538F1F88424CA4BF030` | 66,213 B / 1,142 行 | **一致** |
+| 3 | `REVIEW-SETTINGS.md`（本文，t8 版） | `7EC1E69E172058D0B6373C873F139219430BB216EAC152C8655A3F391EC3FC16` | 19,685 B / 211 行 | — |
+| 4 | `src/.../ui/NeovideCaretManager.java` | `55A8FA5ACBD8422DDC6CD7417508ACB7BD8CC7F77707BA48014B8E0F29B22606` | — | **一致** |
+| 5 | `src/.../settings/NeovideCursorSettings.java` | `CCED3A3FA914CD811E4DE5133EF14ED1CE32C98145D7DA8ECB09FF44B5244920` | — | **一致** |
+| 6 | `src/.../ui/settings/NeovideCursorConfigurable.java` | `EE261A09ECEE8C26EED41FA51006B08D265D5EB2D98C6E398D47F2B677E52104` | — | （本轮新增记录） |
+| 7 | `src/.../core/NeovideConfig.java` | `A43F8F2712C0CB2D1183BAB409EF8BD649E024B6541E1C89407E90F4C2A4A8F8` | — | （禁改文件，见 §5） |
+| 8 | **git diff HEAD** | `E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855` | **0 字节** | 空 diff 的 SHA256 |
+| 9 | **HEAD** | `3c3944d3c585a68e59a5eb6da3a9840b6514a30a`（短 `3c3944d`） | — | **一致** |
+| 10 | **交付 jar 整体** | `D30B23E2FF59C33051C67F1614B586A2CAD70B3266EF7515F83DB9E0DD527F4D` | 70,056 B | **一致** |
+| 11 | **jar 内容指纹** `META-INF/plugin.xml` | `7D5CDEF493B4DFA6` | 5,292 B | **一致** |
+| 12 | `VERSIONS.md` | `18AE86C19FE3A125B76EFA4EDAAABF2E770A39DB6C0C229E79701AF8E6E22E68` | 15,866 B / 255 行 | （本轮新增记录） |
+| 13 | `LESSONS.md` | `E9515FA7DF525F0BBFAB5B94FD040A5FB961AFCD63BDEE6EA8A68B087475FC7C` | 16,263 B / 422 行 | 全程未变 |
 
-**一致性交叉校验**：
-- jar 内所有 `.java` 与 `resources` 的 mtime 均**不晚于** jar（新于 jar 的 .java = 0，resource = 0）→ **jar 不是过期产物**，与 t7 源码同步。
-- jar 内含 **`NeovideCursorSettings$PersistResult.class`** 与 **`NeovideCaretManager$Snapshot.class`** → 证明 R-02/R-03 的修复代码确实进了产物，不只是留在源码里。
-- jar 内 `plugin.xml` 含注入的 `<version>0.9.4</version>`，且 `instance=` 指向 `ui.settings.NeovideCursorConfigurable`（与 v2 契约一致）。
-- **契约 v2 有自己的版本记录**（§8 R1–R7），不是"悄悄改掉冻结文本"——这一点很重要，见 §4。
+> #8 的 `E3B0C442…` 就是**空字符串的 SHA256** —— 本批已全部提交，工作区相对 HEAD 无源码改动，这是正确状态（不是缺失）。
+> 所有数值与 captain 通报**逐位相同**，无差异需要说明。
 
 ---
 
-## 2. 六条 findings 的关闭裁决
+## 2. 【本轮重点】独立核验 VERIFY-SETTINGS.md §12 的 27 条稳定指纹
 
-| ID | 原 severity | 关闭 | 证据位置（file:line + 断言编号） |
+### 2.1 做法
+
+我自己 `jar --extract` 交付 jar 到 `build/t9-scratch/entries`，对**每一个条目**算 SHA256 前 16 位，与 §12.2 表逐条对账。**全量 27 条，不抽查。**
+
+### 2.2 结果
+
+```
+条目数        ：表 27 / jar 实际 27
+名称匹配      ：27/27
+字节数一致    ：27/27
+SHA256 前16位 ：27/27
+jar 中未被表列出的条目：0
+```
+
+**>>> 27 条一致 / 0 条不一致。**
+
+逐条比对覆盖了 core/(7)、settings/(3)、ui/(9)、ui/settings/(3)、META-INF/(2)、OffsetTest.class(1)、以及 6 个 Toggle*Action.class。
+其中 `META-INF/plugin.xml` = `7D5CDEF493B4DFA6`（5,292 B）与 VERSIONS.md 的内容指纹声明**完全吻合**。
+
+**这是一张诚实的表** —— 考虑到 impl-core 在 t7 曾主动交代过"为了让表格看起来完整而编了 R1/R3/R5 的数字"，
+本轮我按 captain 要求做了全量而非抽查，**结论是 §12.2 没有任何编造残留**。
+
+### 2.3 顺带验证 §12.1 的**论断**（重建是否真的稳定）
+
+我在**不改动 `dist/` 交付物**的前提下，用交付 jar 当容器底、以 `jar --update` 重打两次：
+
+| 实验 | 结果 |
+|---|---|
+| 同一份 classes 重打两次（`--update`） | 整体哈希 `D30B23E2…` **与交付 jar 完全相同**（r1 == r2 == delivered） |
+| 解包后逐条比对 r1 vs delivered | **差异 0 / 27** |
+| 把某个 `.class` 的 mtime 改掉再打 | 整体哈希**变了** |
+
+由此确立 `jar` 的真实语义：
+- **class 条目的 zip mtime = 源文件 mtime**（我构造 mtime=`10:00:00` 的源，zip 里就是 `10:00:00`，**不是构建时刻**）；
+- 项目用的是 `jar --update`（`build/offline-build.ps1:69`）；
+- 所以**整体哈希是否变，取决于 `build/classes` 里 `.class` 的 mtime**，而 `javac` 每次重编译都会刷新它 → 跨构建整体哈希确实会变。
+
+**判定：§12.1 的结论成立**（整体哈希不能跨构建比对内容，必须用条目指纹），**但归因不准确** → 记为 **N3-2（low）**，详见 §6。
+
+---
+
+## 3. §9.5 波动表独立对账（t8 做过 50/50，本轮改动后重做）
+
+与原始 `SUMMARY` 行（`:563-567` / `:571-575` / `:581-585` / `:589-593`）逐格对账，
+每场景 10 格（遍1 区间/宽度、遍2 区间/宽度、跨遍跨度、新版的同五项）× 5 场景 = **50 格**：
+
+```
+R1 10/10 OK   R2 10/10 OK   R3 10/10 OK   R4 10/10 OK   R5 10/10 OK
+§9.5 波动表：50/50 格一致，不一致 0
+```
+
+**§9.4 增补部分（:602-632 的口径说明 + R4 单独说明）也复核过**：R4 的"方向一致但幅度小于自身跨度 → 仍判噪声"表述与数据吻合（基线跨遍跨度 0.70 ms > 偏移 0.29 ms）。t8 提的 R-05 已被实质性关闭。
+
+---
+
+## 4. 契约 v2.1 三处修改与实现自洽性
+
+| # | 检查项 | 裁决 | 证据 |
 |---|---|---|---|
-| **R-01** | high | ✅ **关闭** | `NeovideCaretManager.java:133-153`；断言 `NonEdtProbe` D1：「state.enabled=false 时 editorCreated 后 ANIMATORS 为空」+「CONFIG.enabled 已同步为 false」+ 对照组「enabled=true 时有 1 个」 |
-| **R-02** | high | ✅ **关闭** | `NeovideCaretManager.java:445-463`（`Snapshot` :466-483 / `applyConfigOnEdt(@NotNull Snapshot old)` :486）；断言 D2：「非 EDT 调用后入队」「CONFIG 立刻可见新值」「EDT 执行完 saveSettings ≥ 1」「setter 真的落了盘」 |
-| **R-03** | medium | ✅ **关闭** | `NeovideCursorSettings.java:206-226`（switch 三态）/ `:406-466`（`persistQuietly`）/ `:480-487`（`PersistResult` 枚举）；断言 D3 共 6 条（DEFERRED 版本号=1 / 不删键 / 值已搬 / EDT 后删键 / 收敛仍 1 / 刷盘失败保留键） |
-| **R-04** | low | ✅ **关闭** | `kFromTrailFactors()` 已从源码**删除**（我逐文件 grep：src 命中 **0**，连方法签名 `public static float kFromTrailFactors` 也是 0）；契约 §2.5 该条改为【v2 裁决：第一期不做】并给出三条理由（正文 :170-181） |
-| **R-05** | low | ✅ **关闭** | `VERIFY-SETTINGS.md:602-632` 新增「口径说明」+ 5 场景全表的跨遍跨度；R4 单独说明（:619-629）。**我逐格对账 50/50 一致**，见 §3 |
-| **R-06** | low | ✅ **关闭** | 契约 v2 §3.1.6(`:333`)/§3.1.7(`:343/:348/:361-363`) 已改为 `ui.settings.NeovideCursorConfigurable`；§8 表 R1/R2/R3 记载该笔误 |
+| 1 | §3.3.2 伪码 S7 是否含 `refreshGlowPadding()` | **已落实** | 契约 `:453-456`：`S7 for(...) { a.onModeChanged(); a.refreshGlowPadding(); }`；实现 `NeovideCaretManager.java:534-546` 正是两步。**伪码与实现一致** |
+| 2 | §3.2.2 伪码是否已是三态 `PersistResult` | **已落实** | 契约 `:403-408`：`PersistResult persisted = persistQuietly(); switch(...) { CONFIRMED / DEFERRED / FAILED }`，并附 `:410-414` 的「为什么必须三态」；实现 `NeovideCursorSettings.java:206-226` + 枚举 `:480-487`。**一致** |
+| 3 | §3.3.3 是否已把「forceResync…唯一保证」改成两步保证并写明旧句已证伪 | **已落实** | 契约 `:478`：明确写「**单靠 ① 不够**（v1 曾断言……**该断言已被证伪**）」，给出 `CaretAnimator:1007` 早退证据，并写明「真实保证是**两步**」「这正是 R-05 当初产生的根源」 |
+| 4 | **R5/R6/R7 现在是否真的在正文落实**（t8 指出当时只在 §8 表） | **全部落实** | R5 → §3.3.2 伪码 S7（`:453-456`）；R6 → S0 语义与「S0 必须早于任何写 CONFIG」说明（`:443-463`）；R7 → §3.2.2 伪码（`:403-408`）+ 三态理由（`:410-414`）。**不再只是附录表** |
+| 5 | §8 修订记录新增 N-2a/N-2b/N-2c | **已登记** | 契约 `:831-833` 三条，逐条对应 t8 的 N-2 三处 |
 
-**判定**：六条**全部关闭**，无残留。
-
----
-
-## 3. 反向验证（本轮最重要的一节）
-
-> 探针"通过"不等于"探针有效"。**只有把修复回滚后断言变红，才算证据。**
-> 我把源码复制到 `build/t8-scratch/mut/`（不碰工作区 `src/`），逐条还原成修复前的形态，重编译后跑 `NonEdtProbe`。
-
-| 变异 | 还原成什么 | `NonEdtProbe` 结果 | 结论 |
-|---|---|---|---|
-| **R-01** | 把单条 `if(!CONFIG.enabled) return;` 放回方法最开头，删掉同步后的两次重判（忠实还原 t5 描述的原始形态） | **通过 12，失败 1**；`FAIL R-01 修后：state.enabled=false 时 editorCreated 后 ANIMATORS 为空  实际 size=1` | **探针有效** ✔ |
-| **R-02** | 把 `syncStateToConfig()` 移回 `snapshot()` **之前**（快照拍到新值） | **通过 11，失败 2**；`FAIL … saveSettings ≥ 1  实际本次新增 0`、`FAIL … 落了盘  新增 0 次` | **探针有效** ✔ |
-| **R-03** | DEFERRED 分支改回「回退版本号 + 立刻删键」 | **通过 9，失败 4**；版本号 1→0、旧键仍在 false、收敛后仍 1→0、刷盘失败保留 false | **探针有效** ✔ |
-
-> 第一次做 R-01 变异时我只插了顶部早退、保留了同步后的重判，探针仍全绿 —— 说明**变异必须忠实**。改成"删掉重判"的忠实还原后立刻变红。这个细节本身就是"探针确实在测修复点"的旁证。
-> 变异副本已清理（`build/t8-scratch/mut` 已删除），工作区 `src/` 未被触碰。
-
-**关于 captain 的疑问「NonEdtProbe 覆盖得到 R-01 吗」**：**覆盖到了**。R-01 虽然不是线程问题，但该探针的假平台提供了 `EditorFactory` 桩（`NonEdtProbe.java:307-309`，走 `Application.getService(EditorFactory.class)`），所以能真正驱动 `editorCreated` 并数 `ANIMATORS`。D1 段三条断言正是 R-01 的专项断言，且我上面的变异证明它会失败。
+**结论：v2.1 的三处修改与实现完全自洽，R5/R6/R7 已在正文落实。t8 的 N-2 关闭。**
 
 ---
 
-## 4. 契约 v2 的修订审查（captain 重点④）
+## 5. 全部判据我独立重跑（exit code 均为 0）
 
-**裁决：修订合法、已落实、未越界。**
-
-§8「v2 修订记录」列出 R1–R7。我逐条核对"是否只在附录表里写了、正文没改"：
-
-| 记录 | 正文是否真的落实 | 位置 |
+| 判据 | 我跑的命令 | 结果 |
 |---|---|---|
-| R1 XML 片段类名 | ✅ 落实 | §3.1.6 `:333` `instance="…ui.settings.NeovideCursorConfigurable"` |
-| R2 类骨架类名 | ✅ 落实 | §3.1.7 `:343` `class NeovideCursorConfigurable extends BoundConfigurable`、`:348` 构造器 |
-| R3 包名 `ui/settings/` | ✅ 落实 | §3.1.7 `:361-363` 明确写出「实际落点（v2 更正）」及职责划分理由 |
-| R4 §2.5 非规范数组 → 第一期不做 | ✅ 落实且**自洽** | 正文 `:170-181`：标题已改【v2 裁决：第一期不做】，并给出三条理由（不可达 / 反推会漂移 / 与"OK 生效"冲突），明写「v1 里那个 `kFromTrailFactors()` 已从源码删除」。我核对源码：该方法**确实已删**（grep 0 命中）。**契约与实现自洽** ✔ |
-| R5 S7 必须补 `refreshGlowPadding()` | ⚠️ **正文未改，仅在 §8 表**（见 N-2） | §3.3.2 的 S0–S8 伪码 `:437-445` **仍是** `S7 for(...) a.onModeChanged();`，没有 `refreshGlowPadding()`；§3.3.3 的 glowPadding 行 `:466` 仍声称「forceResync 一置位就必走慢路径…这是唯一保证」 |
-| R6 S0 必须早于写 CONFIG | ⚠️ **正文未改，仅在 §8 表**（见 N-2） | 同上，`:437` 仍写 `S0 取 service 的 state…记 old = 当前 CONFIG 的关键值快照`，未提"非 EDT 必须先拍快照再同步" |
-| R7 `PersistResult` 三态 | ⚠️ **正文未改，仅在 §8 表**（见 N-2） | §3.2.2 伪码 `:402-405` **仍是** `boolean persisted = persistQuietly(); if (persisted) deleteOldKeys… else state.stateVersion = 0;` —— 与实际实现的 `switch(PersistResult)` 不一致 |
-
-**结论**：R1–R4 在正文落实；**R5/R6/R7 只在 §8 修订表里记载，正文的伪码没有同步更新**。这属于文档一致性问题（记 N-2，low），**不影响实现正确性**（实现是对的，是契约正文滞后）。但既然 v2 自称"修订记录"，正文理应与之一致，否则下一个人读 §3.3.2/§3.2.2 会按旧的、已知有缺陷的伪码去理解。
+| parity | `run-parity.ps1 -Work build/t9-scratch/parity` | **exit 0**；3 x `PARITY OK` + `ALL PARITY OK`（0A4FDDE6 / 4057AFA0 / 409C5728 两两相等） |
+| audit | `run-audit.ps1` 同上 | **exit 0**；19 项 **DIFF = 1**，唯一 DIFF 是 `hideNativeCaret`（基线 false → 新版 true）；B 段正确报告「git diff 为空」 |
+| audit D 段 | 逐文件统计，排除 `settings/` | **12**（NeovideConfig 4 / CaretAnimator 4 / CaretTrailPanel 2 / NeovideCaretManager 2）—— 与预期一致 |
+| IME | `run-ime-geom-test.ps1` | **exit 0**；通过 29，失败 0 |
+| verify-t4 | `run-verify-t4.ps1` | **exit 0**；1+3+52+26+18 = **100 条断言全过** |
+| non-EDT | `run-non-edt-probe.ps1` | **exit 0**；通过 13，失败 0 |
+| 默认值零改动 | `git diff --exit-code -- core/NeovideConfig.java` | **exit 0**，零 diff；35 项禁改字面量 **missing = 0** |
+| 旧键清除 | 逐文件 grep（17 个 .java） | `PropertiesComponent` 仅 `NeovideCursorSettings.java` 10 命中；`restorePersistedSettings` 0；`static volatile boolean enabled` 0；`kFromTrailFactors` 0 |
 
 ---
 
-## 5. 我独立重跑/重算的全部判据
+## 6. 新发现（本轮 2 条 low）
 
-| 判据 | 我的做法 | 结果 |
+### N3-1【low】§12.4 记录的交付哈希 `1CA71944…` 与当前 `dist` 里的 jar（`D30B23E2…`）不一致
+
+- **file:line**：`VERIFY-SETTINGS.md:1140`（`SHA256: 1CA71944C2D19B50…`）
+- **problem**：该行记录的是 t6 某一次构建产物的哈希，而当前 `dist\jetbrains-neovide-cursor-0.9.4-settings.jar`
+  实际是 `D30B23E2…`（70,056 B，mtime 2026-10-19 23:04:16）。读者按 §12.4 校验会得到"文件被替换"的错误结论。
+  §12.4 本身已加注「该值只对应 t6 那一次构建产生的文件；重建会变」，所以**不算撒谎**，但把一次性哈希放在"本次交付记录"标题下仍然误导。
+- **不是安全问题**：`dist/*.jar` 被 `.gitignore` 忽略、不入库，交付 jar 是可重建产物而非被追踪实体；§12.2 的 27 条指纹才是权威判据。
+- **requiredFix**：把 §12.4 的 `SHA256:` 行删除或改为「本例为 t6 构建时的一次性值，已失效；**判定内容请用 §12.2 的 27 条指纹**」，只保留字节数与内容指纹。
+
+### N3-2【low】§12.1 对"整体哈希每次重建都会变"的**归因**不准确
+
+- **file:line**：`VERIFY-SETTINGS.md:1080-1082`（「`jar` 工具会把当前时间写进 zip 条目头」）；`VERSIONS.md:242` 同句
+- **problem**：我实测 `jar` 写入 `class` 条目的 zip mtime **等于源文件 mtime**（构造 mtime=`10:00:00` 的源，zip 里就是 `10:00:00`），**不是构建当前时间**。
+  真正机制是：`javac` 每次重编译都会刷新 `.class` 的 mtime，`jar --update` 把**源 mtime** 写进条目头 → 跨构建整体哈希才会变。
+  旁证：用同一份 `classes` 连跑两次 `jar --update`，整体哈希**完全相同**（`D30B23E2…`，与交付 jar 逐位一致），这与"写入当前时间"的说法直接矛盾。
+  仅 `jar --create` 时 `META-INF/` 与 `MANIFEST.MF` 这两个**自动生成**的条目会用当前时间，而项目走的是 `--update` + 预置容器 jar。
+- **影响**：**结论正确、可用**（整体哈希不能跨构建比对内容，必须用条目指纹）；只是解释错了原因，会让人误以为"重建必然变"（实际上固定 mtime 就能复现同一哈希）。
+- **requiredFix**：改为「`jar` 把**源文件的 mtime** 写进条目头；`javac` 每次重编译刷新 `.class` 的 mtime，因此跨构建整体哈希会变（同一份 `build/classes` 重打则哈希可复现）」。VERSIONS.md:242 同步更正。
+
+---
+
+## 7. 交付物完整性
+
+| 检查 | 结果 |
+|---|---|
+| jar 内 `<version>0.9.4</version>` | 存在 |
+| jar 内 `<idea-version since-build="242" />` | 存在 |
+| jar 内 `applicationConfigurable`（`instance=…ui.settings.NeovideCursorConfigurable`、`parentId="tools"`） | 存在且正确 |
+| jar 内 `applicationService` | 存在 |
+| settings 相关 class | **9 条**：`NeovideCursorSettings.class` / `$PersistResult` / `$State` / `NeovideCaretManager$Snapshot` / `NeovideCursorConfigurable.class` / `$1` / `$2`（+ 两个目录条目） |
+| `build\rollback-0.9.4.ps1` | 存在，2,843 B；`$expectHash16 = '610AE7E9676E2392'`（L27），L33-34 做**硬校验**（不符即 throw）、L48 对已安装 jar 再比一次 |
+| 回退目标 `dist\...0.9.3-imegeom.jar` | 实际哈希 `610AE7E9676E2392D866CA919EAF6E8C249E8FDF551B2AA51FED8C07298828C6`（44,523 B）—— **与脚本期望值一致** |
+| VERSIONS.md「当前安装」准确性 | **属实**。我实测安装目录 `…\lib\jetbrains-neovide-cursor-0.5.0.jar` = 44,523 B、`610AE7E9676E2392…`，与 VERSIONS.md `:224-229` 声明**逐位吻合**；t6 声称"校正过 0.9.0→0.9.3"**属实** |
+| VERSIONS.md 是否擅自改「待安装」为已安装 | 未擅自改：`:235` 明写「待安装：0.9.4-settings」，`:253-255` 注明安装留给用户 —— **符合"不装 jar"硬约束** |
+
+---
+
+## 8. git 提交与工作区
+
+| 检查 | 结果 |
+|---|---|
+| 本批 commit 数 | **8 个**（`ba67ed3..HEAD`） |
+| Conventional Commits 合规 | **不合规数 = 0**。8 条均为 `type(scope): subject`：`docs(release)` / `fix(audit)` / `chore(release)` / `docs(settings)` / `test(probe)` / `fix(settings)` / `feat(settings)` x 2 |
+| 是否 push | **未 push**：`git rev-parse @{u}` → `fatal: no upstream configured for branch 'feat/settings-ui-ready'` |
+| 是否打 tag | **未打新 tag**：`git tag` 只有历史 `v0.2.0 … v0.5.0`，**没有 v0.9.x** |
+| 剩余未跟踪文件 | **4 个**：`HANDOFF.md` / `HANDOFF-full-history.md` / `SKILL-jetbrains-plugin-offline-build.md` / `SKILL-upstream-lessons-before-patching.md` |
+| 是否本批产物 | **不是**。`git log ba67ed3..HEAD -- <每个文件>` 均返回**空**（从未在本批任何 commit 出现）；四个文件 mtime 均为 **2026-10-16**（本批工作发生在 10-19） |
+| **凭据泄漏扫描** | **未发现真实凭据值**。对四个文件做了 11 类高熵/前缀模式扫描（`sk-`/`ghp_`/`gho_`/`xox[baprs]-`/`AKIA`/`AIza`/PRIVATE KEY/`password:`/`secret:`/`token:`/`api_key:`），**疑似命中 0**。仅 `HANDOFF-full-history.md:297/301` 出现 `token` **字样**，经脱敏阅读确认是**策略说明文字**（"凭据只报键名不打印值"、"推送需要 GitHub 凭据……用完应提醒删除"），**不含任何密钥值**；文中提到的 `gho_` 也无值、且注明"一次性，已消耗" |
+
+**判定**：4 个未跟踪文件确非本批产物、无凭据值泄漏、未被擅自提交 —— impl-core 的处置正确。
+
+---
+
+## 9. `run-audit.ps1` 被改的复核（commit c932944）
+
+- **改动内容**（`tools/parity/run-audit.ps1:69-82`）：原来是 `& git … | Set-Content $diffTxt`，空 diff 时不创建文件 → 下一行 `Get-Content` 抛错 → 整个脚本 exit 1（把正常状态误报为审计失败）。改为**先落到变量 `$diffLines`，判空后分支处理**，空时写空文件并打印说明。
+- **修复正确**：我本轮实跑，B 段正确输出「`（git diff HEAD -- src/ 为空：本工作区相对 HEAD 没有未提交的源码改动）`」，脚本 **exit 0**。
+- **不会让 audit 结论变宽**：`if ($diffLines.Count -eq 0)` 只是**新增**空分支；非空分支仍是原来的 `Select-String '^[+-].*[0-9]'` 原样输出，**没有吞掉任何本该报出的行**，也没有把失败路径改成 success。A 段（19 项常量比对）与 D/E 段完全未动 —— 我核对了 `git show c932944 --stat` 与当前文件，A 段逻辑与 `DIFF 数` 统计方式未变。
+
+---
+
+## 10. N-1「不改代码」裁决复核
+
+**裁决成立，我采纳。** 我独立跑了 impl-core 写的 `build/settings-probe/GlowRadiusProbe.java`（用**当前源码**重新编译后运行）：
+
+```
+=== 结果：通过 10，失败 0 ===
+PASS E1 复现 reviewer 的结论：逐格拖动确实存在 padding 滞后   最大滞后 1 px
+     sbf=0.20 -> 11 / 0.21 -> 11（滞后） / 0.22 -> 12 / 0.23 -> 12（滞后）   <- 与我 t8 的四个点完全一致
+PASS E2 固定输入下 glowWidth 逐位稳定（无振荡、无累积漂移）   变化 0 次
+PASS E2 即使 maxDim 有 1e-7 级抖动，ceil() 后的 padding 也不来回跳   变化 0 次
+PASS E3 sbf 单调递增拖动时 padding 单调不减   端点 0.2->11 / 0.6->24
+```
+
+四条理由逐条核验：
+
+| 理由 | 是否成立 | 我的证据 |
 |---|---|---|
-| NeovideConfig 零 diff | `git diff --exit-code` | **exit 0** ✔ |
-| 35 项禁改字面量 | 自写脚本，**逐文件** `Select-String -SimpleMatch -Path <单文件>`（避开 LESSONS §3.3 假阴性） | **missing = 0 / 35** ✔ |
-| parity | `run-parity.ps1 -Work build/t8-scratch/parity` | **3× PARITY OK + ALL PARITY OK** ✔ |
-| audit | `run-audit.ps1` 同上 | **19 项 DIFF = 1**，唯一 DIFF 是 `hideNativeCaret`（基线 false → 新版 true）✔ |
-| IME | `run-ime-geom-test.ps1` | **通过 29，失败 0** ✔ |
-| 持久化/applyConfig/面板 | `run-verify-t4.ps1` | **1 + 3 + 52 + 26 + 18 = 100 条断言全过**，FAIL 行 0 ✔ |
-| 非 EDT 专项 | `run-non-edt-probe.ps1` | **通过 13，失败 0** ✔ |
-| 旧键清除 | 逐文件 grep（17 个 .java） | `PropertiesComponent` 仅 `NeovideCursorSettings.java` 10 命中；`neovide.cursor.` 仅该文件 2；`restorePersistedSettings` **0**；`static volatile boolean enabled` **0**；`kFromTrailFactors` **0**；`CONFIG.enabled` **14** ✔ |
-| EP 注册 | 读源码 xml + `jar xf` 取 jar 内 xml | `applicationService` 与 `applicationConfigurable` 都在；`parentId="tools"`、`id` 插件前缀、`displayName` 在 XML、`instance` 指向真实类 ✔ |
-| 不做清单未越界 | 面板内 8 个禁名 grep | **命中 0** ✔（R-04/R-06 只动契约文本，未连带改实现） |
-| applyConfig 顺序 | 直读 `:445-565` | S0 快照(非 EDT)`:457` / S1 `:501` / S2–S6 `:507-521`（S6 最后）/ S7 `:534-546`（onModeChanged + refreshGlowPadding）/ S8 `:549-555` —— **与契约一致，且修复了 S0 时机** ✔ |
-| V14 无实时预览 | 面板 grep | `onChanged` **0**、`whenStateChangedFromUi` **0** ✔ |
-| §2.2 七条警告文案 | 脚本把契约表格文本与 Java 多行常量拼接后**逐字符**全等比较 | **7/7 MATCH**（113/101/71/112/106/103/36 长度全等）✔ |
-| audit D 段新基数 | 排除 `settings/` 包，只数 `src/` | **12**（NeovideConfig 4 / CaretAnimator 4 / CaretTrailPanel 2 / NeovideCaretManager 2）✔ 与 captain 定义一致 |
-| 新增工具是否越界 | `NonEdtProbe.java` 位置 | 在 `tools/settings-probe/`，**不在 `src/`** → 不影响 D 段基数 ✔ |
+| (1) 非本批回归 | **成立** | `git diff HEAD --numstat -- CaretTrailPanel.java` **为空**（本批完全未改）；基线 `8906609:135-141` 就是同一条 `> 0.5f` 判据 |
+| (2) 影响 ≤1px 且自愈 | **成立** | 探针 E1「最大 padding 滞后 = 1 px」；`updateGlowRadius` 在 `CaretAnimator:1018` 每次光标移动慢路径都会调用 → 一动就纠正 |
+| (3) 改它属"没验证的性能改动"、超 inScope | **成立** | 探针 E2 已证明去掉死区不振荡（`newWidth` 是 `(shadowBlurFactor, maxDim)` 的纯函数），但 `src/` 确实不在集成交付 inScope 内；本批"不改观感常量"的纪律支持此判断 |
+| 契约 §3.3.4 的表述是否准确 | **准确** | `:485-520`：成因（`CaretTrailPanel:138` + 步长 0.01 x 32 = 0.32 < 0.5）、定量表（29/35/41/47/51/57 共 6 格、最大 1px、复现我的四点）、三条理由、以及给第二期的落法（`> 0.5f` → `>= 0.01f`）都写清了 |
 
 ---
 
-## 6. captain 重点①：编造数字的残留核查
+## 11. 结论
 
-**裁决：无编造残留。**
+**verdict = pass。**
 
-我把 `VERIFY-SETTINGS.md` §9.5 的**波动表（:613-617）**逐格与它自己引用的原始 `SUMMARY` 行（:563-567 / :571-575 / :581-585 / :589-593）对账，**每场景 10 格 × 5 场景 = 50 格**：
+**当前字节已绑定**（§1 全部 13 项为我自己重算，与 captain 通报逐位一致，无差异）。
+**六条 findings 保持关闭**：R-01/R-02/R-03 的修复代码在本轮字节中依旧在位且被 13 条 non-EDT 断言覆盖；
+R-04（`kFromTrailFactors` 已删）与 R-06（类名已更正）在 v2.1 与源码两侧自洽；R-05 的波动表现在 50/50 逐格一致。
+**t6 新增内容经独立核验一致**：
+- **§12.2 的 27 条稳定指纹：27/27 一致，0 条不一致** —— 全量对账，无编造残留；
+- §9.5 波动表 **50/50** 一致；
+- 契约 v2.1 的 R5/R6/R7 **已在正文落实**（不再只是 §8 表），三处伪码与实现完全自洽；
+- 交付物完整（version / idea-version / 9 条 settings class / rollback 脚本哈希校验 / VERSIONS.md 的「当前安装」经我实测属实）；
+- 8 个 commit 全部合规、未 push、未 tag；4 个未跟踪文件确非本批产物且**无凭据值泄漏**；
+- `run-audit.ps1` 的空 diff 修复正确，未放宽任何判据。
 
-```
-R1  10/10 格全部对账一致 ✔      R2  10/10 ✔      R3  10/10 ✔
-R4  10/10 ✔                     R5  10/10 ✔
-合计不一致格数 = 0
-```
-
-对账口径：区间上下端、区间宽度（同遍 3 轮极差）、跨遍跨度（两遍合并极差）。**全部自算复现，无一格偏差。**
-
-同时我核对了 §9.6 用 ROUND 级原始数据（`build/verify-t4/frame*/{base,new}-frame.txt`，共 60 条 ROUND 行）独立复算"是否存在系统性差异"：按报告 `:631` 自设门槛（方向跨遍一致 **且** |差| > 自身跨遍跨度 **且** 方差为零），5 场景 × 4 指标 = 20 项，**判定为系统性差异的 = 0**。→ **报告「无系统性差异」的核心结论成立**，且这次是我用 ROUND 原始数据、不是抄它的表。
-
----
-
-## 7. 本轮新发现（三方均未提及）
-
-### N-1 【low】面板「辉光外扩幅度」滑块逐格拖动时，`glowPadding` 不跟随（0.5px 死区与 0.01 步长的交互）
-
-- **file:line**：`CaretTrailPanel.java:138`（`if (Math.abs(newWidth - glowWidth) > 0.5f)`）对照 `NeovideCursorConfigurable.java:331`（`row.slider(5, 60, 20, 1)`，即步长 0.01）
-- **problem**：`updateGlowRadius()` 有一条 **0.5px 死区**：只有当新半径与当前 `glowWidth` 相差 > 0.5px 时才更新。面板滑块的步长是 1 刻度 = 0.01，单步 Δ = 0.01 × maxDim；按典型光标高度 32px 算 Δ = **0.32px < 0.5**，于是**单步拨动被丢弃**，`glowWidth` 会"粘住"直到累积超过 0.5px。
-  `refreshGlowPadding()` 读的是 `panel.getGlowWidth()`（`CaretAnimator.java:1389-1390`），所以 `glowWidth` 不动 → `glowPadding` 也不动。
-  **我用真实 `CaretTrailPanel` 实测**（`build/t8-scratch/DeadbandProbe.java`）：
-  ```
-  blur=0.20 → glowWidth=6.40  glowPadding=11
-  blur=0.21 → glowWidth=6.40  glowPadding=11   ← 单步被丢弃
-  blur=0.22 → glowWidth=7.04  glowPadding=12
-  blur=0.23 → glowWidth=7.04  glowPadding=12   ← 单步被丢弃
-  blur=0.24 → glowWidth=7.68  glowPadding=12
-  blur=0.25 → glowWidth=7.68  glowPadding=12   ← 单步被丢弃
-  blur=0.26 → glowWidth=8.32  glowPadding=13
-  ```
-- **严重度评估（我自己定量）**：单调拖动 0.20→0.60 全程，`glowWidth` 相对理论值的**最大偏差 = 0.32px**（必然 < 0.5 阈值）。而 `glowPadding = ceil(glowWidth) + 4` 是**阶梯函数**，0.32px 的滞后最多让 padding 差 **1px**；光标一移动就由慢路径纠正。→ **视觉影响 ≤1px 且短暂**，故判 **low**。
-- **为什么三方都没提到**：契约 §3.3.3 的判据用的是"一步到位"（`0.2 → 0.6`，Δ=12.8px ≫ 0.5），**该判据本身不受影响**；实现者的探针 V2 也是直接赋值再调 apply，走的正是"一步到位"。只有**逐格拖动**这一个新 UI 交互才暴露它 —— 而这是设置面板才引入的交互方式（之前编辑器字段只能由代码一次设好）。
-- **不是本批引入的回归**：`CaretTrailPanel.java` 在本批 diff 中**numstat 为空（完全未改）**，基线 `8906609:135-141` 就是同一条判据。→ 是**既有行为**被新 UI 放大。
-- **requiredFix**：二选一即可，都不改观感默认值：
-  (a) 把 `updateGlowRadius` 的死区从 `0.5f` 收紧到 `< 单步 Δ`（例如 `0.01f`），代价是每帧多几次赋值（无实测影响）；
-  (b) 或在 `refreshGlowPadding()` 里绕过死区直接算 `Math.ceil(config.shadowBlurFactor * maxDim) + 4`。
-  **若判定"接受现状"，请在契约 §3.3.3 明确写一句"逐格拖动时 padding 最多滞后 1px，可接受"**，避免下一个人把它当新 bug 再报一次。
-
-### N-2 【low】契约 v2 的 §8 修订记录有 3 条（R5/R6/R7）只在附录表里，正文伪码未同步
-
-- **file:line**：`SETTINGS-CONTRACT.md:444-445`（S7 仍无 `refreshGlowPadding`）、`:437`（S0 未说明非 EDT 时机）、`:402-405`（`persistQuietly` 仍是 boolean）
-- **problem**：§8 表登记了 R5/R6/R7 三项修订，但正文 §3.3.2 的 S0–S8 伪码与 §3.2.2 的落盘伪码**仍是 v1 原文**。R5 尤其重要：§3.3.3 的 glowPadding 行（`:466`）至今仍写着「`forceResync` 一置位就必走慢路径…**这是唯一保证**」，而这句已被 t5/t7 共同证伪（`:1007` 早退）。
-- **影响**：实现是对的（`applyConfigOnEdt` 确实调了 `refreshGlowPadding()`、`persistQuietly` 确实返回三态），纯文档滞后。但下一个人若按正文伪码理解，会误以为 `forceResync` 足够 —— 这正是 R-05 那条 finding 当初产生的原因。
-- **requiredFix**：把 §3.3.2 伪码的 S7 行补上 `refreshGlowPadding()`、补一句 S0 的非 EDT 时机、把 §3.2.2 的伪码换成 `switch(PersistResult)`，并修正 §3.3.3 那句"唯一保证"。
-
----
-
-## 8. 复跑命令（全部我自己跑过）
-
-```powershell
-cd D:\deepseekwork\neovim-cursor-pr
-
-# SHA256 绑定
-Get-FileHash -Algorithm SHA256 SETTINGS-CONTRACT.md, VERIFY-SETTINGS.md, dist\settings-ui-smoke.jar
-git rev-parse HEAD
-git diff HEAD > build\t8-scratch\diff.txt ; Get-FileHash -Algorithm SHA256 build\t8-scratch\diff.txt
-
-# 默认值零改动
-git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java
-
-# 三件套 + 两个探针套件（-Work 必须指到工作区内，沙箱不允许写 %TEMP%）
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools\parity\run-parity.ps1       -Work D:\deepseekwork\neovim-cursor-pr\build\t8-scratch\parity
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools\parity\run-audit.ps1        -Work D:\deepseekwork\neovim-cursor-pr\build\t8-scratch\parity
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools\ime-probe\run-ime-geom-test.ps1 -Work D:\deepseekwork\neovim-cursor-pr\build\t8-scratch\ime
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\run-verify-t4.ps1
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\run-non-edt-probe.ps1
-```
-
-反向验证（变异测试）与 N-1 的复现探针放在 `build/t8-scratch/`（已被 `.gitignore` 忽略），未进入 `src/`：
-`DeadbandProbe.java`（N-1）、以及临时变异副本 `mut/`（跑完已删除）。
-
----
-
-## 9. 结论
-
-**verdict = pass。六条 findings 全部关闭。**
-
-- **R-01**（enabled 早退在同步之前）：已修，`editorCreated` 现在「先同步 → 再判 enabled」，两条 install 路径都被拦住；变异回滚后 D1 断言立刻变红（`ANIMATORS=1`），证明探针有效。
-- **R-02**（非 EDT 跳过 S2–S6）：已修，改为「先拍 Snapshot → 再同步 → 带快照 invokeLater」，S0 语义正确；变异回滚后 `saveSettings` 从 0→2 变回 0，断言变红。
-- **R-03**（迁移永不收敛）：已修，`PersistResult` 三态让「排队中」与「真失败」语义分开，落盘失败才回退版本号；变异回滚后 4 条断言同时变红。
-- **R-04/R-06**：死代码已删、契约类名已更正，且**契约与源码自洽**（`kFromTrailFactors` 两边都 0 命中）。
-- **R-05**：波动表 50/50 格与原始 SUMMARY 完全对账，无编造残留；我用 ROUND 原始数据独立复算，**「无系统性差异」结论成立**。
-
-契约 v2 的修订合法、R1–R4 已在正文落实，但 **R5/R6/R7 只写在 §8 表、正文伪码未同步**（N-2，low，纯文档）。另外发现一条**三方均未提及**的交互边界（N-1，low）：辉光外扩幅度逐格拖动时 `glowPadding` 最多滞后 1px，源于 `CaretTrailPanel:138` 的 0.5px 死区与面板 0.01 步长的交互 —— 这是既有行为被新 UI 放大，非本批回归，且不影响 §3.3.3 的判据。
-
-两条 low 都不构成阻塞，**不影响交付**；建议随集成一起处理（合约 §3.3.3/§3.2.2 伪码同步 + 死区口径写进契约）。
+两条新发现（N3-1、N3-2）都是**文档口径**问题，不影响交付可用性，建议随下一版文档一并更正（各改一两行即可）。
