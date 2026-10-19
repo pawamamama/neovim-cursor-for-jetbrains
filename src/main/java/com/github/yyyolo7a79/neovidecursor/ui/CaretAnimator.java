@@ -5,6 +5,7 @@ import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
+import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.editor.EditorKind;
@@ -144,18 +145,22 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final double GLOW_FADE_END = 2.5;
 
     /**
-     * IME 组合中间态最多连续跳过的帧数（F1-b 的冻结上界）。
+     * IME 组合中间态最多连续跳过的帧数（F1-c 的冻结上界）。
      *
-     * <p><b>为什么必须有上界</b>：F1-b 判定「offset 不变但 column 变」为中间态并跳过重算，
-     * 且按契约要求**不更新** lastVisualColumn —— 于是若该条件在正常场景下也持续成立
-     * （inlay 提示出现、代码折叠展开、软换行/tab 宽度切换等），拦截会变成**无限期冻结**：
-     * 坐标永远不更新，光标停在错误位置。
+     * <p><b>为什么必须有上界</b>：F1-c 判定「几何不一致」为中间态并跳过重算，
+     * 且**不更新** {@code lastVisualColumn} —— 于是若该条件在正常场景下也持续成立，
+     * 拦截会变成**无限期冻结**：坐标永远不更新，光标停在错误位置。
      *
-     * <p>验证方用反射 harness 实测：连续 200 帧全被拦，centerX 停在 101.0 而正确值 133.0
-     * （偏差 30px ≈ 1.5 个字符）。
+     * <p><b>这不是假想</b>：批次2 的 F1-b（判据为「offset 不变但 column 变」）
+     * 就被验证方用反射 harness 实测出这个问题 —— 连续 200 帧全被拦，
+     * centerX 停在 101.0 而正确值 133.0（偏差 30px ≈ 1.5 个字符）。
      *
      * <p>取 15 帧（8ms × 15 ≈ 120ms）：足够覆盖一次 IME 组合的中间态，
      * 又短到肉眼无法察觉"冻结了 120ms"。超过即强制放行一次，避免永久卡死。
+     *
+     * <p><b>F1-c 起这个上界更重要了</b>：新判据是几何比较，理论上比「offset+column」
+     * 更贴近目标，但任何几何 API 都可能在某些重排瞬间短暂不一致。上界保证
+     * 最坏情况只是「120ms 后强制重算一次」，不会永久错位。
      */
     private static final int IME_MAX_SKIP_FRAMES = 15;
 
@@ -255,10 +260,10 @@ public class CaretAnimator implements Disposable, CaretListener {
     private float lastGlowStrength = 0f;
 
     /**
-     * IME 组合态连续跳过的帧数（F1-b）。
+     * IME 组合态连续跳过的帧数（F1-c）。
      *
      * <p>与 {@link #IME_MAX_SKIP_FRAMES} 配合使用：连续跳过达到上界后强制放行一次，
-     * 防止「offset 不变但 column 变」长期成立时坐标被无限期冻结。
+     * 防止几何不一致长期成立时坐标被无限期冻结。
      */
     private int imeSkipFrames = 0;
 
@@ -867,50 +872,105 @@ public class CaretAnimator implements Disposable, CaretListener {
                 return false;
             }
 
-            // 【F1-b / 批次2】IME 组合态识别：offset 没变但视觉列变了 ⇒ 中间态。
+            // 【F1-c / 批次3】IME 组合态识别 —— **几何判据**。
             //
-            // 背景：中文输入法组合期间，getVisualPosition().column 可能指向组合串
-            // 内部，而真实插入点（getOffset()）并未移动。此时按 vp 换算出的像素
-            // 位置会偏出半个字宽（用户观察：「光标卡在中字的竖笔画上」）。
+            // ============ 为什么要换掉批次2 的判据（F1-b） ============
             //
-            // 判据：真实插入点没动、但视觉列变了 → 判定为平台中间态，本帧不重算坐标，
-            // 也【不更新】lastVisualColumn —— 这样下一帧若 offset 恢复一致仍能正确重算。
+            // F1-b 的判据是「getOffset() 没变（lastCaretOffset），但 vp.column 变了」。
+            // 用户实测反馈这个判据对本 bug **无效** —— 因为水杉输入法组合期间
+            // 光标会移动进「拼音音节内部」：offset 和 column **都变了**，
+            // 判据的前提根本不成立，于是中间态被当成正常移动画了出去。
             //
-            // 边界（契约 §2.3 要求逐条满足）：
-            //   · forceResync 优先：布局变化（窗口缩放等）必须重算，不被本判据拦截
-            //   · lastCaretOffset < 0（首次调用）不得误判
-            //   · 正常移动光标时 offset 与 vp 同时变 → 正常放行
+            // ============ 为什么几何判据能治它 ============
+            //
+            // 平台的两个坐标 API 走**不同的换算路径**（已在 IDEA 261 字节码里核实）：
+            //
+            //   visualPositionToXY(vp)
+            //       → EditorCoordinateMapper.visualPositionToXY
+            //       → 按 **vp.column（视觉列）** 迭代 fragment，调 Fragment.visualColumnToX
+            //
+            //   offsetToXY(offset)
+            //       → EditorCoordinateMapper.offsetToXY
+            //       → 先把 offset 钳进 [0, textLength] 并 alignToCodePointBoundary，
+            //         再按 **offset** 迭代 fragment，调 Fragment.offsetToX
+            //
+            // 正常状态下（vp 确实对应 offset 所在的那个字符边界）两者给出**同一个 x**。
+            // 但 IME 组合期间，平台给的 vp 是按「组合串」的临时字符宽度算的，
+            // 而组合串（拼音/候选）与最终汉字的宽度不同 —— 于是 vp 对应的视觉列
+            // 与 offset 真实所在的字符边界**不是同一个位置**，两个 x 就分岔了，
+            // 差值正好是「半个字宽」。这与用户观察到的「卡在『中』的竖笔画上」一致。
+            //
+            // 因此：**x 不一致 ⇔ 这一帧的 vp 不可信**。这不是猜 vp 是否"合理"，
+            // 而是直接检查我们即将画出去的那个点与"按真实 offset 应处的点"是否重合。
+            // 这个判据对「offset 和 column 都变了」的中间态同样有效 —— 正是它要解决的。
+            //
+            // ============ 边界（逐条满足，验证方要专门测） ============
+            //   · forceResync 优先：布局变化必须重算，不被本判据拦截
+            //   · 首次调用（还没定过位）不得误判：必须正常走完首次定位
+            //   · offset 取不到（-1）时判据不介入，退回正常路径
+            //   · 正常移动：vp 与 offset 指向同一个字符边界 → x 相等 → 放行
+            //   · 连续不一致达到 IME_MAX_SKIP_FRAMES 后强制放行一次（保留冻结上界）
             //
             // 注意：offset 只读一次，供本判据与下方 charsMoved 共用（契约 P0-5）。
             int caretOffset = -1;
             try {
                 caretOffset = editor.getCaretModel().getOffset();
             } catch (Throwable ignored) {
-                // 取不到就保持 -1：F1-b 不介入，charsMoved 也退回兼容分支
+                // 取不到就保持 -1：本判据不介入，charsMoved 也退回兼容分支
             }
 
-            // 【F-3 修复】必须有上界：否则一旦条件持续成立（inlay 提示、折叠展开等
-            // 场景也可能出现「offset 不变但 column 变」），拦截会变成**无限期冻结** ——
-            // 验证方实测连续 200 帧全被拦、中心点偏差 30px（约 1.5 个字符）。
-            // 超过 GLOW_IME_MAX_SKIP_FRAMES 后强制放行一次，避免永久卡死。
+            // 【T0-5】耗时埋点起点：必须在快速路径提前返回"之后" ——
+            // 否则等于给 125fps 的每帧路径加两次 nanoTime，与本批目标相反。
+            //
+            // 【位置注意】它必须在几何判据之前开始计时：判据里的 offsetToXY 也是
+            // 被计量的换算成本的一部分，漏掉它会让 T0-5 的读数偏乐观。
+            long startedNanos = System.nanoTime();
+
+            // vp 的像素坐标：本帧只算这一次，几何判据与后续定位共用同一个 p。
+            Point p = editor.visualPositionToXY(vp);
+
+            // 【冻结上界】没有它，一旦几何不一致在正常场景下持续成立
+            // （inlay 提示、折叠展开、重排瞬间等），拦截会变成**无限期冻结**。
+            // 批次2 的 F1-b 就被验证方实测出这个缺陷：连续 200 帧全被拦、偏差 30px。
+            // 这里保留同一个上界：超过即强制放行一次，最坏只是「120ms 后自愈」。
             if (!forceResync
                     && lastCaretOffset >= 0
-                    && caretOffset == lastCaretOffset
-                    && vp.column != lastVisualColumn
+                    && caretOffset >= 0
+                    && initialized
                     && imeSkipFrames < IME_MAX_SKIP_FRAMES) {
-                // 平台处于组合/重排中间态：本帧不采信 vp 的像素换算
-                imeSkipFrames++;
-                return false;
+                // 只有当两个 API 都成功给出坐标时才做比较；任一抛异常就放行，
+                // 绝不让"取不到坐标"变成"永远不重算"。
+                boolean midComposition = false;
+                try {
+                    Point byOffset = editor.offsetToXY(caretOffset);
+                    // 只比较 x：本项目只画竖条光标，横向错位才是本 bug 的表现；
+                    // 纵向差异属于换行/软换行重排，交给下方正常路径重算，不在此拦截。
+                    //
+                    // 【必须先排除虚拟空间】光标越过行尾时（IntelliJ 默认开启 virtual space，
+                    // 按 → 键可以把光标推到行尾之后），两个 API **本就应当**给出不同的 x：
+                    //   visualPositionToXY → 行尾 x + 空格宽 × 越界列数
+                    //   offsetToXY         → 被钳到行尾 offset，返回行尾 x
+                    // 这是设计如此，不是中间态。不排除的话，用户每次把光标推到行尾之后，
+                    // 覆盖层就会被误判成组合态而冻结 —— 一个比原 bug 更显眼的新缺陷。
+                    // 判据见 isInVirtualSpace()：offset 已在该行行尾，
+                    // 而 vp.column 超出该行真实存在的字符数。
+                    midComposition = byOffset.x != p.x && !isInVirtualSpace(caretOffset, vp);
+                } catch (Throwable ignored) {
+                    // 坐标 API 不可用：不判定为中间态，走正常路径
+                }
+
+                if (midComposition) {
+                    // 平台给的 vp 与真实插入点的几何位置不一致 ⇒ 组合中间态。
+                    // 本帧不重算坐标，也【不更新】lastVisualLine/lastVisualColumn ——
+                    // 这样下一帧若几何重新一致，仍能正常重算。
+                    imeSkipFrames++;
+                    return false;
+                }
             }
             imeSkipFrames = 0;
 
             forceResync = false;
 
-            // 【T0-5】耗时埋点起点：必须在快速路径提前返回"之后" ——
-            // 否则等于给 125fps 的每帧路径加两次 nanoTime，与本批目标相反。
-            long startedNanos = System.nanoTime();
-
-            Point p = editor.visualPositionToXY(vp);
             lastVisualLine = vp.line;
             lastVisualColumn = vp.column;
 
@@ -931,7 +991,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 结果都是「英文丝滑、中文卡」。
             int charsMoved = -1;
             if (caretOffset >= 0) {
-                // 【F1-b】复用上面已经读到的 offset，不重复调用（契约 P0-5）
+                // 【F1-c】复用上面已经读到的 offset，不重复调用（契约 P0-5）
                 if (lastCaretOffset >= 0) {
                     charsMoved = Math.abs(caretOffset - lastCaretOffset);
                 }
@@ -973,6 +1033,53 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         } catch (Throwable t) {
             // 编辑器正在销毁或重绘中：本次跳过，下一帧会自动重试
+            return false;
+        }
+    }
+
+    /**
+     * 光标是否停在「虚拟空间」里（即行尾之后）。
+     *
+     * <p><b>为什么这个排除是必需的</b>：IntelliJ 默认开启 virtual space，
+     * 用户按 → 键可以把光标推到行尾<b>之后</b>。此时平台的两个坐标 API
+     * <b>本来就应当给出不同的 x</b>：
+     *
+     * <ul>
+     *   <li>{@code visualPositionToXY(vp)} → 行尾 x + 空格宽 × 越界列数（越界多远画多远）</li>
+     *   <li>{@code offsetToXY(offset)} → offset 被钳到 {@code [0, textLength]}，
+     *       所以永远返回行尾 x</li>
+     * </ul>
+     *
+     * <p>这是设计如此，<b>不是</b> IME 中间态。若不排除，用户每次把光标推到行尾之后，
+     * 几何判据都会误判为组合态、把覆盖层冻在旧位置 —— 这会是一个比原 bug
+     * 更显眼的新缺陷（原 bug 只在第三方输入法组合期出现，这个则是每次按 → 都出现）。
+     *
+     * <p>判据（两条同时成立才算虚拟空间）：
+     * <ol>
+     *   <li>{@code offset == 该行行尾}（即插入点已经在最后一个字符之后），且</li>
+     *   <li>{@code vp.column > 该行的可见列数}（vp 超出了这一行真实存在的列）。</li>
+     * </ol>
+     *
+     * <p>任一取不到数据就返回 {@code false}（保守：宁可让它走正常重算路径，
+     * 也不要把真实中间态放过去）。
+     */
+    private boolean isInVirtualSpace(int caretOffset, VisualPosition vp) {
+        try {
+            Document doc = editor.getDocument();
+            int line = doc.getLineNumber(caretOffset);
+            int lineEnd = doc.getLineEndOffset(line);
+            if (caretOffset != lineEnd) {
+                return false;           // 插入点不在行尾 → 不可能是虚拟空间
+            }
+            // 该行真实存在的字符数。getLineEndOffset 已不含行分隔符，
+            // 所以这个差值就是行内字符数。
+            // 注意 tab 会让「视觉列」大于「字符数」（一个 \t 可能占 4 列），
+            // 但那只会让 vp.column 更大、更可能被判为虚拟空间 —— 所以这里
+            // 用「字符数」是**保守**的：真正的虚拟空间一定满足 vp.column > 字符数。
+            int lineLength = lineEnd - doc.getLineStartOffset(line);
+            return vp.column > lineLength;
+        } catch (Throwable t) {
+            // 取不到就按「不是虚拟空间」处理：宁可多走一次正常重算
             return false;
         }
     }
