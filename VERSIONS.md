@@ -32,6 +32,7 @@
 | **10-18 21:32** | **`0.9.1-zeroopt`** | **✅** | **8ms** | **8** | **无** | **offset** | **`C718675E046CAB82`** |
 | 10-19 12:29 | `0.9.2-imetime-fade` | ✅ | 8ms | 8 | 无 | offset | `7AC9D80E58CD8567` |
 | **10-19 13:05** | **`0.9.3-imegeom`** | **✅** | **8ms** | **8** | **无** | **offset + 几何判据** | **`610AE7E9676E2392`** |
+| **10-19 23:40** | **`0.9.4-settings`** | **✅** | **8ms** | **8** | **无** | **offset + 几何判据**（未改） | **`D7DC6665ADE902BE`** |
 
 > ⚠️ **本表 0.7.3 ～ 0.9.0 未记录**（那些构建发生在记录习惯中断期间）。
 > 不要为了"补齐"而编造内容；需要追溯请直接看 `dist\` 里的 jar 文件名与时间戳。
@@ -87,6 +88,72 @@ Tier 1（一项）：
 **⚠️ 未验证项（重要）**：本次**没有在真机上跑探针**（用户选择"直接修复"）。
 几何判据是否在真机上真的对水杉生效，仍需一次实机确认。
 `dist\neovide-ime-probe.zip` 是现成的探针插件，装上打字即出日志，可随时补做这个验证。
+
+
+### `0.9.4-settings` 改动摘要（设置界面 + 三个前置改造 + alwaysHighFps 兜底修复）
+
+**这是本插件第一个带「设置界面」的版本。** 观感常量一个没动（`NeovideConfig.java` git diff 零输出），
+20 项禁改字面量 + 15 项调度常量逐项复核缺失数 0。
+
+#### 一、设置界面（新增）
+
+`Settings | Tools | Neovide Cursor`，16 个可调参数：
+
+| 分组 | 字段 |
+|---|---|
+| 总开关 | `enabled` / `trailMode` / `hideNativeCaret` / `alwaysHighFps` |
+| 淡出 | `overlayFadeOut` / `cursorDisappearDelay` / `cursorFadeOutDuration` |
+| 颜色与辉光 | `tailColor` / `tailOpacity` / `useShadow` / `shadowColor` / `glowOpacity` / `glowLayers` / `shadowBlurFactor` |
+| 拖尾手感 | `trailSize` / **拖尾拉伸强度**（复合滑块，写标量 `stretchRatioK`，`trailFactors` 由公式派生） |
+
+- **OK 生效，不做实时预览**（`apply()` 才动运行期状态，Cancel 无需回滚）。
+- 联动置灰 4/2/2 条：`useShadow` → 颜色/辉光四项；`overlayFadeOut` → 淡出两项；`trailMode=AFTERIMAGE` → 拖尾手感两项。
+- 滑块都是 int 刻度，右侧显示**真实物理量**（`75 ms` / `1.00` / `8 层` / `4.5×  后缘 110 ms / 前缘 24 ms`）。
+- 关键警告文案逐字上屏（常驻刷新的 EDT 代价、隐藏原生光标的 `.icls` 落盘副作用、辉光层数的 CPU 成本等）。
+
+#### 二、三个前置改造（设置界面能存在的前提）
+
+1. **`NeovideCursorSettings` 持久化服务** —— `@State` + `PersistentStateComponent`，
+   落 `<config>/options/NeovideCursorSettings.xml`（`roamingType=DISABLED`：`alwaysHighFps` 等是性能相关设置）。
+   从此「持久化真相」只有一处；`NeovideConfig` 保留为运行期快照 + 默认值来源（热路径零改动、parity harness 依赖它）。
+2. **`PropertiesComponent` 两个旧键一次性迁移并删除** —— 三分支（旧键存在 → 搬旧值 / 无旧键 → 用默认 / 已迁移 → 只删不读），
+   落盘成功才删键。消除了「`NeovideConfig` 字段 / `PropertiesComponent` / 新 XML」三真相源。
+3. **`NeovideCaretManager.applyConfig()` 编排** —— S0 快照 → S1 写字段 → S2–S6 按序调 setter（仅在值真的变化时）
+   → S7 刷新三类被缓存的值（`fillColor/glowColor`、`AfterimageTrail.lifetime`、`glowPadding`）→ S8 重排调度。
+   它是**唯一的全局生效入口**：直接改 `CONFIG` 字段不会刷新这些缓存。
+
+#### 三、`alwaysHighFps` 兜底 bug 修复
+
+旧代码在 `restorePersistedSettings()` 里读不到键时兜底 **`false`**，而 `NeovideConfig.alwaysHighFps` 的字段默认是 **`true`** ——
+**干净安装 + 从没点过菜单的用户，实际拿到 `false`，与文档宣称相反。** 本版删掉整个方法，默认值只剩 `State` 一处。
+
+#### 四、三个线程/落盘回归（第二轮复审抓到，已修）
+
+| 编号 | 缺陷 | 修法 |
+|---|---|---|
+| R-01 | `if (!CONFIG.enabled) return;` 排在 `syncStateToConfig()` **之前** → 用户关掉插件重启后覆盖层又回来 | 同步提到早退之前，同步后**重判一次** |
+| R-02 | 非 EDT 分支先 `syncStateToConfig()` 再 `invokeLater` → EDT 侧 S0 拍到新值 → setter 链**永不执行** | 先拍 `Snapshot` → 再同步 → 带快照 `invokeLater` |
+| R-03 | 非 EDT 迁移：日志说「旧键保留」、回调却**无条件删键**，且 `stateVersion` 永不收敛 | `persistQuietly()` 改三态 `{CONFIRMED, DEFERRED, FAILED}`，DEFERRED 不删键也不回退版本号 |
+
+#### 五、验证证据（可复现）
+
+- **parity** 三份 harness base/new **逐字节一致**（`run-parity.ps1`）
+- **常量审计** 19 项 DIFF = 1，唯一 DIFF 是 `hideNativeCaret`（0.9.2 已改，非本批引入）
+- **IME 几何判据** 29 项边界全过（`run-ime-geom-test.ps1`）
+- **t4 验证探针** 1 + 3 + 52 + 26 + 18 = 100 项全过（`run-verify-t4.ps1`）
+- **非 EDT 专项探针** 13 项全过（`run-non-edt-probe.ps1`）—— 假 `Application` 的 `isDispatchThread()` **恒 false**，
+  这是此前 5 个探针的共同盲区（全部 `return true`），R-02/R-03 正是由此漏网
+- **辉光死区定量**（`GlowRadiusProbe`）最大滞后 1 px，判**第一期不改**（见契约 §3.3.4）
+
+#### 六、⚠️ 未验证项（必须如实看待）
+
+1. **U-1 真机 EDT 抢占下的手感** —— 离线探针用 Proxy 伪造 `Editor`，测不到 IDEA 自身绘制对 EDT 的抢占。
+2. **U-2 真实 `Application.saveSettings()` 落盘** —— 离线无 `Application`，走的是「无法确认写入 → DEFERRED」分支；
+   真机上第一次启动是否如期写出 `NeovideCursorSettings.xml`、旧键是否如期删除，**尚未实测**。
+3. **未在真机打开过设置面板**看实际渲染（离线探针只验证了 `createComponent()` 能建出 65 个组件、字段绑定正确）。
+4. **未验证安装后插件加载**（本批全程未装 jar、未重启 IDEA）。
+
+回退：`build\rollback-0.9.4.ps1`（回 0.9.3-imegeom，`610AE7E9676E2392`）。
 
 ---
 
@@ -151,24 +218,32 @@ Tier 1（一项）：
 
 ---
 
-## 当前安装
+## 当前安装（2026-10-19 23:40 只读实测校正）
 
 ```
-v0.9.0-ahf-default
-哈希: FA161E4F77C8C99992381DD489F7C172A38F56BB62DC3C2D45D8856AD8C95CD5
-路径: %APPDATA%\JetBrains\IntelliJIdea2026.1\plugins\jetbrains-neovide-cursor\lib\
+v0.9.3-imegeom
+大小: 44,523 B
+哈希: 610AE7E9676E2392D866CA919EAF6E8C249E8FDF551B2AA51FED8C07298828C6
+路径: C:\Users\wangw\AppData\Roaming\JetBrains\IntelliJIdea2026.1\plugins\jetbrains-neovide-cursor\lib\
       jetbrains-neovide-cursor-0.5.0.jar
-注意: 文件名仍是 0.5.0.jar（安装脚本固定此名），实际内容是 0.9.0-ahf-default
+注意: 文件名仍是 0.5.0.jar（安装脚本固定此名），实际内容是 0.9.3-imegeom
 ```
 
-## 待安装：`0.9.1-zeroopt`
+> 本节此前写的是 `v0.9.0-ahf-default`，已过时。t6 集成交付时用
+> `Get-FileHash` 只读实测校正为上表值（未安装、未重启 IDEA，仅比对哈希）。
+
+## 待安装：`0.9.4-settings`
 
 ```
-dist\jetbrains-neovide-cursor-0.9.1-zeroopt.jar
-大小: 42,079 B
-SHA256: C718675E046CAB820E7EC6F5AEEE1B647C06DDF829BCF5837B185AD2BE29CB62
-前16位: C718675E046CAB82
+dist\jetbrains-neovide-cursor-0.9.4-settings.jar
+大小: 70,056 B
+SHA256: D7DC6665ADE902BEC6DBF74DBF9F959522C1F085CAAC0B8B7DDE0A5A9B0641EE
+前16位: D7DC6665ADE902BE
 
-安装：先完全退出 IDEA → Move-Item 旧 jar → Copy-Item 新 jar → 重启 IDEA
-回退：build\rollback-0.9.1.ps1
+安装：先完全退出 IDEA → Move-Item 旧 jar 到 .bak → Copy-Item 新 jar → 重启 IDEA
+回退：build\rollback-0.9.4.ps1（回 0.9.3-imegeom / 610AE7E9676E2392）
 ```
+
+> 上一版「待安装 0.9.1-zeroopt」已被 0.9.2 / 0.9.3 / 0.9.4 依次取代，历史记录见上表。
+> ⚠️ 0.9.4 的「当前安装」状态以 `START-HERE.md` 与用户实际安装为准 —— **本文件不擅自更新它**，
+> 因为本批全程遵守「不装 jar、不重启 IDEA」，安装动作留给用户手动完成。
