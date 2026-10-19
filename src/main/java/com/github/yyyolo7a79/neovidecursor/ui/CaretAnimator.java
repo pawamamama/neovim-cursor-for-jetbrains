@@ -256,10 +256,31 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
     }
 
-    /** 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应） */
+    /**
+     * 立即切到高帧率并唤醒调度线程（否则最长要等一个 IDLE 周期才响应）。
+     *
+     * <p><b>必须同时重置 {@link #lastNanos}</b>：空闲档（120ms / 失焦 600ms）期间
+     * {@code tick()} 不跑，{@code lastNanos} 就停在最后一次 tick 上。若只把
+     * {@code currentDelayMs} / {@code nextDueNanos} 归位，唤醒后的<b>第一帧</b>
+     * 仍会用 {@code dt = now - lastNanos} = 整段空闲期来计算，被 {@code MAX_DT}
+     * 截断到约 33.3ms —— 弹簧一帧就走完绝大部分位移，视觉上是"瞬移"。
+     *
+     * <p>以 {@code animationLength = 0.05}、{@code o = 4/animationLength = 80} 为例：
+     * <pre>
+     *   dt = 0.008s（正常）  → c = exp(-0.64) ≈ 0.527  → 一帧后剩 47%
+     *   dt = 0.0333s（空闲后）→ c = exp(-2.67) ≈ 0.070  → 一帧后仅剩 7%
+     * </pre>
+     * 这正是「停手几秒后第一次删除到上一行，会卡一下」的成因；
+     * 而连续快速删除反而流畅 —— 因为那时 {@code lastNanos} 每 8ms 都在更新。
+     *
+     * <p>只影响「从空闲档唤醒后的第一帧」，活跃档下 {@code lastNanos} 本就是新的，
+     * 因此不影响正常输入手感，也不改变任何延时/时长常量。
+     */
     private void wakeUp() {
+        long now = System.nanoTime();
         currentDelayMs = ACTIVE_DELAY_MS;
-        nextDueNanos = System.nanoTime();
+        nextDueNanos = now;
+        lastNanos = now;
         RenderScheduler.wakeUp();
     }
 
