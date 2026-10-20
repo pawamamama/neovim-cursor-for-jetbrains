@@ -91,8 +91,11 @@ public final class VerifyPanel {
         // 断言随之更新，但语义不变：滑块总数必须等于「可调数值参数」的个数。
         check("U7 10 个滑块（8 既有 + animationLength / shortAnimationLength）",
                 sliders == 10, "实际 " + sliders);
-        check("U8 5 个复选框（enabled / hideNativeCaret / alwaysHighFps / overlayFadeOut / useShadow）",
-                checks == 5, "实际 " + checks);
+        // 0.9.6 / M1：性能诊断从 Tools 菜单挪进面板「高级（诊断）」折叠组 → 5 变 6。
+        // 断言随之更新，语义不变：复选框总数必须等于「面板上的布尔开关」个数
+        // （性能诊断是唯一不持久化的那个，见 NeovideCursorConfigurable#paintDiag）。
+        check("U8 6 个复选框（enabled / hideNativeCaret / alwaysHighFps / overlayFadeOut / useShadow / 性能诊断）",
+                checks == 6, "实际 " + checks);
         // 0.9.5 的 t3 新增两个预设下拉（动画 / 颜色），加上 trailMode = 3 个。
         check("U9 3 个下拉（trailMode + 动画预设 + 颜色预设）", combos == 3, "实际 " + combos);
         check("U10 2 个 ColorPanel（tailColor / shadowColor）", colors == 2, "实际 " + colors);

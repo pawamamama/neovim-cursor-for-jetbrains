@@ -46,64 +46,28 @@
     </extensions>
 
     <actions>
-        <action id="NeovideCursor.Toggle"
-                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleNeovideAction"
-                text="Neovide 拖尾光标（开关）"
-                description="启用或禁用拖尾光标效果；关闭时会恢复原生光标">
+        <!--
+          【0.9.6 / M1】Tools 菜单只留 3 项：常驻刷新 + 动画预设 + 颜色预设。
+
+          其余开关（总开关 / 拖尾渲染模式 / 隐藏原生光标 / 辉光淡出 / 性能诊断）
+          全部只放在 Settings | Tools | Neovide Cursor 面板里 —— 一处开关只有一个入口，
+          才不会有「菜单和面板两套状态不同步」。
+
+          ⚠️ 本条【取代】FIX-BATCH2.md:245 的「不得删除 Tools 菜单开关」：那条约束的目的
+          是防功能消失，而功能现在都在面板里（用户 0.9.6 反馈明确要求菜单只留 3 项）。
+        -->
+        <action id="NeovideCursor.AlwaysHighFps"
+                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleAlwaysHighFpsAction"
+                text="Neovide 光标：常驻刷新（永远 8ms）"
+                description="开启后调度器不再空闲降频（约 125fps）；关掉可省电，代价是停手后第一次操作可能等一个空闲周期">
             <add-to-group group-id="ToolsMenu" anchor="first"/>
         </action>
 
-        <action id="NeovideCursor.PaintDiag"
-                class="com.github.yyyolo7a79.neovidecursor.ui.TogglePaintDiagAction"
-                text="Neovide 光标：性能诊断（禁用重绘）"
-                description="跳过重绘只跑计算，用于分离瓶颈：是绘制慢还是 EDT 调度慢">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
-
-        <action id="NeovideCursor.TrailMode"
-                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleTrailModeAction"
-                text="Neovide 光标：残影模式（低帧率更稳）"
-                description="勾选切换到残影轨迹模型（记录真实历史位置，掉帧不失真）；取消则回到弹簧拉伸模型（Neovide 原版效果）">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
-
         <!--
-          隐藏原生光标（批次2 / F3 起默认勾选）
+          动画预设 / 颜色预设 子菜单（0.9.5 / 契约 §8.4–§8.5；M1 起是菜单里的第 2、3 项）
 
-          批次2 起默认勾选 = 覆盖层充当光标本体。
-          理由：本插件 alwaysHighFps 默认 true，调度恒 8ms，上游担心的
-          「空闲降频导致跟随滞后」不存在；而保留原生光标时两套绘制叠加反而更重
-          （用户实测「取消勾选之后卡一点」）。此处有意偏离上游踩坑 #19。
-
-          取消勾选后回到叠加模式：原生光标由 IDE 自己绘制、零延迟跟随，
-          拖尾只在移动时叠加。
-        -->
-        <action id="NeovideCursor.HideNativeCaret"
-                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleHideNativeCaretAction"
-                text="Neovide 光标：隐藏原生光标（常驻绘制）"
-                description="默认勾选：由覆盖层充当光标本体（不闪烁、颜色可自定义）。取消勾选则保留原生光标负责零延迟跟随，拖尾只做叠加。">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
-
-        <!--
-          辉光淡出（批次2 / F2）
-
-          只淡辉光，光标本体始终不透明 —— 因为默认档原生光标已隐藏，
-          整体淡出会变成「光标自己消失」。
-        -->
-        <action id="NeovideCursor.FadeOut"
-                class="com.github.yyyolo7a79.neovidecursor.ui.ToggleFadeOutAction"
-                text="Neovide 光标：辉光淡出（停止后柔和熄灭）"
-                description="默认勾选：拖尾停止后辉光先保持 50ms，再用 75ms 线性熄灭（只淡辉光，光标不淡）。取消勾选则辉光瞬时归零，行为与 0.9.1 一致。">
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </action>
-
-        <!--
-          动画预设 / 颜色预设 子菜单（0.9.5 / 契约 §8.4–§8.5）
-
-          两个新组排在既有 5 项【之后】（anchor="last"）：既有 5 项是「开关」语义，
-          预设是「切换一整套值」语义；混排会让用户误以为预设也是开关。
-          （anchor="first" 只有一条槽位，已被总开关占用。）
+          排在最下面（anchor="last"）：第 1 项是「开关」语义，这两项是「切换一整套值」语义；
+          混排会让用户误以为预设也是开关。
 
           注意【必须】：<group> 里不能再列 <action> 子项 —— 子项由 DefaultActionGroup
           的构造器动态 add()。两处都列会出现重名冲突。

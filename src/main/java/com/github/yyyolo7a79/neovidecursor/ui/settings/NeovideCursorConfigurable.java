@@ -158,6 +158,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     private static final String W_ANIM_COUPLING =
             "这两个值只影响【动画时长】，不改变拉伸倍率；拉伸倍率见上方「拖尾拉伸强度」。";
 
+    /** 高级（诊断）区：性能诊断开关的说明。该项不持久化。 */
+    private static final String W_PAINT_DIAG =
+            "只跑物理计算、跳过重绘，用于分离瓶颈：开启后 fps 大幅回升说明瓶颈在绘制；"
+            + "几乎不变说明瓶颈在 EDT 调度。本项不写进配置文件，重启 IDEA 后自动关闭。";
+
     // ==================== 下拉项文案（契约 §2.4：不得只显示枚举名）====================
 
     private static final String MODE_SPRING_TEXT = "弹簧拉伸（Neovide 原版效果）";
@@ -369,6 +374,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     private JLabel singleMoveHint;
     private JLabel crossMoveHint;
 
+    /**
+     * 性能诊断（高级区）。**唯一不持久化**的开关：不进 State、不进 CONFIG、不进 isModified，
+     * 只在 {@code apply()} 时下发给 {@link com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager}。
+     */
+    private boolean paintDiag;
+
     // 联动置灰用的三个实时属性（由控件自身的监听器驱动）
     private final PropertyGraph graph = new PropertyGraph();
     private final GraphProperty<Boolean> springMode = graph.property(Boolean.TRUE);
@@ -420,6 +431,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         colorPresetItems.clear();
         singleMoveHint = null;
         crossMoveHint = null;
+        paintDiag = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.isPaintDisabled();
 
         animPresetItems.addAll(animPresetNames());
         animPresetItems.add(CUSTOM_LABEL);
@@ -611,6 +623,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 g.row("", row -> {
                     crossMoveHint = new JLabel();
                     row.cell(crossMoveHint);
+                    return kotlin.Unit.INSTANCE;
+                });
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // ---------- F. 高级（诊断）（折叠，默认折叠）----------
+            // 从 Tools 菜单挪进来（0.9.6 / M1）：菜单只留 3 项，诊断属于「偶尔用一次」的高级项。
+            // 注意它**不持久化** —— 所以也不参与 isModified()：勾选后点「应用」才生效，重启即失效。
+            panel.collapsibleGroup("高级（诊断）", false, g -> {
+                g.row("性能诊断（跳过重绘，只跑计算）", row -> {
+                    row.topGap(TopGap.MEDIUM);
+                    bindCheck(row, () -> paintDiag, v -> paintDiag = v)
+                            .comment(W_PAINT_DIAG, COMMENT, NO_LINK);
                     return kotlin.Unit.INSTANCE;
                 });
                 return kotlin.Unit.INSTANCE;
@@ -1179,6 +1204,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
         // A5：唯一生效入口（写字段 → 调 setter → 刷新三类缓存）
         NeovideCaretManager.applyConfig();
+
+        // A5.5：性能诊断（高级区，唯一不持久化的项）。
+        // 只在**变化时**下发：setPaintDisabled 会写一行日志并清屏，每次 apply 都调会刷屏。
+        if (NeovideCaretManager.isPaintDisabled() != paintDiag) {
+            NeovideCaretManager.setPaintDisabled(paintDiag);
+        }
 
         // A6：baseline 前移 —— 否则连续两次 apply 时第二次会把第一次的值误判为非脏
         baseline = deepCopy(target);
