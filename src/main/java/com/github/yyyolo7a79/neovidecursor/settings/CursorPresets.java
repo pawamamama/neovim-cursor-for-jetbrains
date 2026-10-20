@@ -141,15 +141,28 @@ public final class CursorPresets {
      * {@code trailSize}/{@code shadowBlurFactor}/{@code glowOpacity} 步长 5、
      * {@code glowLayers} 步长 1。
      */
+    /**
+     * <p><b>0.9.6 / M3：七个预设的短跳时长统一成 0.11s。</b>
+     *
+     * <p>原因（数据）：{@code shortAnimationLength} 是「同行打字/退格」的拖尾总时长，
+     * 而<b>前缘（rank3）的有效时长 = 本值 × trailFactors[3] = 本值 × 0.22</b>。
+     * 于是 {@code 0.04s} 的前缘只有 <b>8.8ms</b> —— 在 8ms 一帧的调度下就是 <b>1 帧位移完</b>，
+     * 肉眼看就是「光标直接跳过去」，后缘还留着拖尾，所以显得「前半截断了」。
+     * 这也是 {@code W_SHORT_LEN} 文案里「0.03 起步步归零、0.04 起能跑」的同一句话。
+     *
+     * <p>统一到 0.11 之后前缘 ≈ 24ms（3 帧），四个角都能展开；各预设之间的差异仍然由
+     * {@code animationLength} / {@code trailSize} / {@code layers} / {@code blur} / {@code opacity} 承担，
+     * 所以「快/平滑/柔和/高比对观感」这一层语义没有被抹平。
+     */
     public static final AnimPreset[] ANIM_PRESETS = {
             //                        名称            anim  short trail layers blur opacity
             new AnimPreset("原版粉色",            10,  11,  100,  8,   20,  55),   // = NeovideConfig 默认值
             new AnimPreset("缎带",                28,  11,  100,  8,   20,  55),   // 跨行拉长
-            new AnimPreset("Neovide 官方",        15,   4,  100,  8,   20,  55),   // 最接近原版
-            new AnimPreset("社区·快",             6,   4,  100,  8,   20,  55),   // 跟手
-            new AnimPreset("社区·平滑",           10,   4,   30,  8,   25,  45),   // 四角匀、柔和
-            new AnimPreset("柔和",                18,   8,   80,  6,   30,  40),   // 轻量
-            new AnimPreset("高对比",              12,  10,  100, 10,   15,  75),   // 强调
+            new AnimPreset("Neovide 官方",        15,  11,  100,  8,   20,  55),   // 最接近原版；短跳 0.11（M3）
+            new AnimPreset("社区·快",             6,  11,  100,  8,   20,  55),   // 跟手；短跳 0.11（M3）
+            new AnimPreset("社区·平滑",           10,  11,   30,  8,   25,  45),   // 四角匀、柔和；短跳 0.11（M3）
+            new AnimPreset("柔和",                18,  11,   80,  6,   30,  40),   // 轻量；短跳 0.11（M3）
+            new AnimPreset("高对比",              12,  11,  100, 10,   15,  75),   // 强调；短跳 0.11（M3）
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */
