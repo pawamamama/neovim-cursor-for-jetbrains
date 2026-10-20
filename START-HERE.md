@@ -321,6 +321,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\
 | **`SETTINGS-CONTRACT.md`** | 0.9.4 的实现契约 v2.1（16 项字段 / 三个前置改造 / 35 项禁改） |
 | **`VERIFY-SETTINGS.md`** | 0.9.4 独立验证报告（九项 + §12 jar 稳定指纹表） |
 | **`REVIEW-SETTINGS.md`** | 0.9.4 三轮审查报告（t5 抓出 2 个 high、t8 变异测试、t9 字节绑定） |
+| **`SETTINGS-UI-REDESIGN.md`** | 0.9.5 方案（真实参数调研 + 8 动画预设 × 5 颜色预设 + 布局线框） |
+| **`SETTINGS-UI-CONTRACT.md`** | 0.9.5 实现契约 v1.2（4 个缺陷修法 + §1.3.1 参考实现骨架） |
+| **`VERIFY-SETTINGS-V2.md`** | 0.9.5 独立验证（119 断言，含 5 条偏差裁决） |
+| **`REVIEW-SETTINGS-V2.md`** | 0.9.5 两轮审查（抓出 R-01/R-02/R-03/R-09/R-10） |
+| **`NEXT-REFACTOR.md`** | **下一版设置面板结构重构计划**（God Class 拆分，不改行为） |
 | `BUG-REPORT-CJK-IME.md` | IME 错位的原始取证（四组实验） |
 | `UPSTREAM-REPORT-2026-10-18.md` | 给上游的报告（含自我审查） |
 | `NEXT-TASK-IME.md` | 水杉输入法问题的交接（已被 0.9.3 解决，留作历史） |
