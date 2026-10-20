@@ -225,9 +225,10 @@ public final class VPreset {
         System.out.println();
         System.out.println("--- V3：默认值与全部预设值都必须落在滑块刻度网格上 ---");
         // 第 11 项 typingSmoothness 是 0.9.6 / M4 新增的「输入平滑」（刻度 0–100，步长 5）
-        int[] steps = {50, 25, 5, 5, 1, 5, 5, 5, 1, 1, 5};
-        int[] mins = {0, 0, 0, 0, 1, 5, 0, 10, 5, 2, 0};
-        int[] maxs = {500, 1000, 100, 100, 12, 60, 100, 80, 35, 25, 100};
+        // 第 6 项 shadowBlurFactor 自 M6 起对外是「锐度 0–100，步长 1」（存储仍是外扩幅度）
+        int[] steps = {50, 25, 5, 5, 1, 1, 5, 5, 1, 1, 5};
+        int[] mins = {0, 0, 0, 0, 1, 0, 0, 10, 5, 2, 0};
+        int[] maxs = {500, 1000, 100, 100, 12, 100, 100, 80, 35, 25, 100};
         // 每个滑块参与的全部取值（默认 + 预设）
         java.util.List<int[]> values = new java.util.ArrayList<>();
         values.add(new int[]{50});                       // cursorDisappearDelay 默认

@@ -52,7 +52,7 @@ public final class Probe4Bugs {
      */
     private static final String[] SLIDER_NAMES = {
             "淡出前保持时长", "淡出时长", "拖尾不透明度", "辉光峰值不透明度",
-            "辉光层数", "辉光外扩幅度", "拖尾密度", "拖尾拉伸强度",
+            "辉光层数", "辉光锐度", "拖尾密度", "拖尾拉伸强度",
             "跨行动画时长", "短动画时长", "输入平滑"
     };
 
@@ -315,7 +315,7 @@ public final class Probe4Bugs {
             case 2: return Math.round(p.tailOpacity * 100f);
             case 3: return Math.round(p.glowOpacity * 100f);
             case 4: return p.glowLayers;
-            case 5: return Math.round(p.shadowBlurFactor * 100f);
+            case 5: return NeovideCursorConfigurable.sharpnessOf(p.shadowBlurFactor);   // M6：对外是锐度
             case 6: return Math.round(p.trailSize * 100f);
             case 7: return Math.round(p.stretchRatioK * 10f);
             case 8: return Math.round(p.animationLength * 100f);

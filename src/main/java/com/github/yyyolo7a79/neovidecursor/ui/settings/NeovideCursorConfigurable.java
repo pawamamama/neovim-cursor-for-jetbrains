@@ -105,9 +105,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             "层数越多渐变越平滑，但每层都是一次 CPU 抗锯齿 + alpha 混合（fill(Path2D) 不享受 Java2D 的 GPU 加速）。"
             + "层数不影响亮度：内部按层数反解每层 alpha，8 层与 12 层的峰值亮度相同。";
 
+    /**
+     * 辉光锐度/外扩的说明（0.9.6 / M6：显示层从「外扩幅度」改成「锐度」，内部值不变）。
+     *
+     * <p>原文案「0.6 是原版 JS 的夸张光雾（约 40px）」保留其事实，但主语换成锐度 ——
+     * 否则用户看到一个叫「锐度」的滑块配一段讲 0.6 的文案，会以为滑块坏了。
+     */
     private static final String W_SHADOW_BLUR =
-            "0.6 是原版 JS 的夸张光雾（约 40px）。它同时决定重绘 padding：每个编辑器每帧的重绘包围盒会随之变大，"
-            + "慢机器上可能掉帧。默认 0.2（约 14px）是本插件按「光晕总宽与残影模式一致」反推的值。";
+            "「锐度」是外扩幅度的反向说法：100 = 外扩 0.05（最锐）、0 = 外扩 0.60（最柔，即原版 JS 的夸张光雾，约 40px）。"
+            + "它同时决定重绘 padding：每个编辑器每帧的重绘包围盒会随之变大，慢机器上可能掉帧。"
+            + "默认外扩 0.20（约 14px，锐度 73）是本插件按「光晕总宽与残影模式一致」反推的值。";
 
     private static final String W_STRETCH =
             "只调整后缘与前缘的时长比（拉伸倍率）。默认 4.5×＝后缘 110ms / 前缘 24ms，是实测调出来的观感；"
@@ -300,12 +307,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                     (c, v) -> v + " 层",
                     v -> String.valueOf(v)),
 
-            // 6. 辉光外扩幅度：刻度 / 100f
-            new SliderSpec("shadowBlurFactor", BLUR_MIN, BLUR_MAX, BLUR_STEP, "",
-                    s -> Math.round(s.shadowBlurFactor * 100f),
-                    (s, v) -> s.shadowBlurFactor = v / 100f,
-                    (c, v) -> fmt2(v / 100f),
-                    v -> fmt2(v / 100f)),
+            // 6. 辉光锐度（0.9.6 / M6）：刻度 **0..100 = 锐度**，存储仍是 shadowBlurFactor（外扩 0.05..0.60）。
+            //    0 ⇒ 外扩 0.60（最柔）、100 ⇒ 外扩 0.05（最锐）—— 向右拖 = 更锐，方向符合直觉。
+            //    为什么不做成第二个滑块：那会多一个「同一物理量的两个旋钮」，用户不知道听谁的；
+            //    而「锐度」正是用户说「高对比」时的直觉语义（外扩窄 = 边缘锐）。
+            new SliderSpec("shadowBlurFactor", 0, 100, 1, "",
+                    s -> sharpnessOf(s.shadowBlurFactor),
+                    (s, v) -> s.shadowBlurFactor = blurOfSharpness(v),
+                    (c, v) -> "锐 " + v + "（外扩 " + fmt2(blurOfSharpness(v)) + "）",
+                    v -> v == 0 ? "柔" : (v == 100 ? "锐" : String.valueOf(v))),
 
             // 7. 拖尾密度：刻度 / 100f
             new SliderSpec("trailSize", PCT_MIN, PCT_MAX, PCT_STEP, "",
@@ -611,7 +621,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("辉光外扩幅度", row -> {
+                g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
                     addSlider(row, SPECS[5], shadowOn);
                     row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
                     return kotlin.Unit.INSTANCE;
@@ -1554,6 +1564,27 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         return MODE_AFTERIMAGE_TEXT.equals(text)
                 ? NeovideConfig.TrailMode.AFTERIMAGE
                 : NeovideConfig.TrailMode.SPRING;
+    }
+
+    /**
+     * M6：锐度（0–100）⇄ 外扩幅度（0.60–0.05）的纯显示换算。
+     *
+     * <p>**不参与渲染**：真正写进 CONFIG 的仍然是 {@code shadowBlurFactor}（外扩幅度），
+     * 而它是 {@code NeovideConfig} 的既有常量，本轮一个字节都没动。
+     *
+     * <p>映射：{@code blur = 0.05 + (100 - sharp) × 0.0055} ⇒
+     * 0 = 外扩 0.60（最柔，原版 JS 的夸张光雾）、100 = 外扩 0.05（最锐）。
+     * 往返误差由 {@link #sharpnessOf(float)} 的四舍五入吸收（同一 blur 读回同一锐度）。
+     */
+    public static float blurOfSharpness(int sharp) {
+        int v = Math.max(0, Math.min(100, sharp));
+        return 0.05f + (100 - v) * 0.0055f;
+    }
+
+    /** 外扩幅度 → 锐度（0–100）。M6 的显示层换算，见 {@link #blurOfSharpness(int)}。 */
+    public static int sharpnessOf(float blur) {
+        float b = Math.max(0.05f, Math.min(0.60f, blur));
+        return Math.round((0.60f - b) / 0.0055f);
     }
 
     private static boolean isSpringText(Object selected) {

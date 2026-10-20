@@ -74,6 +74,7 @@ public final class ProbeSettingsV2 {
         animationTiming(conf);
         typingSmoothness(conf);
         modifiedLabel(conf);
+        shadowSharpness(conf);
         toolsMenu();
         componentDump();
 
@@ -681,6 +682,63 @@ public final class ProbeSettingsV2 {
                 conf.slidersForProbe().size() > 10
                         ? ("min=" + conf.slidersForProbe().get(10).getMinimum()
                         + " max=" + conf.slidersForProbe().get(10).getMaximum()) : "滑块数不足");
+        System.out.println();
+    }
+
+    // ---------------------------------------------------------------- M6 辉光锐度
+    /**
+     * M6：把「辉光外扩幅度」的显示层反向映射成「辉光锐度」（0–100，纯 UI）。
+     *
+     * <p>要证明三件事：①映射是单调反向且端点正确；②只改显示，**存储仍是 shadowBlurFactor**；
+     * ③值文本里同时给得出外扩值（否则老用户不知道自己原来的 0.20 变成多少）。
+     */
+    private static void shadowSharpness(NeovideCursorConfigurable conf) {
+        System.out.println("--- M6. 辉光锐度（0–100，纯 UI 映射）---");
+
+        check("M6-1 端点：外扩 0.05 ⇒ 锐度 100（最锐）、外扩 0.60 ⇒ 锐度 0（最柔）",
+                NeovideCursorConfigurable.sharpnessOf(0.05f) == 100
+                        && NeovideCursorConfigurable.sharpnessOf(0.60f) == 0,
+                "0.05→" + NeovideCursorConfigurable.sharpnessOf(0.05f)
+                        + ", 0.60→" + NeovideCursorConfigurable.sharpnessOf(0.60f));
+
+        boolean mono = true;
+        int prev = Integer.MAX_VALUE;
+        for (int k = 5; k <= 60; k += 5) {
+            int sh = NeovideCursorConfigurable.sharpnessOf(k / 100f);
+            if (sh >= prev) { mono = false; }   // 外扩变大 → 锐度必须变小
+            prev = sh;
+        }
+        check("M6-2 外扩幅度越大 → 锐度越小（严格单调反向）", mono, "ok");
+
+        check("M6-3 默认外扩 0.20 显示为锐度 73",
+                NeovideCursorConfigurable.sharpnessOf(0.20f) == 73,
+                "实际 " + NeovideCursorConfigurable.sharpnessOf(0.20f));
+
+        resetState();
+        conf.reset();
+        int blurIdx = conf.sliderKeysForProbe().indexOf("shadowBlurFactor");
+        String txt = conf.labelsForProbe().get(blurIdx).getText();
+        check("M6-4 数值标签同时给出「锐度」与「外扩」两个口径",
+                txt != null && txt.contains("锐") && txt.contains("外扩"),
+                "标签=" + txt);
+
+        // ② 存储仍是 shadowBlurFactor：拖滑块 → pending 变，state 不动
+        conf.slidersForProbe().get(blurIdx).setValue(100);         // 拖到最锐
+        check("M6-5 拖到最锐：pending.shadowBlurFactor = 0.05（存储语义没变）",
+                Math.abs(conf.pendingForProbe().shadowBlurFactor - 0.05f) < 1e-6f,
+                "pending.shadowBlurFactor=" + conf.pendingForProbe().shadowBlurFactor);
+        check("M6-6 未 apply 前 state 不变（面板语义仍要按应用）",
+                Math.abs(svc.getState().shadowBlurFactor - 0.20f) < 1e-6f,
+                "state.shadowBlurFactor=" + svc.getState().shadowBlurFactor);
+
+        // ③ 「高对比」预设的锐度：外扩 0.15 ⇒ 18
+        check("M6-7 「高对比」预设的外扩 0.15 对应锐度 82",
+                NeovideCursorConfigurable.sharpnessOf(0.15f) == 82,
+                "实际 " + NeovideCursorConfigurable.sharpnessOf(0.15f));
+
+        // 恢复默认，避免污染后续用例
+        resetState();
+        conf.reset();
         System.out.println();
     }
 
