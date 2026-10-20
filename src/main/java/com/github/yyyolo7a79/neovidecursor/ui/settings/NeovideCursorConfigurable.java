@@ -1,15 +1,19 @@
 package com.github.yyyolo7a79.neovidecursor.ui.settings;
 
+import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier;
 import com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager;
-import com.intellij.openapi.options.BoundConfigurable;
-import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.observable.properties.GraphProperty;
 import com.intellij.openapi.observable.properties.PropertyGraph;
+import com.intellij.openapi.options.BoundConfigurable;
+import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.ui.DialogPanel;
 import com.intellij.ui.ColorPanel;
 import com.intellij.ui.components.JBCheckBox;
+import com.intellij.ui.components.JBTextField;
+import com.intellij.ui.dsl.builder.BottomGap;
 import com.intellij.ui.dsl.builder.BuilderKt;
 import com.intellij.ui.dsl.builder.ButtonKt;
 import com.intellij.ui.dsl.builder.Cell;
@@ -19,41 +23,60 @@ import com.intellij.ui.dsl.builder.MutableProperty;
 import com.intellij.ui.dsl.builder.Panel;
 import com.intellij.ui.dsl.builder.Row;
 import com.intellij.ui.dsl.builder.SliderKt;
+import com.intellij.ui.dsl.builder.TextFieldKt;
+import com.intellij.ui.dsl.builder.TopGap;
 import kotlin.jvm.functions.Function0;
+import kotlin.jvm.functions.Function1;
+import kotlin.ranges.IntRange;
 
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JSlider;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.Color;
 import java.awt.Rectangle;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.function.IntFunction;
 
 /**
- * Neovide 拖尾光标的设置面板（第一期 16 项）。
+ * Neovide 拖尾光标的设置面板（0.9.5：预设 + 吸附滑块 + 布局重排）。
  *
  * <p><b>为什么继承 {@link BoundConfigurable} 而不是裸实现 {@code SearchableConfigurable}：
  * </b>父类已经实现了 {@code createComponent / isModified / reset / apply / disposeUIResources}，
  * 子类只需要给出 {@link #createPanel()}。手写那几个方法等于把"什么时候把控件值刷回模型"
  * 的时序自己重新发明一遍，而 {@code DialogPanel} 已经做对了。
  *
- * <p><b>第一期是「OK 生效」，不做实时预览。</b>三条硬约束：
- * <ol>
- *   <li>{@code apply()} 之前<b>不碰任何运行期状态</b>——全部编辑只发生在 {@link #pending}；</li>
- *   <li>不用 DSL 的「控件变化回调」那套 API（其中一个带 {@code @ApiStatus.NonExtendable}，
- *       另一个官方文档无背书）去实时写配置；</li>
- * </ol>
- * 拖动滑块时右侧数值会跟着变——那只是<b>改一个 JLabel 的文字</b>，
- * 不碰 {@code CONFIG}、不调 {@code applyConfig()}，与"实时预览"是两件事。
+ * <p><b>仍然是「OK 生效」，不做实时预览。</b>拖动滑块时右侧数值会跟着变——那只是<b>改一个
+ * JLabel 的文字 + 写预览副本 {@link #pending}</b>，不碰 {@code CONFIG}、不调
+ * {@code applyConfig()}、不落盘，与"实时预览"是两件事。
  *
- * <p><b>数据流</b>（{@code SETTINGS-CONTRACT.md} §3.4）：
+ * <p><b>数据流</b>（{@code SETTINGS-UI-CONTRACT.md} §3.3 / §3.4）：
  * <pre>
- *   reset()   service.getState() --深拷贝--&gt; pending --DialogPanel--&gt; 控件
- *   apply()   控件 --DialogPanel--&gt; pending --+--&gt; service.getState() --&gt; XML
- *                                             +--&gt; NeovideCaretManager.applyConfig()
+ *   reset()   service.getState() --深拷贝--&gt; pending + baseline --DialogPanel--&gt; 控件
+ *   apply()   控件 --DialogPanel--&gt; pending --逐字段(pending!=baseline)--&gt; service.getState()
+ *                                              --&gt; persistQuietly()
+ *                                              --&gt; NeovideCaretManager.applyConfig()
+ *                                              --&gt; baseline 前移
  * </pre>
- * {@link #pending} 是预览副本：面板编辑期间只改它，用户点 Cancel 时没有任何东西需要回滚。
+ *
+ * <p><b>缺陷 1 是三层缺陷，不是一个 bug</b>（契约 §1.1 的 L1/L2/L3），三条修法缺一不可：
+ * <ol>
+ *   <li><b>修法 1</b>：显式 {@code slider.addChangeListener} —— 写 {@code pending} + 刷标签；</li>
+ *   <li><b>修法 2</b>：{@link #isModified()} 必须自己比 {@code pending vs state} ——
+ *       否则补了 ChangeListener 之后 {@code super.isModified()} 恒 false（B-1：应用按钮变灰、
+ *       改动静默丢失）；</li>
+ *   <li><b>修法 3</b>：滑块的 getter 必须返回 <b>吸附后的</b> pending（{@link #snapToTick}）——
+ *       否则"精确值 vs 刻度值"不一致时 {@code isModified()} 永真（B-2：OK 按钮永远亮着）。</li>
+ * </ol>
+ * 修法 2 与修法 3 是<b>对向陷阱</b>：只修一个就会踩另一个。
  */
 public final class NeovideCursorConfigurable extends BoundConfigurable implements SearchableConfigurable {
 
@@ -63,7 +86,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     /** 页面名称。**同时**写在 plugin.xml 的 displayName 里（平台取名字时不必实例化本类）。 */
     public static final String DISPLAY_NAME = "Neovide Cursor";
 
-    // ==================== 警告文案（契约 §2.2，逐字，不得改动）====================
+    // ==================== 警告文案（契约 §2.2 / §7.3 / §9.4，逐字，不得改动）====================
 
     private static final String W_ALWAYS_HIGH_FPS =
             "常驻刷新 = 调度线程每秒向 EDT 投递约 125 次任务，且永不停歇。标签页很多或机器较慢时，"
@@ -93,42 +116,258 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     private static final String W_FADE_OFF =
             "辉光淡出关闭时不使用这两个值，辉光瞬时归零（行为与 0.9.1 一致）。";
 
+    /** 契约 §9.4：跨行动画时长的 comment，逐字。 */
+    private static final String W_ANIM_LEN =
+            "跨行动画时长 = 光标从一行移到另一行时的拖尾时长。上限 0.35s：再长切屏回来会看到「上一个位置还在拖」。";
+
+    /**
+     * 契约 §9.4：短动画时长的 comment。<b>两边界版本</b>（t7 / R-06 定稿）。
+     *
+     * <p><b>为什么不再是「下限 0.05s 是硬边界」</b>：那句话把
+     * {@code MAX_DT = 0.05s} 直接当成了滑块下限，但滑块量程是 <b>0.02–0.25</b>
+     * （契约 §7.1，captain 已裁决保持），文案与量程互相矛盾。
+     *
+     * <p>真实机制是：<b>前缘（rank3）</b>的有效时长 = 本值 × {@code trailFactors[3]=0.22}，
+     * 而 {@code DampedSpring.update()} 首句是
+     * {@code if (animationLength <= dt) 归零} —— 所以短路发生在<b>前缘</b>而不是整体，
+     * 且阈值是 {@code 0.05 / 0.22 ≈ 0.227s}（卡顿帧）与 {@code 0.008 / 0.22 ≈ 0.036s}（日常帧），
+     * 不是 0.05s。
+     *
+     * <p>文案由 verifier §10.0 实测 + reviewer 独立复算确认（0.03 起步步归零、0.04 起能跑）。
+     */
+    /**
+     * <b>分行渲染的写法（t9 / t8-R11）</b>：DSL 的 comment 走 {@code DslLabel}（继承
+     * {@code JEditorPane}，按 HTML 渲染），串里的字面 {@code \n} <b>不会</b>变成换行
+     * —— HTML 会把连续空白折叠成一个空格。必须显式写 {@code <br/>}。
+     *
+     * <p>为什么不拆成多条 {@code rowComment}：那会在语义上变成「多条独立提示」，
+     * 而这 6 行是<b>同一条</b>提示的连续说明（前半句 + 三种取值区间 + 实测注记），
+     * 拆开会让回退/检索时难以判断它们属于同一个字段；用 {@code <br/>} 保持「一个 comment」语义。
+     */
+    private static final String BR = "<br/>";
+
+    private static final String W_SHORT_LEN =
+            "短动画时长 = 同行打字/退格时的拖尾时长。" + BR + BR
+            + "注意前缘（rank3）的有效时长 = 本值 × 0.22，两种情况下会被单帧短路成「前缘瞬移」：" + BR
+            + "  · 低于 0.036s：日常帧（8ms）下前缘就整段归零，后缘仍有拖尾" + BR
+            + "  · 0.036s ~ 0.227s：日常帧能正常展开，只在卡顿（单帧 ≥ 50ms）时前缘才归零" + BR
+            + "  · 0.227s 以上：四角都能完整展开" + BR
+            + "实测：0.03 起步步归零，0.04 起能跑。";
+
+    /** 契约 §7.3 第三行：动画时序组底部，恒显示，逐字。 */
+    private static final String W_ANIM_COUPLING =
+            "这两个值只影响【动画时长】，不改变拉伸倍率；拉伸倍率见上方「拖尾拉伸强度」。";
+
     // ==================== 下拉项文案（契约 §2.4：不得只显示枚举名）====================
 
     private static final String MODE_SPRING_TEXT = "弹簧拉伸（Neovide 原版效果）";
     private static final String MODE_AFTERIMAGE_TEXT = "残影轨迹（低帧率更稳）";
     private static final List<String> MODE_ITEMS = Arrays.asList(MODE_SPRING_TEXT, MODE_AFTERIMAGE_TEXT);
 
-    /**
-     * 第一期固定不可调，只用来把 {@code trailFactors} 换算成界面上的毫秒数（契约 §2.5 联动显示）。
-     * <b>它是 NeovideConfig 现值的一个只读镜像，不是新的默认值来源。</b>
-     */
-    private static final float SHORT_ANIMATION_LENGTH = 0.11f;
-
     private static final int COMMENT = -1;
 
     private static final HyperlinkEventAction NO_LINK = HyperlinkEventAction.HTML_HYPERLINK_INSTANCE;
 
-    // ==================== 预览副本 + 控件引用 ====================
+    /** 预设下拉末尾那一项的下标偏移：前 N 项是预设，最后一项是「自定义」（契约 §5.7）。 */
+    private static final String CUSTOM_LABEL = CursorPresets.CUSTOM_LABEL;
+
+    // ==================== 10 个滑块的刻度表（契约 §6.2，逐值冻结）====================
+
+    /**
+     * 一个滑块的完整建模。<b>滑块刻度值</b>是唯一的中间表示：
+     * <ul>
+     *   <li>滑块只在刻度上（{@code setSnapToTicks(true)}）；</li>
+     *   <li>输入框任意值；</li>
+     *   <li>{@code pending} 存<b>精确值</b>（由 {@link #write} 换算）。</li>
+     * </ul>
+     * 步长不能随便定（契约 §0.2 的 R-2）：淡出时长必须是 25（默认 0.075 = 刻度 75），
+     * 百分比类必须是 5（默认 0.55 / 预设 0.45、0.40、0.30 都落在 5 的网格上）。
+     * 定错一档，<b>设置页一打开默认值就漂移</b>，直接违反硬纪律 1。
+     */
+    private static final class SliderSpec {
+        final String key;
+        final int min;
+        final int max;
+        final int step;
+        final String unitSuffix;
+        /** 从 pending 读<b>刻度整数</b>。 */
+        final java.util.function.ToIntFunction<NeovideCursorSettings.State> readTick;
+        /** 把刻度整数写回 pending。 */
+        final java.util.function.BiConsumer<NeovideCursorSettings.State, Integer> writeTick;
+        /** 右侧数值标签的格式（可含多段信息，如拉伸强度）。 */
+        final java.util.function.BiFunction<NeovideCursorConfigurable, Integer, String> valueText;
+        /** 刻度轴上的文字（必须短，否则又挤成一团）。 */
+        final IntFunction<String> tickText;
+
+        SliderSpec(String key, int min, int max, int step, String unitSuffix,
+                   java.util.function.ToIntFunction<NeovideCursorSettings.State> readTick,
+                   java.util.function.BiConsumer<NeovideCursorSettings.State, Integer> writeTick,
+                   java.util.function.BiFunction<NeovideCursorConfigurable, Integer, String> valueText,
+                   IntFunction<String> tickText) {
+            this.key = key;
+            this.min = min;
+            this.max = max;
+            this.step = step;
+            this.unitSuffix = unitSuffix;
+            this.readTick = readTick;
+            this.writeTick = writeTick;
+            this.valueText = valueText;
+            this.tickText = tickText;
+        }
+    }
+
+    private static final int DELAY_MIN = 0;
+    private static final int DELAY_MAX = 500;
+    private static final int DELAY_STEP = 50;
+
+    private static final int FADE_MIN = 0;
+    private static final int FADE_MAX = 1000;
+    private static final int FADE_STEP = 25;
+
+    private static final int PCT_MIN = 0;
+    private static final int PCT_MAX = 100;
+    private static final int PCT_STEP = 5;
+
+    private static final int LAYERS_MIN = 1;
+    private static final int LAYERS_MAX = 12;
+    private static final int LAYERS_STEP = 1;
+
+    private static final int BLUR_MIN = 5;
+    private static final int BLUR_MAX = 60;
+    private static final int BLUR_STEP = 5;
+
+    private static final int STRETCH_MIN = 10;
+    private static final int STRETCH_MAX = 80;
+    private static final int STRETCH_STEP = 5;
+
+    private static final int ANIM_MIN = 5;
+    private static final int ANIM_MAX = 35;
+    private static final int ANIM_STEP = 1;
+
+    private static final int SHORT_MIN = 2;
+    private static final int SHORT_MAX = 25;
+    private static final int SHORT_STEP = 1;
+
+    /** 10 个滑块的规格表。<b>顺序 = 面板从上到下的顺序</b>（探针按此下标取滑块）。 */
+    private static final SliderSpec[] SPECS = {
+            // 1. 淡出前保持时长：刻度 = 毫秒
+            new SliderSpec("cursorDisappearDelay", DELAY_MIN, DELAY_MAX, DELAY_STEP, " ms",
+                    s -> s.cursorDisappearDelay,
+                    (s, v) -> s.cursorDisappearDelay = v,
+                    (c, v) -> v + " ms",
+                    v -> String.valueOf(v)),
+
+            // 2. 淡出时长：刻度 / 1000f = 秒
+            new SliderSpec("cursorFadeOutDuration", FADE_MIN, FADE_MAX, FADE_STEP, " ms",
+                    s -> Math.round(s.cursorFadeOutDuration * 1000f),
+                    (s, v) -> s.cursorFadeOutDuration = v / 1000f,
+                    (c, v) -> v + " ms",
+                    v -> String.valueOf(v)),
+
+            // 3. 拖尾不透明度：刻度 / 100f
+            new SliderSpec("tailOpacity", PCT_MIN, PCT_MAX, PCT_STEP, "",
+                    s -> Math.round(s.tailOpacity * 100f),
+                    (s, v) -> s.tailOpacity = v / 100f,
+                    (c, v) -> fmt2(v / 100f),
+                    v -> fmt2(v / 100f)),
+
+            // 4. 辉光峰值不透明度：刻度 / 100f
+            new SliderSpec("glowOpacity", PCT_MIN, PCT_MAX, PCT_STEP, "",
+                    s -> Math.round(s.glowOpacity * 100f),
+                    (s, v) -> s.glowOpacity = v / 100f,
+                    (c, v) -> fmt2(v / 100f),
+                    v -> fmt2(v / 100f)),
+
+            // 5. 辉光层数：刻度 = 层数
+            new SliderSpec("glowLayers", LAYERS_MIN, LAYERS_MAX, LAYERS_STEP, " 层",
+                    s -> s.glowLayers,
+                    (s, v) -> s.glowLayers = v,
+                    (c, v) -> v + " 层",
+                    v -> String.valueOf(v)),
+
+            // 6. 辉光外扩幅度：刻度 / 100f
+            new SliderSpec("shadowBlurFactor", BLUR_MIN, BLUR_MAX, BLUR_STEP, "",
+                    s -> Math.round(s.shadowBlurFactor * 100f),
+                    (s, v) -> s.shadowBlurFactor = v / 100f,
+                    (c, v) -> fmt2(v / 100f),
+                    v -> fmt2(v / 100f)),
+
+            // 7. 拖尾密度：刻度 / 100f
+            new SliderSpec("trailSize", PCT_MIN, PCT_MAX, PCT_STEP, "",
+                    s -> Math.round(s.trailSize * 100f),
+                    (s, v) -> s.trailSize = v / 100f,
+                    (c, v) -> fmt2(v / 100f),
+                    v -> fmt2(v / 100f)),
+
+            // 8. 拖尾拉伸强度：刻度 / 10f = 倍率（标签要显示派生时长，故用实例方法）
+            new SliderSpec("stretchRatioK", STRETCH_MIN, STRETCH_MAX, STRETCH_STEP, "",
+                    s -> Math.round(s.stretchRatioK * 10f),
+                    (s, v) -> s.stretchRatioK = v / 10f,
+                    (c, v) -> c.stretchText(v / 10f),
+                    v -> String.format(Locale.ROOT, "%.1f×", v / 10f)),
+
+            // 9. 跨行动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
+            new SliderSpec("animationLength", ANIM_MIN, ANIM_MAX, ANIM_STEP, " s",
+                    s -> Math.round(s.animationLength * 100f),
+                    (s, v) -> s.animationLength = v / 100f,
+                    (c, v) -> fmt2(v / 100f) + " s",
+                    v -> fmt2(v / 100f)),
+
+            // 10. 短动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
+            new SliderSpec("shortAnimationLength", SHORT_MIN, SHORT_MAX, SHORT_STEP, " s",
+                    s -> Math.round(s.shortAnimationLength * 100f),
+                    (s, v) -> s.shortAnimationLength = v / 100f,
+                    (c, v) -> fmt2(v / 100f) + " s",
+                    v -> fmt2(v / 100f)),
+    };
+
+    // ==================== 预览副本 + 基线 + 抑制标志 ====================
 
     /**
      * 面板正在编辑的副本。<b>绝不在 apply() 之前写进 service</b>——那是「OK 生效」的语义边界。
      */
     private NeovideCursorSettings.State pending = new NeovideCursorSettings.State();
 
+    /**
+     * 面板打开那一刻的 state 快照（契约 §3.3 / §3.4）。<b>只作比较基准，不是真相源。</b>
+     *
+     * <p>缺陷 3 的修法：{@code apply()} 逐字段比较 {@code pending} 与 {@code baseline}，
+     * 只有<b>用户真改过</b>的字段才写进 {@code state}。于是「面板打开期间 Tools 改了 X」时，
+     * 因为 {@code pending.X == baseline.X}，X 不会被面板覆盖；而用户拖过的 Y
+     * （{@code pending.Y != baseline.Y}）以用户为准 —— 两个方向都不丢。
+     *
+     * <p><b>时效</b>：{@code createPanel()} / {@code reset()} 时与 pending 同时拍快照，
+     * {@code apply()} 成功后前移为 {@code deepCopy(target)}，{@code disposeUIResources()} 置 null。
+     */
+    private NeovideCursorSettings.State baseline = new NeovideCursorSettings.State();
+
+    /**
+     * 「正在由代码改控件」抑制标志（契约 §6.4）。
+     *
+     * <p>滑块监听器<b>写 pending + 刷标签</b>，程序化 {@code setValue()} 也会触发它；
+     * 输入框的 DocumentListener 同理。若不抑制，{@code reset()} / 应用预设时
+     * 用吸附值回灌控件就会把「精确值 333」改写成「刻度 350」，
+     * 于是 {@code isModified()} 永远为真（契约附录 B 的 B-2 变体）。
+     */
+    private boolean syncingControls;
+
     // 非 DSL 绑定控件：DialogPanel 不追踪它们，必须在 reset/apply/isModified 里手工同步
     private ColorPanel tailColorPanel;
     private ColorPanel shadowColorPanel;
 
-    // 数值标签（拖动时只改文字，纯 UI）
-    private JLabel disappearDelayLabel;
-    private JLabel fadeOutDurationLabel;
-    private JLabel tailOpacityLabel;
-    private JLabel glowOpacityLabel;
-    private JLabel glowLayersLabel;
-    private JLabel shadowBlurLabel;
-    private JLabel trailSizeLabel;
-    private JLabel stretchLabel;
+    // 预设下拉（手工驱动：选中「自定义」不写任何字段，契约 §5.7）
+    private com.intellij.openapi.ui.ComboBox<String> animPresetCombo;
+    private com.intellij.openapi.ui.ComboBox<String> colorPresetCombo;
+
+    private final List<String> animPresetItems = new ArrayList<>();
+    private final List<String> colorPresetItems = new ArrayList<>();
+
+    /** 10 个滑块的建模对象（滑块 + 输入框 + 数值标签三者一组）。 */
+    private final List<SliderBinding> bindings = new ArrayList<>();
+
+    // 动画时序组的两条动态耦合提示（契约 §7.4：禁止写死数字）
+    private JLabel singleMoveHint;
+    private JLabel crossMoveHint;
 
     // 联动置灰用的三个实时属性（由控件自身的监听器驱动）
     private final PropertyGraph graph = new PropertyGraph();
@@ -158,11 +397,34 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     /**
      * 纯 DSL 构建，<b>不依赖 Project / Editor</b>——
      * {@code buildSearchableOptions}、{@code TraverseUIStarter} 会在无项目环境下调用它。
+     *
+     * <p><b>布局顺序（契约 §9.1 的线框）</b>：
+     * <pre>
+     *   [预设]   动画预设 [▾]    颜色预设 [▾]        ← 最显眼，置顶
+     *   总开关    （4 行 + 耦合提示）
+     *   淡出      （开关 + 2 个滑块）
+     *   颜色与辉光（2 个 ColorPanel + 开关 + 3 个滑块）
+     *   ▾ 拖尾手感（折叠，默认展开）
+     *   ▾ 动画时序（折叠，默认折叠 = 高级）
+     * </pre>
+     * 每个分组的第一行都加 {@code topGap(MEDIUM)} —— 这是 JetBrains Layout 规范
+     * 「用垂直间距把控件分组」的落地方式（{@code Panel} 接口没有 topGap，只有 {@code Row} 有）。
      */
     @Override
     public DialogPanel createPanel() {
         pending = deepCopy(currentState());
+        baseline = deepCopy(currentState());     // 契约 §3.4：平台可能只调 createPanel 不调 reset
         graphReset(pending);
+        bindings.clear();
+        animPresetItems.clear();
+        colorPresetItems.clear();
+        singleMoveHint = null;
+        crossMoveHint = null;
+
+        animPresetItems.addAll(animPresetNames());
+        animPresetItems.add(CUSTOM_LABEL);
+        colorPresetItems.addAll(colorPresetNames());
+        colorPresetItems.add(CUSTOM_LABEL);
 
         return BuilderKt.panel(panel -> {
 
@@ -171,22 +433,35 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 return kotlin.Unit.INSTANCE;
             });
 
+            // ---------- 0. 预设置顶（契约 §9.1 的第一块）----------
+            panel.row("", row -> {
+                row.topGap(TopGap.MEDIUM);
+                row.bottomGap(BottomGap.SMALL);
+                row.label("动画预设");
+                animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
+                animPresetCombo.addActionListener(e -> onAnimPresetPicked());
+                row.label("颜色预设");
+                colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
+                colorPresetCombo.addActionListener(e -> onColorPresetPicked());
+                return kotlin.Unit.INSTANCE;
+            });
+
             // ---------- A. 总开关 ----------
             panel.group("总开关", true, g -> {
-
                 g.row("启用拖尾光标（总开关）", row -> {
+                    row.topGap(TopGap.MEDIUM);
                     bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
                     return kotlin.Unit.INSTANCE;
                 });
 
                 g.row("拖尾渲染模式", row -> {
-                    Cell<com.intellij.openapi.ui.ComboBox<String>> c = ComboBoxKt.bindItem(
+                    Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
                             row.comboBox(MODE_ITEMS, null),
                             new MutableProperty<String>() {
                                 @Override public String get() { return modeText(pending.trailMode); }
                                 @Override public void set(String v) { pending.trailMode = textToMode(v); }
                             });
-                    com.intellij.openapi.ui.ComboBox<String> box = c.getComponent();
+                    com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
                     // 下拉一改就刷新置灰；只改 enabled 状态，不碰 CONFIG
                     box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
                     return kotlin.Unit.INSTANCE;
@@ -214,8 +489,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
             // ---------- B. 淡出 ----------
             panel.group("淡出", true, g -> {
-
                 g.row("辉光淡出（停止后柔和熄灭）", row -> {
+                    row.topGap(TopGap.MEDIUM);
                     bindCheck(row, () -> pending.overlayFadeOut, v -> {
                         pending.overlayFadeOut = v;
                         fadeOn.set(v);
@@ -224,33 +499,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 });
 
                 g.row("淡出前保持时长", row -> {
-                    SliderKt.bindValue(row.slider(0, 500, 50, 10),
-                            () -> pending.cursorDisappearDelay,
-                            v -> {
-                                pending.cursorDisappearDelay = v;
-                                if (disappearDelayLabel != null) {
-                                    disappearDelayLabel.setText(v + " ms");
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            }).enabledIf(fadeOn);
-                    disappearDelayLabel = new JLabel();
-                    row.cell(disappearDelayLabel).enabledIf(fadeOn);
+                    addSlider(row, SPECS[0], fadeOn);
                     row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
                     return kotlin.Unit.INSTANCE;
                 });
 
                 g.row("淡出时长", row -> {
-                    SliderKt.bindValue(row.slider(0, 1000, 75, 5),
-                            () -> Math.round(pending.cursorFadeOutDuration * 1000f),
-                            v -> {
-                                pending.cursorFadeOutDuration = v / 1000f;
-                                if (fadeOutDurationLabel != null) {
-                                    fadeOutDurationLabel.setText(v + " ms");
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            }).enabledIf(fadeOn);
-                    fadeOutDurationLabel = new JLabel();
-                    row.cell(fadeOutDurationLabel).enabledIf(fadeOn);
+                    addSlider(row, SPECS[1], fadeOn);
                     return kotlin.Unit.INSTANCE;
                 });
                 return kotlin.Unit.INSTANCE;
@@ -258,26 +513,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
             // ---------- C. 颜色与辉光 ----------
             panel.group("颜色与辉光", true, g -> {
-
                 g.row("拖尾颜色", row -> {
+                    row.topGap(TopGap.MEDIUM);
                     tailColorPanel = new ColorPanel();
                     tailColorPanel.setSupportTransparency(false);
+                    // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
+                    // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
+                    tailColorPanel.addActionListener(e -> onColorPanelChanged());
                     row.cell(tailColorPanel);
                     return kotlin.Unit.INSTANCE;
                 });
 
                 g.row("拖尾不透明度", row -> {
-                    SliderKt.bindValue(row.slider(0, 100, 100, 5),
-                            () -> Math.round(pending.tailOpacity * 100f),
-                            v -> {
-                                pending.tailOpacity = v / 100f;
-                                if (tailOpacityLabel != null) {
-                                    tailOpacityLabel.setText(fmt2(pending.tailOpacity));
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            });
-                    tailOpacityLabel = new JLabel();
-                    row.cell(tailOpacityLabel);
+                    addSlider(row, SPECS[2], null);
                     return kotlin.Unit.INSTANCE;
                 });
 
@@ -292,90 +540,77 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 g.row("辉光颜色", row -> {
                     shadowColorPanel = new ColorPanel();
                     shadowColorPanel.setSupportTransparency(false);
+                    shadowColorPanel.addActionListener(e -> onColorPanelChanged());
                     row.cell(shadowColorPanel).enabledIf(shadowOn);
                     return kotlin.Unit.INSTANCE;
                 });
 
                 g.row("辉光峰值不透明度", row -> {
-                    SliderKt.bindValue(row.slider(0, 100, 55, 1),
-                            () -> Math.round(pending.glowOpacity * 100f),
-                            v -> {
-                                pending.glowOpacity = v / 100f;
-                                if (glowOpacityLabel != null) {
-                                    glowOpacityLabel.setText(fmt2(pending.glowOpacity));
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            }).enabledIf(shadowOn);
-                    glowOpacityLabel = new JLabel();
-                    row.cell(glowOpacityLabel).enabledIf(shadowOn);
+                    addSlider(row, SPECS[3], shadowOn);
                     return kotlin.Unit.INSTANCE;
                 });
 
                 g.row("辉光层数", row -> {
-                    SliderKt.bindValue(row.slider(1, 12, 8, 1),
-                            () -> pending.glowLayers,
-                            v -> {
-                                pending.glowLayers = v;
-                                if (glowLayersLabel != null) {
-                                    glowLayersLabel.setText(v + " 层");
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            }).enabledIf(shadowOn);
-                    glowLayersLabel = new JLabel();
-                    row.cell(glowLayersLabel).enabledIf(shadowOn);
+                    addSlider(row, SPECS[4], shadowOn);
                     row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
                     return kotlin.Unit.INSTANCE;
                 });
 
                 g.row("辉光外扩幅度", row -> {
-                    SliderKt.bindValue(row.slider(5, 60, 20, 1),
-                            () -> Math.round(pending.shadowBlurFactor * 100f),
-                            v -> {
-                                pending.shadowBlurFactor = v / 100f;
-                                if (shadowBlurLabel != null) {
-                                    shadowBlurLabel.setText(fmt2(pending.shadowBlurFactor));
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            }).enabledIf(shadowOn);
-                    shadowBlurLabel = new JLabel();
-                    row.cell(shadowBlurLabel).enabledIf(shadowOn);
+                    addSlider(row, SPECS[5], shadowOn);
                     row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
                     return kotlin.Unit.INSTANCE;
                 });
                 return kotlin.Unit.INSTANCE;
             });
 
-            // ---------- D. 拖尾手感 ----------
-            panel.group("拖尾手感", true, g -> {
-
+            // ---------- D. 拖尾手感（折叠，默认展开）----------
+            panel.collapsibleGroup("拖尾手感", true, g -> {
                 g.row("拖尾密度", row -> {
-                    SliderKt.bindValue(row.slider(0, 100, 100, 1),
-                            () -> Math.round(pending.trailSize * 100f),
-                            v -> {
-                                pending.trailSize = v / 100f;
-                                if (trailSizeLabel != null) {
-                                    trailSizeLabel.setText(fmt2(pending.trailSize));
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            }).enabledIf(springMode);
-                    trailSizeLabel = new JLabel();
-                    row.cell(trailSizeLabel).enabledIf(springMode);
+                    row.topGap(TopGap.MEDIUM);
+                    addSlider(row, SPECS[6], springMode);
                     return kotlin.Unit.INSTANCE;
                 });
 
                 g.row("拖尾拉伸强度", row -> {
-                    SliderKt.bindValue(row.slider(10, 80, 45, 1),
-                            () -> Math.round(pending.stretchRatioK * 10f),
-                            v -> {
-                                pending.stretchRatioK = v / 10f;
-                                if (stretchLabel != null) {
-                                    stretchLabel.setText(stretchText(pending.stretchRatioK));
-                                }
-                                return kotlin.Unit.INSTANCE;
-                            }).enabledIf(springMode);
-                    stretchLabel = new JLabel();
-                    row.cell(stretchLabel).enabledIf(springMode);
+                    addSlider(row, SPECS[7], springMode);
                     row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                    return kotlin.Unit.INSTANCE;
+                });
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // ---------- E. 动画时序（折叠，默认折叠 = 高级）----------
+            panel.collapsibleGroup("动画时序", false, g -> {
+                g.row("跨行动画时长", row -> {
+                    row.topGap(TopGap.MEDIUM);
+                    addSlider(row, SPECS[8], null);
+                    row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                g.row("短动画时长", row -> {
+                    addSlider(row, SPECS[9], null);
+                    row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // 契约 §7.3 第三行：恒显示的耦合提示（逐字）
+                g.row("", row -> {
+                    row.rowComment(W_ANIM_COUPLING, COMMENT, NO_LINK);
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // 契约 §7.4：两条【必须】动态计算的耦合提示（禁止写死数字）
+                g.row("", row -> {
+                    singleMoveHint = new JLabel();
+                    row.cell(singleMoveHint);
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                g.row("", row -> {
+                    crossMoveHint = new JLabel();
+                    row.cell(crossMoveHint);
                     return kotlin.Unit.INSTANCE;
                 });
                 return kotlin.Unit.INSTANCE;
@@ -385,38 +620,474 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         });
     }
 
+    // ==================== 滑块构建（缺陷 1 + 缺陷 2 + 吸附 + 输入框）====================
+
+    /**
+     * 建一条「滑块 → 输入框 → 数值标签」的 row，并接进双向绑定。
+     *
+     * <p><b>三列的先后【必须】是 滑块 → 输入框 → 标签</b>（契约 §6.7）：
+     * {@code DialogPanel} 的 apply 回调表是 {@code LinkedHashMap}（javap 实证），
+     * 因此回调按<b>构建顺序</b>执行。输入框必须<b>最后</b>写 {@code pending} ——
+     * 否则用户键入的精确值会被滑块的吸附值覆盖（实测 A-4 的 A/B 段：333 被 350 覆盖）。
+     * <b>调换这三行的顺序就是静默的数据丢失。</b>
+     *
+     * @param spec      刻度表里的一项
+     * @param enabledIf 联动置灰属性，可为 null
+     */
+    private void addSlider(Row row, SliderSpec spec, GraphProperty<Boolean> enabledIf) {
+        SliderBinding b = new SliderBinding(spec);
+
+        // ---- 1) 滑块（必须最先建）----
+        Cell<JSlider> cell = row.slider(spec.min, spec.max, spec.step, spec.step);  // minor == major
+        b.slider = cell.getComponent();
+        // 吸附开关：拖动只落在刻度上（契约 §1.4；paintTicks=false 不影响吸附）
+        b.slider.setSnapToTicks(true);
+
+        // ---- 2) 缺陷 2 的修法：只给 min / mid / max 三个关键刻度（契约 §2.2）----
+        // labelTable 的条目数 = (max-min)/majorTickSpacing + 1，原来是 51 / 101 / 201 条 → 挤成一团。
+        Map<Integer, JComponent> marks = new LinkedHashMap<>();
+        marks.put(spec.min, new JLabel(spec.tickText.apply(spec.min)));
+        int mid = spec.min + ((spec.max - spec.min) / 2 / spec.step) * spec.step;   // 必须对齐到 step
+        if (mid > spec.min && mid < spec.max) {
+            marks.put(mid, new JLabel(spec.tickText.apply(mid)));
+        }
+        marks.put(spec.max, new JLabel(spec.tickText.apply(spec.max)));
+        SliderKt.labelTable(cell, marks);
+        // labelTable 内部是 new Hashtable + setLabelTable，【不会】替你打开 paintLabels → 必须显式设置
+        b.slider.setPaintLabels(true);
+        b.slider.setPaintTicks(false);     // 不画刻度线，只保留 label 的位置语义
+
+        // ---- 3) 输入框（必须建在滑块【之后】）----
+        Cell<JBTextField> tf = row.intTextField(
+                new IntRange(spec.min, spec.max), spec.readTick.applyAsInt(pending));
+        b.textField = tf.getComponent();
+        TextFieldKt.bindIntText(tf,
+                // getter 返回【精确值】，不 snap：用户键入的 333 必须原样进 pending
+                (Function0<Integer>) () -> spec.readTick.applyAsInt(pending),
+                (Function1<Integer, kotlin.Unit>) v -> {
+                    spec.writeTick.accept(pending, v);
+                    refreshDerivedHints();
+                    return kotlin.Unit.INSTANCE;
+                });
+        b.textField.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { onTextEdited(b); }
+            @Override public void removeUpdate(DocumentEvent e) { onTextEdited(b); }
+            @Override public void changedUpdate(DocumentEvent e) { onTextEdited(b); }
+        });
+        // 契约 §6.5：失焦才做 clamp + 回写（键入过程中不 clamp，否则 999 会被改成 500 打不下去）
+        b.textField.addFocusListener(new FocusAdapter() {
+            @Override public void focusLost(FocusEvent e) { normalizeTextField(b); }
+        });
+
+        // ---- 4) 右侧数值标签 ----
+        JLabel valueLabel = new JLabel(spec.valueText.apply(this, spec.readTick.applyAsInt(pending)));
+        b.valueLabel = valueLabel;
+        Cell<JLabel> labelCell = row.cell(valueLabel);
+
+        // ---- 修法 3：getter 返回【吸附后的】 pending（防 B-2）----
+        SliderKt.bindValue(cell,
+                (Function0<Integer>) () -> snapToTick(spec.readTick.applyAsInt(pending),
+                        spec.min, spec.max, spec.step),
+                (Function1<Integer, kotlin.Unit>) v -> {
+                    spec.writeTick.accept(pending, v);
+                    refreshDerivedHints();
+                    return kotlin.Unit.INSTANCE;
+                });
+
+        // ---- 修法 1：显式 ChangeListener（缺陷 1 的直接修复）----
+        // 用 JSlider 的 ChangeListener（不是 ItemListener）。吸附开启后一次 setValue 可能
+        // 触发 2 次 ChangeEvent（实测 [100, 100]），因此监听器必须幂等 —— 它只写「当前值」。
+        b.slider.addChangeListener(e -> {
+            if (syncingControls) {
+                return;                                  // 程序化回灌，不回写
+            }
+            int v = b.slider.getValue();                 // 已被 JSlider 吸附过
+            spec.writeTick.accept(pending, v);           // ① 写 pending（脏标记需要）
+            valueLabel.setText(spec.valueText.apply(this, v));   // ② 右侧标签实时跟随 ← 缺陷 1
+            syncTextFieldIfDifferent(b, v);              // ③ 输入框文字同步
+            refreshDerivedHints();
+            // ④ 预设下拉的显示必须跟着变（t7 / R-02）。
+            //    pending 一变，原先匹配上的预设就可能不再匹配 → 必须重算，
+            //    否则下拉继续显示「原版粉色」，而实际值早已不是它（显示层撒谎）。
+            refreshPresetDisplay();
+        });
+
+        if (enabledIf != null) {
+            cell.enabledIf(enabledIf);
+            tf.enabledIf(enabledIf);
+            labelCell.enabledIf(enabledIf);
+        }
+
+        bindings.add(b);
+    }
+
+    /**
+     * 把任意原始值<b>吸附</b>到最近刻度，并 <b>clamp</b> 到 {@code [min, max]}。
+     *
+     * <p>它【必须】同时做两件事：
+     * <ul>
+     *   <li><b>clamp</b>：越界输入（如 XML 里被手改成 9999）不能进滑块；</li>
+     *   <li><b>吸附</b>：抹平「精确值 vs 刻度值」的差异 —— 只 clamp 不吸附时，
+     *       {@code pending=333} / 滑块显示 {@code 350} 会让 {@code isModified()} 恒真（B-2）。</li>
+     * </ul>
+     * {@code Math.round} 对 .5 向上，与 {@code JSlider} 的 tick 吸附规则一致
+     * （契约 §1.3.1 的样本：333→350 / 37→50 / -9→0 / 9999→500 / 25→50）。
+     */
+    static int snapToTick(int raw, int min, int max, int step) {
+        int clamped = Math.max(min, Math.min(max, raw));
+        int k = Math.round((float) (clamped - min) / step);
+        return Math.max(min, Math.min(max, min + k * step));
+    }
+
+    // ==================== 双向同步（契约 §6.4 / §6.5）====================
+
+    /** 方向 1：滑块 → 输入框。只改文字，不碰 pending。 */
+    private void syncTextFieldIfDifferent(SliderBinding b, int v) {
+        syncingControls = true;
+        try {
+            String txt = String.valueOf(v);
+            if (!txt.equals(b.textField.getText())) {
+                b.textField.setText(txt);
+            }
+        } finally {
+            syncingControls = false;
+        }
+    }
+
+    /** 方向 2：输入框 → 滑块位置。只挪滑块，pending 交给 apply（契约 §6.1 的语义表）。 */
+    private void onTextEdited(SliderBinding b) {
+        if (syncingControls) {
+            return;
+        }
+        String t = b.textField.getText();
+        if (t == null || !t.trim().matches("-?\\d+")) {
+            return;                                   // 非数字：什么都不做
+        }
+        int v;
+        try {
+            v = Integer.parseInt(t.trim());
+        } catch (NumberFormatException ex) {
+            return;
+        }
+        syncingControls = true;
+        try {
+            int snapped = snapToTick(v, b.spec.min, b.spec.max, b.spec.step);
+            if (b.slider.getValue() != snapped) {
+                b.slider.setValue(snapped);
+            }
+        } finally {
+            syncingControls = false;
+        }
+        // 标签显示【用户输入】而不是滑块值（契约 §6.1 / B-2b）
+        b.valueLabel.setText(b.spec.valueText.apply(this, v));
+        refreshDerivedHints();
+        // t7 / R-02：键入时 pending 按契约【不写】（§6.1 的语义表：只在 apply 时写精确值），
+        // 所以不能拿 pending 去匹配预设 —— 否则「键入 3 但 pending 还是 8」时下拉毫无变化，
+        // 而标签已经显示 3，两者对不上。这里用「用户输入值覆盖 pending 后」的视图做匹配，
+        // 只影响<b>显示</b>，不写 pending。
+        refreshPresetDisplayForInput(b, v);
+    }
+
+    /** 契约 §6.5：失焦规整 —— 非法回滚、越界 clamp 后写回 pending。 */
+    private void normalizeTextField(SliderBinding b) {
+        String t = b.textField.getText();
+        int v = b.spec.readTick.applyAsInt(pending);
+        if (t != null && t.trim().matches("-?\\d+")) {
+            try {
+                v = Integer.parseInt(t.trim());
+            } catch (NumberFormatException ignored) {
+                // 保持 pending 现值
+            }
+        }
+        int clamped = Math.max(b.spec.min, Math.min(b.spec.max, v));
+        syncingControls = true;
+        try {
+            b.textField.setText(String.valueOf(clamped));
+            b.slider.setValue(snapToTick(clamped, b.spec.min, b.spec.max, b.spec.step));
+        } finally {
+            syncingControls = false;
+        }
+        b.spec.writeTick.accept(pending, clamped);
+        b.valueLabel.setText(b.spec.valueText.apply(this, clamped));
+        refreshDerivedHints();
+        refreshPresetDisplay();      // t7 / R-02：失焦规整也会改 pending，下拉必须重算
+    }
+
+    /** 把 {@code pending} 灌进全部控件（reset / 预设应用共用）。 */
+    private void syncAllControlsFromPending() {
+        syncingControls = true;
+        try {
+            for (SliderBinding b : bindings) {
+                int exact = b.spec.readTick.applyAsInt(pending);
+                int snapped = snapToTick(exact, b.spec.min, b.spec.max, b.spec.step);
+                if (b.slider.getValue() != snapped) {
+                    b.slider.setValue(snapped);
+                }
+                String txt = String.valueOf(exact);
+                if (!txt.equals(b.textField.getText())) {
+                    b.textField.setText(txt);
+                }
+                b.valueLabel.setText(b.spec.valueText.apply(this, exact));
+            }
+            if (tailColorPanel != null) {
+                tailColorPanel.setSelectedColor(parseHex(pending.tailColor));
+            }
+            if (shadowColorPanel != null) {
+                shadowColorPanel.setSelectedColor(parseHex(pending.shadowColor));
+            }
+        } finally {
+            syncingControls = false;
+        }
+        refreshDerivedHints();
+        refreshPresetDisplay();
+    }
+
+    // ==================== 预设（契约 §5.7 / §8.6）====================
+
+    /**
+     * 动画预设被选中。<b>只写 {@code pending}，绝不直接写 state / CONFIG</b>（契约 §5.7）。
+     *
+     * <p>「自定义」项<b>不可被选中执行</b>：它只在 {@link #refreshPresetDisplay()} 里被程序置为当前项。
+     * 用户手动点到它时不写任何字段，只把显示刷新回去。
+     */
+    private void onAnimPresetPicked() {
+        if (syncingControls || animPresetCombo == null) {
+            return;
+        }
+        int idx = animPresetCombo.getSelectedIndex();
+        if (idx < 0 || idx >= CursorPresets.ANIM_PRESETS.length) {
+            refreshPresetDisplay();          // 选中「自定义」→ 不改任何字段
+            return;
+        }
+        CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[idx];
+        // 只碰这 6 个字段 —— 颜色两个 HEX、stretchRatioK、trailMode 一概不动（正交性硬判据）
+        pending.animationLength = p.animationLength();
+        pending.shortAnimationLength = p.shortAnimationLength();
+        pending.trailSize = p.trailSize();
+        pending.glowLayers = p.glowLayers();
+        pending.shadowBlurFactor = p.shadowBlurFactor();
+        pending.glowOpacity = p.glowOpacity();
+        syncAllControlsFromPending();
+    }
+
+    /** 颜色预设被选中。只写 2 个 HEX，不碰任何动画字段（正交性硬判据）。 */
+    private void onColorPresetPicked() {
+        if (syncingControls || colorPresetCombo == null) {
+            return;
+        }
+        int idx = colorPresetCombo.getSelectedIndex();
+        if (idx < 0 || idx >= CursorPresets.COLOR_PRESETS.length) {
+            refreshPresetDisplay();
+            return;
+        }
+        CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[idx];
+        pending.tailColor = p.tailColor();
+        pending.shadowColor = p.shadowColor();
+        syncAllControlsFromPending();
+    }
+
+    /**
+     * ColorPanel 变更回调（t7 / R-02 的第 4 处入口）。
+     *
+     * <p>ColorPanel <b>不是</b> {@code DialogPanel} 的绑定控件 —— 用户选色时它只改自己的
+     * 内部状态，{@code pending} 要等 {@code apply()} 才回读。因此这里要先把颜色同步进
+     * {@code pending}（只同步这两个 HEX，不碰别的字段），再重算「当前预设」，
+     * 否则用户换完颜色、下拉还显示原来的颜色预设。
+     *
+     * <p>{@link #refreshPresetDisplay()} 自身在 {@code syncingControls} 保护下，
+     * 且 {@code setSelectedIndex} 触发的 actionPerformed 会被 {@code onColorPresetPicked()}
+     * 的 {@code syncingControls} 早退挡住 —— 无回环。
+     */
+    private void onColorPanelChanged() {
+        if (syncingControls) {
+            return;
+        }
+        if (tailColorPanel != null && tailColorPanel.getSelectedColor() != null) {
+            pending.tailColor = toHex(tailColorPanel.getSelectedColor());
+        }
+        if (shadowColorPanel != null && shadowColorPanel.getSelectedColor() != null) {
+            pending.shadowColor = toHex(shadowColorPanel.getSelectedColor());
+        }
+        refreshPresetDisplay();
+    }
+
+    /**
+     * 键入路径专用的预设显示重算（t7 / R-02）。
+     *
+     * <p><b>为什么不直接调 refreshPresetDisplay()</b>：契约 §6.1 的语义表规定
+     * 「键入合法值 → pending <b>只在 apply() 时写</b>」。所以键入 3 时 pending 仍是 8，
+     * 拿 pending 去匹配会一直匹配「原版粉色」，而下拉与标签（显示 3）就对不上。
+     *
+     * <p>这里用「把用户输入值临时代入 pending 视图」的方式算匹配 ——
+     * <b>只用于显示，绝不写 pending</b>（真正的落库仍由 apply() 完成）。
+     */
+    private void refreshPresetDisplayForInput(SliderBinding b, int inputTick) {
+        if (animPresetCombo == null || colorPresetCombo == null) {
+            return;
+        }
+        // 复制一份 pending，把这一格换成用户输入值，再拿副本去匹配
+        NeovideCursorSettings.State view = deepCopy(pending);
+        b.spec.writeTick.accept(view, inputTick);
+        CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(view);
+        syncingControls = true;
+        try {
+            animPresetCombo.setSelectedIndex(
+                    a == null ? animPresetItems.size() - 1 : indexOfAnim(a));
+        } finally {
+            syncingControls = false;
+        }
+    }
+
+    /**
+     * 重算两个下拉的当前项（契约 §5.3：**逐字段比对**，不看历史）。
+     *
+     * <p>匹配失败时显示末项「自定义」。这是<b>显示态</b>，不是状态 —— 它不被持久化。
+     */
+    private void refreshPresetDisplay() {
+        if (animPresetCombo == null || colorPresetCombo == null) {
+            return;
+        }
+        CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(pending);
+        CursorPresets.ColorPreset c = CursorPresetApplier.matchColorPreset(pending);
+        syncingControls = true;
+        try {
+            animPresetCombo.setSelectedIndex(
+                    a == null ? animPresetItems.size() - 1 : indexOfAnim(a));
+            colorPresetCombo.setSelectedIndex(
+                    c == null ? colorPresetItems.size() - 1 : indexOfColor(c));
+        } finally {
+            syncingControls = false;
+        }
+    }
+
+    private static int indexOfAnim(CursorPresets.AnimPreset p) {
+        for (int i = 0; i < CursorPresets.ANIM_PRESETS.length; i++) {
+            if (CursorPresets.ANIM_PRESETS[i] == p) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private static int indexOfColor(CursorPresets.ColorPreset p) {
+        for (int i = 0; i < CursorPresets.COLOR_PRESETS.length; i++) {
+            if (CursorPresets.COLOR_PRESETS[i] == p) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    // ==================== 派生提示（契约 §7.4：禁止写死数字）====================
+
+    /**
+     * 刷新两条动态耦合提示 + 拉伸强度那一行的派生时长。
+     *
+     * <p>公式与 {@code TrailCorner.jump()} 同源（契约 §7.4）：
+     * <ul>
+     *   <li><b>短跳分支</b>（同一行、≤3 字符）：{@code 时长 = shortAnimationLength × trailFactors[rank]}；</li>
+     *   <li><b>跨行分支</b>：{@code leading = animationLength × (1 - trailSize)}、{@code trailing = animationLength}。</li>
+     * </ul>
+     * 这里只<b>显示</b>，绝不做第二套换算。
+     */
+    private void refreshDerivedHints() {
+        if (singleMoveHint != null) {
+            float[] f = NeovideCursorSettings.deriveTrailFactors(pending.stretchRatioK);
+            long trailing = Math.round(pending.shortAnimationLength * 1000f * f[0]);
+            long leading = Math.round(pending.shortAnimationLength * 1000f * f[3]);
+            singleMoveHint.setText(String.format(Locale.ROOT,
+                    "单行动画时长 = 短动画时长 × 拉伸系数：后缘 %d ms / 前缘 %d ms（系数 %.3f×）。",
+                    trailing, leading, f[3] > 0f ? f[0] / f[3] : 0f));
+        }
+        if (crossMoveHint != null) {
+            long trailing = Math.round(pending.animationLength * 1000f);
+            long leading = Math.round(pending.animationLength * 1000f * (1f - pending.trailSize));
+            // t6 / t10-(R-19)：这里报的是 DampedSpring 的【时间常数】（= 参数值本身），
+            // 不是「运动做完」的墙钟时长。
+            //
+            // 【为什么必须澄清口径】t10 用真实的 DampedSpring(dt=8ms) 量到：
+            // 参数 0.35s → 实际运动 115 帧 / 920ms。面板若只写「350 ms」，
+            // 用户按它判断会低报约 62%，看着困惑；而「单行动画时长」那条提示
+            // 走的是 trailFactors 系数，口径与这条不同，两者并排会显得自相矛盾。
+            //
+            // 【为什么不直接乘一个系数】那是新的写死数字，需要在多处同步维护，
+            // 下一轮审查必然再抓一次。改成「说明它是时间常数」既准确又零新常量。
+            crossMoveHint.setText(String.format(Locale.ROOT,
+                    "跨行动画时长：DampedSpring 时间常数 —— 后缘 = %d ms；前缘 = %d ms"
+                            + "（拖尾密度 %.2f，为 1.00 时前缘为 0）。"
+                            + "实际拖尾约为该值的 2.6 倍（0.35 s 实测约 920 ms / 115 帧）。",
+                    trailing, leading, pending.trailSize));
+        }
+        // 拉伸强度那一行的数值标签里也带派生时长 → 一并刷新
+        for (SliderBinding b : bindings) {
+            if ("stretchRatioK".equals(b.spec.key)) {
+                b.valueLabel.setText(b.spec.valueText.apply(this, b.spec.readTick.applyAsInt(pending)));
+            }
+        }
+    }
+
+    /**
+     * 「拖尾拉伸强度」的派生显示：标称倍率 + 后缘/前缘绝对时长 + rank 方向。
+     *
+     * <p>时长 = <b>{@code pending.shortAnimationLength}</b> × {@code trailFactors[rank]}
+     * （{@code TrailCorner.java:221}）。0.9.5 起短动画时长可调，因此这里
+     * <b>必须读 pending</b>，不能用任何写死的镜像常量（契约 §10.2 的 N-2）。
+     */
+    String stretchText(float k) {
+        float[] f = NeovideCursorSettings.deriveTrailFactors(k);
+        long trailingMs = Math.round(pending.shortAnimationLength * 1000f * f[0]);
+        long leadingMs = Math.round(pending.shortAnimationLength * 1000f * f[3]);
+        float ratio = f[3] > 0f ? f[0] / f[3] : 0f;
+        // 比值用三位小数：契约 §2.5 的自检表就是按 4.545 / 7.692 这种精度写的，
+        // 面板显示必须与它逐位对得上，否则"显示"和"文档"又是两套口径。
+        return String.format(Locale.ROOT,
+                "%.1f×   后缘 %d ms / 前缘 %d ms   (rank0 最拖 → rank3 最跟手，实际比值 %.3f×)",
+                k, trailingMs, leadingMs, ratio);
+    }
+
     // ==================== reset / apply / isModified ====================
 
     /**
      * 从 service 取当前值灌进控件（契约 §3.4 的 R1–R4）。
      *
-     * <p><b>顺序：先换 pending，再 super.reset()。</b>{@code DialogPanel.reset()} 是把
+     * <p><b>顺序：先换 pending + baseline，再 super.reset()。</b>{@code DialogPanel.reset()} 是把
      * {@code get()} 的结果写进控件——pending 还是旧的，控件就会被灌上一轮的值。
+     *
+     * <p><b>baseline 必须与 pending 同时拍</b>：此刻 state 就是「尚未改动」的基准（缺陷 3）。
      */
     @Override
     public void reset() {
-        pending = deepCopy(currentState());
+        NeovideCursorSettings.State cur = deepCopy(currentState());
+        pending = cur;
+        baseline = deepCopy(cur);
         graphReset(pending);
 
-        super.reset();          // DialogPanel 按 pending 刷所有绑定控件
-
-        // R3：非绑定控件（ColorPanel）与派生标签要自己刷
-        if (tailColorPanel != null) {
-            tailColorPanel.setSelectedColor(parseHex(pending.tailColor));
+        // 程序化回灌期间抑制监听器：否则吸附会把「精确值」改写成「刻度值」（B-2 变体）
+        syncingControls = true;
+        try {
+            super.reset();          // DialogPanel 按 pending 刷所有绑定控件
+        } finally {
+            syncingControls = false;
         }
-        if (shadowColorPanel != null) {
-            shadowColorPanel.setSelectedColor(parseHex(pending.shadowColor));
-        }
-        refreshAllLabels();
+        syncAllControlsFromPending();
     }
 
     /**
-     * 把控件值写回 service 并生效（契约 §3.4 的 A1–A5）。
+     * 把控件值写回 service 并生效（契约 §3.3 的 A1–A6）。
      *
      * <p><b>唯一的生效入口是 {@link NeovideCaretManager#applyConfig()}</b>：直接改
-     * {@code CONFIG} 字段会让颜色 / 辉光 / 淡出这些被<b>缓存</b>的值停在旧状态
-     * （证据见 {@code NeovideCaretManager.applyConfig()} 的 S7 与 {@code CaretAnimator}
-     * 的 {@code refreshGlowPadding()}）。
+     * {@code CONFIG} 字段会让颜色 / 辉光 / 淡出这些被<b>缓存</b>的值停在旧状态。
+     *
+     * <p><b>缺陷 3 的修法</b>：逐字段比较 {@code pending} 与 {@code baseline}，
+     * <b>只有用户真改过的字段才写</b>。原来的写法是无条件全量写 18 个字段，
+     * 面板打开期间 Tools 菜单改的值会被冲掉。
+     *
+     * <p><b>【禁止】把它改成「任一字段不同就整份替换」</b>（{@code if (dirtyAnyField) target = pending}）——
+     * 那正是缺陷 3 的原缺陷：用户没碰的字段也会被面板值覆盖掉 Tools 的改动。
+     *
+     * <p><b>已知语义边界（契约 §3.5，刻意保留，不是缺陷）</b>：用户把某字段改了又改回原值、
+     * 期间 Tools 也改了它 → {@code pending == baseline} → 判为「没改过」→ <b>Tools 的值胜出</b>。
+     * 用户最终值就是「原值」，行为上等于没改；而 Tools 的改动是更晚发生的真实事件。
      */
     @Override
     public void apply() {
@@ -428,57 +1099,177 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             pending.shadowColor = toHex(shadowColorPanel.getSelectedColor());
         }
 
-        // A2：DialogPanel 把绑定控件的值写进 pending
-        super.apply();
+        // A2：DialogPanel 把绑定控件的值写进 pending（滑块先、输入框后 —— 见 addSlider 的注释）
+        syncingControls = true;
+        try {
+            super.apply();
+        } finally {
+            syncingControls = false;
+        }
 
-        // A3：pending → service 的 state（15 个字段 + stretchRatioK）
         NeovideCursorSettings svc = serviceOrNull();
         if (svc == null) {
             return;
         }
         NeovideCursorSettings.State target = svc.getState();
-        target.enabled = pending.enabled;
-        target.trailMode = pending.trailMode;
-        target.hideNativeCaret = pending.hideNativeCaret;
-        target.alwaysHighFps = pending.alwaysHighFps;
-        target.overlayFadeOut = pending.overlayFadeOut;
-        target.cursorDisappearDelay = pending.cursorDisappearDelay;
-        target.cursorFadeOutDuration = pending.cursorFadeOutDuration;
-        target.tailColor = pending.tailColor;
-        target.tailOpacity = pending.tailOpacity;
-        target.useShadow = pending.useShadow;
-        target.shadowColor = pending.shadowColor;
-        target.glowOpacity = pending.glowOpacity;
-        target.glowLayers = pending.glowLayers;
-        target.shadowBlurFactor = pending.shadowBlurFactor;
-        target.trailSize = pending.trailSize;
+
+        // A3：逐字段脏标记合并（缺陷 3 的修法本体）
+        // float 必须用 Float.compare：NaN != NaN（==）与 -0.0f == 0.0f 两个边界它都对；
+        // 颜色必须用 equalsIgnoreCase：sanitizeColor 统一成大写，用户手改 XML 可能留小写。
+        if (pending.enabled != baseline.enabled) {
+            target.enabled = pending.enabled;
+        }
+        if (pending.trailMode != baseline.trailMode) {
+            target.trailMode = pending.trailMode;
+        }
+        if (pending.hideNativeCaret != baseline.hideNativeCaret) {
+            target.hideNativeCaret = pending.hideNativeCaret;
+        }
+        if (pending.alwaysHighFps != baseline.alwaysHighFps) {
+            target.alwaysHighFps = pending.alwaysHighFps;
+        }
+        if (pending.overlayFadeOut != baseline.overlayFadeOut) {
+            target.overlayFadeOut = pending.overlayFadeOut;
+        }
+        if (pending.cursorDisappearDelay != baseline.cursorDisappearDelay) {
+            target.cursorDisappearDelay = pending.cursorDisappearDelay;
+        }
+        if (Float.compare(pending.cursorFadeOutDuration, baseline.cursorFadeOutDuration) != 0) {
+            target.cursorFadeOutDuration = pending.cursorFadeOutDuration;
+        }
+        if (!eqHex(pending.tailColor, baseline.tailColor)) {
+            target.tailColor = pending.tailColor;
+        }
+        if (Float.compare(pending.tailOpacity, baseline.tailOpacity) != 0) {
+            target.tailOpacity = pending.tailOpacity;
+        }
+        if (pending.useShadow != baseline.useShadow) {
+            target.useShadow = pending.useShadow;
+        }
+        if (!eqHex(pending.shadowColor, baseline.shadowColor)) {
+            target.shadowColor = pending.shadowColor;
+        }
+        if (Float.compare(pending.glowOpacity, baseline.glowOpacity) != 0) {
+            target.glowOpacity = pending.glowOpacity;
+        }
+        if (pending.glowLayers != baseline.glowLayers) {
+            target.glowLayers = pending.glowLayers;
+        }
+        if (Float.compare(pending.shadowBlurFactor, baseline.shadowBlurFactor) != 0) {
+            target.shadowBlurFactor = pending.shadowBlurFactor;
+        }
+        if (Float.compare(pending.trailSize, baseline.trailSize) != 0) {
+            target.trailSize = pending.trailSize;
+        }
         // 标量真相：只有它会派生 trailFactors（NeovideCursorSettings#deriveTrailFactors）
-        target.stretchRatioK = pending.stretchRatioK;
+        if (Float.compare(pending.stretchRatioK, baseline.stretchRatioK) != 0) {
+            target.stretchRatioK = pending.stretchRatioK;
+        }
+        // ★ 0.9.5 新增 2 项（契约 §7.1）：不写就等于"XML 存了但运行期读不到"
+        if (Float.compare(pending.animationLength, baseline.animationLength) != 0) {
+            target.animationLength = pending.animationLength;
+        }
+        if (Float.compare(pending.shortAnimationLength, baseline.shortAnimationLength) != 0) {
+            target.shortAnimationLength = pending.shortAnimationLength;
+        }
+        // 预设不持久化（契约 §5.2 的 P-1），因此不在此处写任何「当前预设」字段
 
         // A4：落盘
         svc.persistQuietly();
 
         // A5：唯一生效入口（写字段 → 调 setter → 刷新三类缓存）
         NeovideCaretManager.applyConfig();
+
+        // A6：baseline 前移 —— 否则连续两次 apply 时第二次会把第一次的值误判为非脏
+        baseline = deepCopy(target);
+        // A7：pending 必须与 baseline 【同源】前移（0.9.5 t7 / R-01）。
+        //
+        // 【不这么做的实际后果 · 第二次点「应用」会冲掉 Tools 的改动】：
+        //   1) 第 1 次 apply：用户没碰 X，pending.X == baseline.X → 不写 → Tools 的 X 保住；
+        //   2) 但 pending.X 仍是【面板打开时的旧值】，而 target.X 已是 Tools 的新值
+        //      → dirtyAnyField(pending, state) 仍为真 → 按钮保持点亮；
+        //   3) 第 2 次 apply：baseline 已被前移成 Tools 的新值，
+        //      于是 pending.X != baseline.X 成立 → 把【旧值】写回去 → Tools 被冲掉。
+        // 两者同源前移后，第 2 次 apply 的判据全部为「没变」，不会再写任何字段。
+        pending = deepCopy(target);
+        // A8：控件也必须跟着回灌到 target（t7 补强 —— 只前移 pending 是不够的）。
+        //
+        // 【为什么 A7 单独不够】：pending 前移之后，控件里<b>仍显示面板打开时的旧值</b>。
+        // 第 2 次 apply 一开始就 {@code super.apply()}（把控件值写进 pending），
+        // 于是 pending 又被<u>陈旧控件值</u>覆盖回去 → 判据重新变成「变脏」
+        // → 把旧值写进 target → Tools 的改动第二次被冲掉。
+        // 回灌控件后控件值与 target 一致，super.apply() 写回的也是同一组值，判据保持「没变」。
+        //
+        // 【为什么必须用 super.reset() 而不是只调 syncAllControlsFromPending()】：
+        // 后者只回灌滑块 / 输入框 / ColorPanel / 数值标签 —— <b>复选框与下拉不在它的覆盖范围里</b>。
+        // 而本例被 Tools 改掉的恰恰是复选框（overlayFadeOut）：控件仍显示 true，
+        // 第 2 次 super.apply() 会把 true 写回 pending，再次冲掉 Tools 的 false。
+        // {@code super.reset()} 走的是 DialogPanel 自己的 reset 回调表（全部绑定控件），
+        // 正好补齐这一块；两者配合才完整。
+        syncingControls = true;
+        try {
+            super.reset();          // DialogPanel 把 pending 灌进【所有】绑定控件（含复选框/下拉）
+        } finally {
+            syncingControls = false;
+        }
+        syncAllControlsFromPending();
     }
 
     /**
      * 是否有未保存的改动。
      *
-     * <p><b>必须额外比较 ColorPanel</b>：它不是 {@code DialogPanel} 的绑定控件，
-     * 平台自己的 {@code isModified} 完全看不到它——只比 {@code super.isModified()}
-     * 会导致「只改了颜色 → 应用按钮是灰的 → 改动静默丢失」。
+     * <p><b>两半都必须有</b>（契约 §1.3.1 的 C，缺一即踩 B-1 或 B-2）：
+     * <ol>
+     *   <li>{@code super.isModified()} —— 抓「控件值 vs getter()」的差异
+     *       （复选框/下拉被点，或输入框里"键入但未 apply"的文字）；</li>
+     *   <li>{@code dirtyAnyField(pending, state)} —— 抓「pending vs state」的差异
+     *       （滑块拖动已写 pending，但组件值与 getter 一致，super 看不见）。</li>
+     * </ol>
+     *
+     * <p><b>为什么 dirtyAnyField 不可省</b>：修法 3 让 getter 返回 {@code snap(pending)}，
+     * 于是滑块组件值恒等于 {@code getter()}，super 对滑块<b>永远</b>返回 false（B-1：
+     * 应用按钮变灰 → 拖动被静默丢弃）。而拖动已经把 pending 写成新值，故这一半能抓到。
+     *
+     * <p><b>为什么 super 不可省</b>：只比 pending vs state 时，
+     * 「精确值 333 / 刻度 350」会让 isModified 恒真（B-2：OK 按钮永远亮着）。
      */
     @Override
     public boolean isModified() {
-        if (super.isModified()) {
-            return true;
-        }
-        NeovideCursorSettings svc = serviceOrNull();
-        if (svc == null) {
-            return false;
-        }
-        NeovideCursorSettings.State cur = svc.getState();
+        NeovideCursorSettings.State cur = currentState();
+        return super.isModified()
+                || colorPanelModified(cur)
+                || dirtyAnyField(pending, cur);
+    }
+
+    /** pending 与 state 是否有【任一】字段不同（isModified 的第 3 半，与 apply 的判据同源）。 */
+    static boolean dirtyAnyField(NeovideCursorSettings.State p, NeovideCursorSettings.State s) {
+        return p.enabled != s.enabled
+                || p.trailMode != s.trailMode
+                || p.hideNativeCaret != s.hideNativeCaret
+                || p.alwaysHighFps != s.alwaysHighFps
+                || p.overlayFadeOut != s.overlayFadeOut
+                || p.cursorDisappearDelay != s.cursorDisappearDelay
+                || Float.compare(p.cursorFadeOutDuration, s.cursorFadeOutDuration) != 0
+                || !eqHex(p.tailColor, s.tailColor)
+                || Float.compare(p.tailOpacity, s.tailOpacity) != 0
+                || p.useShadow != s.useShadow
+                || !eqHex(p.shadowColor, s.shadowColor)
+                || Float.compare(p.glowOpacity, s.glowOpacity) != 0
+                || p.glowLayers != s.glowLayers
+                || Float.compare(p.shadowBlurFactor, s.shadowBlurFactor) != 0
+                || Float.compare(p.trailSize, s.trailSize) != 0
+                || Float.compare(p.stretchRatioK, s.stretchRatioK) != 0
+                || Float.compare(p.animationLength, s.animationLength) != 0
+                || Float.compare(p.shortAnimationLength, s.shortAnimationLength) != 0;
+    }
+
+    /** HEX 必须忽略大小写：{@code sanitizeColor} 统一成大写，用户手改 XML 可能留小写。 */
+    static boolean eqHex(String a, String b) {
+        return a == null ? b == null : a.equalsIgnoreCase(b);
+    }
+
+    /** ColorPanel 与 state 的颜色是否不同（不是 DialogPanel 的绑定控件，必须单独比）。 */
+    private boolean colorPanelModified(NeovideCursorSettings.State cur) {
         if (tailColorPanel != null && tailColorPanel.getSelectedColor() != null
                 && !toHex(tailColorPanel.getSelectedColor()).equalsIgnoreCase(cur.tailColor)) {
             return true;
@@ -492,14 +1283,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         super.disposeUIResources();
         tailColorPanel = null;
         shadowColorPanel = null;
-        disappearDelayLabel = null;
-        fadeOutDurationLabel = null;
-        tailOpacityLabel = null;
-        glowOpacityLabel = null;
-        glowLayersLabel = null;
-        shadowBlurLabel = null;
-        trailSizeLabel = null;
-        stretchLabel = null;
+        animPresetCombo = null;
+        colorPresetCombo = null;
+        singleMoveHint = null;
+        crossMoveHint = null;
+        bindings.clear();
+        animPresetItems.clear();
+        colorPresetItems.clear();
+        baseline = null;
     }
 
     // ==================== 搜索定位 ====================
@@ -532,25 +1323,40 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     /** 关键字 → 面板上最能代表它的那个数值标签。 */
     private JLabel targetFor(String key) {
         if (has(key, "常驻", "高帧", "highfps", "fps", "刷新")) {
-            return glowLayersLabel;
+            return labelOf("glowLayers");
         }
         if (has(key, "淡出", "fade")) {
-            return disappearDelayLabel;
+            return labelOf("cursorDisappearDelay");
         }
         if (has(key, "层", "layer", "辉光", "glow")) {
-            return glowLayersLabel;
+            return labelOf("glowLayers");
         }
         if (has(key, "外扩", "模糊", "blur", "光晕")) {
-            return shadowBlurLabel;
+            return labelOf("shadowBlurFactor");
         }
         if (has(key, "不透明", "透明", "opacity")) {
-            return glowOpacityLabel;
+            return labelOf("glowOpacity");
         }
         if (has(key, "拉伸", "stretch", "拖尾", "trail")) {
-            return stretchLabel;
+            return labelOf("stretchRatioK");
         }
         if (has(key, "密度", "size")) {
-            return trailSizeLabel;
+            return labelOf("trailSize");
+        }
+        if (has(key, "跨行", "animationLength", "动画时长")) {
+            return labelOf("animationLength");
+        }
+        if (has(key, "短动画", "shortanimation", "打字")) {
+            return labelOf("shortAnimationLength");
+        }
+        return null;
+    }
+
+    private JLabel labelOf(String key) {
+        for (SliderBinding b : bindings) {
+            if (key.equals(b.spec.key)) {
+                return b.valueLabel;
+            }
         }
         return null;
     }
@@ -562,55 +1368,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             }
         }
         return false;
-    }
-
-    // ==================== 标签刷新（纯 UI）====================
-
-    private void refreshAllLabels() {
-        if (disappearDelayLabel != null) {
-            disappearDelayLabel.setText(pending.cursorDisappearDelay + " ms");
-        }
-        if (fadeOutDurationLabel != null) {
-            fadeOutDurationLabel.setText(Math.round(pending.cursorFadeOutDuration * 1000f) + " ms");
-        }
-        if (tailOpacityLabel != null) {
-            tailOpacityLabel.setText(fmt2(pending.tailOpacity));
-        }
-        if (glowOpacityLabel != null) {
-            glowOpacityLabel.setText(fmt2(pending.glowOpacity));
-        }
-        if (glowLayersLabel != null) {
-            glowLayersLabel.setText(pending.glowLayers + " 层");
-        }
-        if (shadowBlurLabel != null) {
-            shadowBlurLabel.setText(fmt2(pending.shadowBlurFactor));
-        }
-        if (trailSizeLabel != null) {
-            trailSizeLabel.setText(fmt2(pending.trailSize));
-        }
-        if (stretchLabel != null) {
-            stretchLabel.setText(stretchText(pending.stretchRatioK));
-        }
-    }
-
-    /**
-     * 「拖尾拉伸强度」的派生显示：标称倍率 + 后缘/前缘绝对时长 + rank 方向。
-     *
-     * <p>时长 = 第一期固定的 110ms 基准 × {@code trailFactors[rank]}
-     * （{@code TrailCorner.java:220}），而 {@code trailFactors} 由
-     * {@link NeovideCursorSettings#deriveTrailFactors(float)} 从标量派生——
-     * 面板只<b>显示</b>派生结果，绝不做第二套换算。
-     */
-    static String stretchText(float k) {
-        float[] f = NeovideCursorSettings.deriveTrailFactors(k);
-        long trailingMs = Math.round(SHORT_ANIMATION_LENGTH * 1000f * f[0]);
-        long leadingMs = Math.round(SHORT_ANIMATION_LENGTH * 1000f * f[3]);
-        float ratio = f[3] > 0f ? f[0] / f[3] : 0f;
-        // 比值用三位小数：契约 §2.5 的自检表就是按 4.545 / 7.692 这种精度写的，
-        // 面板显示必须与它逐位对得上，否则"显示"和"文档"又是两套口径。
-        return String.format(Locale.ROOT,
-                "%.1f×   后缘 %d ms / 前缘 %d ms   (rank0 最拖 → rank3 最跟手，实际比值 %.3f×)",
-                k, trailingMs, leadingMs, ratio);
     }
 
     // ==================== 小工具 ====================
@@ -626,7 +1383,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             @Override public Boolean get() { return getter.invoke(); }
             @Override public void set(Boolean v) {
                 setter.accept(v);
-                return;
             }
         });
     }
@@ -698,6 +1454,36 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         return String.format(Locale.ROOT, "#%02X%02X%02X", c.getRed(), c.getGreen(), c.getBlue());
     }
 
+    private static List<String> animPresetNames() {
+        List<String> out = new ArrayList<>();
+        for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
+            out.add(p.name());
+        }
+        return out;
+    }
+
+    private static List<String> colorPresetNames() {
+        List<String> out = new ArrayList<>();
+        for (CursorPresets.ColorPreset p : CursorPresets.COLOR_PRESETS) {
+            out.add(p.name());
+        }
+        return out;
+    }
+
+    // ==================== 滑块绑定（滑块 + 输入框 + 标签）====================
+
+    /** 一个滑块的三个组件 + 它的规格。 */
+    private static final class SliderBinding {
+        final SliderSpec spec;
+        JSlider slider;
+        JBTextField textField;
+        JLabel valueLabel;
+
+        SliderBinding(SliderSpec spec) {
+            this.spec = spec;
+        }
+    }
+
     // ==================== 供探针读取的观测量 ====================
 
     /** 探针/调试用：当前预览副本（只读语义，不要改它）。 */
@@ -705,13 +1491,71 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         return pending;
     }
 
-    /** 探针/调试用：控件引用（可能为 null，视面板是否已创建）。 */
-    public JLabel stretchLabelForProbe() {
-        return stretchLabel;
+    /** 探针/调试用：面板打开那一刻的 state 快照（缺陷 3 的比较基准）。 */
+    public NeovideCursorSettings.State baselineForProbe() {
+        return baseline;
     }
 
-    public JLabel glowLayersLabelForProbe() {
-        return glowLayersLabel;
+    /** 探针/调试用：{@code syncingControls} 抑制标志的当前值。 */
+    public boolean syncingForProbe() {
+        return syncingControls;
+    }
+
+    /** 探针/调试用：10 个滑块，按创建顺序（= 面板从上到下）。 */
+    public List<JSlider> slidersForProbe() {
+        List<JSlider> out = new ArrayList<>();
+        for (SliderBinding b : bindings) {
+            out.add(b.slider);
+        }
+        return out;
+    }
+
+    /** 探针/调试用：10 个输入框，与 {@link #slidersForProbe()} 同序。 */
+    public List<JBTextField> textFieldsForProbe() {
+        List<JBTextField> out = new ArrayList<>();
+        for (SliderBinding b : bindings) {
+            out.add(b.textField);
+        }
+        return out;
+    }
+
+    /** 探针/调试用：10 个数值标签，与 {@link #slidersForProbe()} 同序。 */
+    public List<JLabel> labelsForProbe() {
+        List<JLabel> out = new ArrayList<>();
+        for (SliderBinding b : bindings) {
+            out.add(b.valueLabel);
+        }
+        return out;
+    }
+
+    /** 探针/调试用：10 个滑块的字段名，与 {@link #slidersForProbe()} 同序。 */
+    public List<String> sliderKeysForProbe() {
+        List<String> out = new ArrayList<>();
+        for (SliderBinding b : bindings) {
+            out.add(b.spec.key);
+        }
+        return out;
+    }
+
+    /** 探针/调试用：某个滑块的刻度表规格（min/max/step）。 */
+    public int[] sliderRangeForProbe(int index) {
+        SliderSpec s = bindings.get(index).spec;
+        return new int[]{s.min, s.max, s.step};
+    }
+
+    /** 探针/调试用：动画预设下拉。 */
+    public com.intellij.openapi.ui.ComboBox<String> animPresetComboForProbe() {
+        return animPresetCombo;
+    }
+
+    /** 探针/调试用：颜色预设下拉。 */
+    public com.intellij.openapi.ui.ComboBox<String> colorPresetComboForProbe() {
+        return colorPresetCombo;
+    }
+
+    /** 探针/调试用：两条动态耦合提示。 */
+    public JLabel[] couplingHintsForProbe() {
+        return new JLabel[]{singleMoveHint, crossMoveHint};
     }
 
     public ColorPanel tailColorPanelForProbe() {
@@ -722,9 +1566,29 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         return shadowColorPanel;
     }
 
-    /** 探针/调试用：复选框被绑定到哪个 predicate（验证联动置灰来源）。 */
-    public JLabel[] allLabelsForProbe() {
-        return new JLabel[]{disappearDelayLabel, fadeOutDurationLabel, tailOpacityLabel,
-                glowOpacityLabel, glowLayersLabel, shadowBlurLabel, trailSizeLabel, stretchLabel};
+    /** 探针/调试用：强制重算预设显示（不经过下拉事件）。 */
+    public void refreshPresetDisplayForProbe() {
+        refreshPresetDisplay();
+    }
+
+    /**
+     * 探针/调试用：直接驱动 ColorPanel 的变更回调体（t7 / R-02 的第 4 处入口）。
+     *
+     * <p>为什么需要它：{@code ColorPanel.setSelectedColor(...)} <b>不派发</b> ActionEvent，
+     * 只有用户在弹出选择器里确认时才派发。探针要覆盖这条路径，
+     * 就等价调用同一个回调体 —— 它驱动的正是生产代码里 {@code addActionListener} 指向的方法。
+     */
+    public void onColorPanelChangedForProbe() {
+        onColorPanelChanged();
+    }
+
+    /** 探针/调试用：模拟用户在下拉里选了某个动画预设（下标 = 预设下标）。 */
+    public void pickAnimPresetForProbe(int index) {
+        animPresetCombo.setSelectedIndex(index);
+    }
+
+    /** 探针/调试用：模拟用户在下拉里选了某个颜色预设。 */
+    public void pickColorPresetForProbe(int index) {
+        colorPresetCombo.setSelectedIndex(index);
     }
 }

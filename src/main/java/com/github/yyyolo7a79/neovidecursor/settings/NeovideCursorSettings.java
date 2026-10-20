@@ -72,6 +72,20 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
     /** 迁移版本号。{@code 1} = 旧键已迁移完毕；{@code 0} = 尚未迁移（或本轮迁移未成功落盘）。 */
     public static final int STATE_VERSION_MIGRATED = 1;
 
+    // ==================== 动画时序的取值范围（契约 §7.1 / §7.2）====================
+
+    /** 跨行动画时长下限（秒）。= {@code MAX_DT}：等于它会被一帧短路成瞬移，故是硬边界。 */
+    public static final float ANIM_LENGTH_MIN = 0.05f;
+
+    /** 跨行动画时长上限（秒）。0.35 的量化依据见 {@code State#animationLength} 的 javadoc。 */
+    public static final float ANIM_LENGTH_MAX = 0.35f;
+
+    /** 短动画时长下限（秒）。 */
+    public static final float SHORT_LENGTH_MIN = 0.02f;
+
+    /** 短动画时长上限（秒）。 */
+    public static final float SHORT_LENGTH_MAX = 0.25f;
+
     private State state = new State();
 
     public static NeovideCursorSettings getInstance() {
@@ -122,6 +136,12 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
 
         target.trailSize = clamp(from.trailSize, 0f, 1f);
         target.stretchRatioK = clamp(from.stretchRatioK, 1.0f, 8.0f);
+
+        // 17/18：0.9.5 新增的两个「动画时序」字段（契约 §7.1）—— 也必须容忍缺省与越界。
+        // 老 XML 里没有这两项 → 平台按字段初值（= NeovideConfig 现值）填充，行为不变。
+        target.animationLength = clamp(from.animationLength, ANIM_LENGTH_MIN, ANIM_LENGTH_MAX);
+        target.shortAnimationLength =
+                clamp(from.shortAnimationLength, SHORT_LENGTH_MIN, SHORT_LENGTH_MAX);
 
         state = target;
 
@@ -297,6 +317,11 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         c.shadowBlurFactor = s.shadowBlurFactor;
         c.trailSize = s.trailSize;
 
+        // 17/18：动画时序（0.9.5 新增可调，契约 §7.1）。
+        // 【必须】写进 CONFIG —— 否则 XML 存了但绘制路径读不到（TrailCorner/DampedSpring 都读 CONFIG）。
+        c.animationLength = s.animationLength;
+        c.shortAnimationLength = s.shortAnimationLength;
+
         // 派生量：新建数组，绝不复用 State 的对象引用
         c.trailFactors = deriveTrailFactors(s.stretchRatioK);
     }
@@ -321,6 +346,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         s.glowLayers = c.glowLayers;
         s.shadowBlurFactor = c.shadowBlurFactor;
         s.trailSize = c.trailSize;
+        s.animationLength = c.animationLength;
+        s.shortAnimationLength = c.shortAnimationLength;
         // stretchRatioK 不在这里回写：它是 trailFactors 的「派生源」而不是派生值。
         // 若从 trailFactors 反推 k，round2 会把 4.5 变回 4.545，面板滑块就会自己漂移。
         // 反推逻辑第一期【不做】（见 SETTINGS-CONTRACT.md v2 §2.5 的裁决），
@@ -534,8 +561,11 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
     /**
      * 持久化形态：第一期 16 项 + 1 个迁移版本号。
      *
-     * <p><b>为什么只放这 16 项</b>：第一期没有任何 UI 通路能改
-     * {@code animationLength} 等字段，把它们也持久化只会扩大迁移面与「多真相源」风险。
+     * <p><b>0.9.5 起有 18 项可调</b>：第一期没有任何 UI 通路能改 {@code animationLength} /
+     * {@code shortAnimationLength}，故未持久化；0.9.5 把这两个做成「动画时序」折叠组后，
+     * 它们成为可调字段（契约 §7.1），必须持久化，否则重启就丢。
+     * <b>除此之外不新增任何字段</b> —— 预设名<b>刻意不持久化</b>（契约 §5.2 的 P-1：
+     * 预设是纯动作不是状态，记「上次选了哪个」就是第四个真相源）。
      *
      * <p><b>平台约束</b>：必须有公开无参构造器，字段必须 {@code public}
      * （{@code XmlSerializer} 默认按字段名序列化）。
@@ -605,6 +635,33 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          */
         public float stretchRatioK = 4.5f;
 
+        /**
+         * 17. 跨行动画时长（秒）。0.9.5 新增可调（契约 §7.1）。
+         *
+         * <p>范围 {@code [0.05, 0.35]}，滑块步长 0.01。
+         * <b>初值必须 = {@code NeovideConfig.animationLength}（0.1f）的字面量</b> ——
+         * 干净安装的用户走 {@code noStateLoaded()}，此时 state 保持这些初值。
+         * 契约 §10.2 的 N-3 允许 {@code 0.1f} / {@code 0.11f} 只出现在这两处声明。
+         *
+         * <p><b>上限 0.35s 的量化依据</b>（契约 §7.2，驱动真实 DampedSpring、dt=8ms）：
+         * 0.35 → 跨行拖尾持续 115 帧 / 920ms，已接近 1 秒心理阈值；
+         * 0.50 → 164 帧 / 1312ms，切屏回来会看到「上一个位置还在拖」。
+         * <b>下限 0.05s 是硬边界</b>：{@code DampedSpring.update()} 首句
+         * {@code animationLength <= dt} 时直接归零，而 {@code MAX_DT = 0.05s}
+         * （{@code CaretAnimator:101}），因此 animationLength = 0.05 在一帧 dt 下即瞬移。
+         */
+        public float animationLength = 0.1f;
+
+        /**
+         * 18. 短动画时长（秒）。0.9.5 新增可调（契约 §7.1）。
+         *
+         * <p>范围 {@code [0.02, 0.25]}，滑块步长 0.01。初值 = {@code NeovideConfig.shortAnimationLength}。
+         *
+         * <p>它只在<b>短跳分支</b>（同一行、≤3 字符）生效：
+         * 时长 = {@code shortAnimationLength × trailFactors[rank]}（{@code TrailCorner.jump() :221}）。
+         */
+        public float shortAnimationLength = 0.11f;
+
         public State() {
         }
 
@@ -630,6 +687,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             shadowBlurFactor = from.shadowBlurFactor;
             trailSize = from.trailSize;
             stretchRatioK = from.stretchRatioK;
+            animationLength = from.animationLength;
+            shortAnimationLength = from.shortAnimationLength;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
@@ -652,6 +711,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                     + ", shadowBlurFactor=" + shadowBlurFactor
                     + ", trailSize=" + trailSize
                     + ", stretchRatioK=" + stretchRatioK
+                    + ", animationLength=" + animationLength
+                    + ", shortAnimationLength=" + shortAnimationLength
                     + "}";
         }
     }
