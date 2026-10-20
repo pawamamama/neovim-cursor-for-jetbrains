@@ -174,8 +174,14 @@ public final class CursorPresets {
     /** 工具菜单的分组标题（plugin.xml 的 {@code text} 与这里必须一致）。 */
     public static final String MENU_COLOR = "Neovide 光标：颜色预设";
 
-    /** 下拉末尾那一项的文案。它<b>不可被选中执行</b>，只是显示态的兜底（契约 §5.7）。 */
-    public static final String CUSTOM_LABEL = "自定义（当前值）";
+    /**
+     * 「已修改」后缀（0.9.6 / M5）。
+     *
+     * <p>M5 之前下拉末项是固定的「自定义（当前值）」——用户看不出自己是<b>基于哪个预设</b>改的。
+     * 现在末项变成动态文案：{@code {基准预设名} + 本后缀}，例如「缎带（已修改）」。
+     * 基准预设 = 最近一次匹配成功 / 手动选中的那个预设（见 NeovideCursorConfigurable#animBaseIdx）。
+     */
+    public static final String MODIFIED_SUFFIX = "（已修改）";
 
     // ==================== 颜色预设 ====================
 

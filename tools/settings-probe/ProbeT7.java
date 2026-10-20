@@ -177,9 +177,11 @@ public final class ProbeT7 {
                 conf.animPresetComboForProbe().getSelectedIndex() == customIdxAnim,
                 "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex()
                         + "（期望 " + customIdxAnim + "）");
-        check("T-02c 末项文案确实是「" + CursorPresets.CUSTOM_LABEL + "」",
-                CursorPresets.CUSTOM_LABEL.equals(
-                        conf.animPresetComboForProbe().getItemAt(customIdxAnim)),
+        // 0.9.6 / M5：末项文案由固定的「自定义（当前值）」改成动态的「{基准预设}（已修改）」。
+        // 基准 = 最近一次匹配成功/手选的预设；本用例里是预设 1（原版粉色）。
+        String expectLast = CursorPresets.ANIM_PRESETS[0].name() + CursorPresets.MODIFIED_SUFFIX;
+        check("T-02c 末项文案是「" + expectLast + "」（M5 起动态生成）",
+                expectLast.equals(conf.animPresetComboForProbe().getItemAt(customIdxAnim)),
                 String.valueOf(conf.animPresetComboForProbe().getItemAt(customIdxAnim)));
 
         // 颜色下拉此时仍应是「原版粉色」（颜色没被碰）—— 正交性 + 只刷该刷的

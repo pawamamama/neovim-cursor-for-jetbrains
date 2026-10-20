@@ -73,6 +73,7 @@ public final class ProbeSettingsV2 {
         snapping(conf);
         animationTiming(conf);
         typingSmoothness(conf);
+        modifiedLabel(conf);
         toolsMenu();
         componentDump();
 
@@ -542,6 +543,88 @@ public final class ProbeSettingsV2 {
             check("A13 跨行耦合提示随 animationLength 动态变化",
                     c1 != null && c2 != null && !c1.equals(c2), "「" + c1 + "」→「" + c2 + "」");
         }
+    }
+
+    // ---------------------------------------------------------------- M5 预设名 + 一键恢复
+    /**
+     * M5：下拉末项从「自定义（当前值）」改成「{基准预设}（已修改）」，并加一键恢复。
+     *
+     * <p>要证明三件事：①干净态显示的是预设名本身；②改一个值后末项文案仍带着「基准预设名」；
+     * ③点恢复能回到该预设、且**只改 pending**（落库仍归 apply）。
+     */
+    private static void modifiedLabel(NeovideCursorConfigurable conf) {
+        System.out.println("--- M5. 预设名「X（已修改）」+ 一键恢复 ---");
+        resetState();
+        conf.reset();
+
+        int lastAnim = conf.animPresetComboForProbe().getItemCount() - 1;
+        String base = CursorPresets.ANIM_PRESETS[0].name();          // 原版粉色
+        int glowIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
+
+        check("M5-1 干净态：下拉选中预设 1，不显示（已修改）",
+                conf.animPresetComboForProbe().getSelectedIndex() == 0,
+                "选中下标=" + conf.animPresetComboForProbe().getSelectedIndex());
+        check("M5-2 末项文案 = 「" + base + "（已修改）」",
+                (base + CursorPresets.MODIFIED_SUFFIX).equals(
+                        conf.animPresetComboForProbe().getItemAt(lastAnim)),
+                String.valueOf(conf.animPresetComboForProbe().getItemAt(lastAnim)));
+
+        conf.slidersForProbe().get(glowIdx).setValue(3);             // 用户改辉光层数 8 → 3
+        check("M5-3 改值后：选中末项，文案仍是「" + base + "（已修改）」",
+                conf.animPresetComboForProbe().getSelectedIndex() == lastAnim
+                        && (base + CursorPresets.MODIFIED_SUFFIX).equals(
+                        conf.animPresetComboForProbe().getItemAt(lastAnim)),
+                "下标=" + conf.animPresetComboForProbe().getSelectedIndex()
+                        + " 文案=" + conf.animPresetComboForProbe().getItemAt(lastAnim));
+
+        check("M5-4 恢复按钮存在且文案带基准预设名",
+                conf.animRestoreButtonForProbe() != null
+                        && conf.animRestoreButtonForProbe().getText().contains(base),
+                conf.animRestoreButtonForProbe() == null ? "null"
+                        : conf.animRestoreButtonForProbe().getText());
+
+        conf.animRestoreButtonForProbe().doClick();
+        check("M5-5 点恢复后 pending.glowLayers 回到预设值 8",
+                conf.pendingForProbe().glowLayers == 8,
+                "pending.glowLayers=" + conf.pendingForProbe().glowLayers);
+        check("M5-6 恢复后显示回到干净预设名（选中预设 1）",
+                conf.animPresetComboForProbe().getSelectedIndex() == 0,
+                "选中下标=" + conf.animPresetComboForProbe().getSelectedIndex());
+        check("M5-7 恢复只改 pending：state 里仍是原值（落库归 apply）",
+                svc.getState().glowLayers == 8,
+                "state.glowLayers=" + svc.getState().glowLayers);
+
+        // 换一个预设后，末项文案的基准要跟着变
+        conf.animPresetComboForProbe().setSelectedIndex(1);          // 缎带
+        conf.slidersForProbe().get(glowIdx).setValue(5);
+        String ribbon = CursorPresets.ANIM_PRESETS[1].name();
+        check("M5-8 换到「" + ribbon + "」再改值：末项文案变成「" + ribbon + "（已修改）」",
+                (ribbon + CursorPresets.MODIFIED_SUFFIX).equals(
+                        conf.animPresetComboForProbe().getItemAt(lastAnim)),
+                String.valueOf(conf.animPresetComboForProbe().getItemAt(lastAnim)));
+
+        // 颜色侧同理
+        resetState();
+        conf.reset();
+        int lastColor = conf.colorPresetComboForProbe().getItemCount() - 1;
+        String colorBase = CursorPresets.COLOR_PRESETS[0].name();
+        check("M5-9 颜色末项文案 = 「" + colorBase + "（已修改）」",
+                (colorBase + CursorPresets.MODIFIED_SUFFIX).equals(
+                        conf.colorPresetComboForProbe().getItemAt(lastColor)),
+                String.valueOf(conf.colorPresetComboForProbe().getItemAt(lastColor)));
+        svc.getState().tailColor = "#123456";
+        conf.reset();
+        check("M5-10 改过颜色后：颜色下拉落到末项、文案带原基准名",
+                conf.colorPresetComboForProbe().getSelectedIndex() == lastColor
+                        && (colorBase + CursorPresets.MODIFIED_SUFFIX).equals(
+                        conf.colorPresetComboForProbe().getItemAt(lastColor)),
+                "下标=" + conf.colorPresetComboForProbe().getSelectedIndex()
+                        + " 文案=" + conf.colorPresetComboForProbe().getItemAt(lastColor));
+        conf.colorRestoreButtonForProbe().doClick();
+        check("M5-11 点颜色恢复后 pending.tailColor 回到预设色 #FFC0CB",
+                "#FFC0CB".equalsIgnoreCase(conf.pendingForProbe().tailColor),
+                conf.pendingForProbe().tailColor);
+        System.out.println();
     }
 
     // ---------------------------------------------------------------- M4 输入平滑

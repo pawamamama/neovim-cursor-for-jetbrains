@@ -180,8 +180,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
     private static final HyperlinkEventAction NO_LINK = HyperlinkEventAction.HTML_HYPERLINK_INSTANCE;
 
-    /** 预设下拉末尾那一项的下标偏移：前 N 项是预设，最后一项是「自定义」（契约 §5.7）。 */
-    private static final String CUSTOM_LABEL = CursorPresets.CUSTOM_LABEL;
+    /** 下拉末项的动态后缀（0.9.6 / M5）：{基准预设名} + 本后缀。 */
+    private static final String MODIFIED_SUFFIX = CursorPresets.MODIFIED_SUFFIX;
+
+    /** 「恢复为默认值」按钮的文案模板。 */
+    private static final String RESTORE_TPL = "恢复为「%s」默认值";
 
     // ==================== 10 个滑块的刻度表（契约 §6.2，逐值冻结）====================
 
@@ -375,8 +378,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     private ColorPanel tailColorPanel;
     private ColorPanel shadowColorPanel;
 
-    // 预设下拉（手工驱动：选中「自定义」不写任何字段，契约 §5.7）
+    // 预设下拉（手工驱动：选中末项「X（已修改）」不写任何字段，契约 §5.7）
     private com.intellij.openapi.ui.ComboBox<String> animPresetCombo;
+
+    /** 末项文案的「基准预设」下标（0.9.6 / M5）：最近一次匹配成功或手动选中的预设。 */
+    private int animBaseIdx = CursorPresets.ANIM_PRESET_DEFAULT_INDEX;
+    private int colorBaseIdx = CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
+
+    /** 「恢复为「X」默认值」按钮（0.9.6 / M5）。点它把基准预设的常量重新写进 pending。 */
+    private javax.swing.JButton animRestoreBtn;
+    private javax.swing.JButton colorRestoreBtn;
     private com.intellij.openapi.ui.ComboBox<String> colorPresetCombo;
 
     private final List<String> animPresetItems = new ArrayList<>();
@@ -452,9 +463,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         paintDiag = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.isPaintDisabled();
 
         animPresetItems.addAll(animPresetNames());
-        animPresetItems.add(CUSTOM_LABEL);
+        animPresetItems.add(MODIFIED_SUFFIX);     // 末项：文案在 refreshPresetDisplay() 里动态改写
         colorPresetItems.addAll(colorPresetNames());
-        colorPresetItems.add(CUSTOM_LABEL);
+        colorPresetItems.add(MODIFIED_SUFFIX);
 
         return BuilderKt.panel(panel -> {
 
@@ -473,6 +484,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 row.label("颜色预设");
                 colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
                 colorPresetCombo.addActionListener(e -> onColorPresetPicked());
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 0b. 一键恢复（0.9.6 / M5）：把「基准预设」的常量重新写进 pending。
+            // 只改 pending（和选预设完全同一条路径），落库仍由「应用 / OK」完成。
+            panel.row("", row -> {
+                row.bottomGap(BottomGap.SMALL);
+                animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                animRestoreBtn.addActionListener(e -> restoreAnimPreset());
+                row.cell(animRestoreBtn);
+                colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                colorRestoreBtn.addActionListener(e -> restoreColorPreset());
+                row.cell(colorRestoreBtn);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1000,15 +1024,89 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         }
         CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(pending);
         CursorPresets.ColorPreset c = CursorPresetApplier.matchColorPreset(pending);
+        // 匹配成功 → 基准预设跟着走（末项文案 = 它 +「已修改」）；匹配失败 → 基准保持不动。
+        if (a != null) {
+            animBaseIdx = indexOfAnim(a);
+        }
+        if (c != null) {
+            colorBaseIdx = indexOfColor(c);
+        }
         syncingControls = true;
         try {
+            setLastItemText(animPresetCombo, animPresetItems,
+                    CursorPresets.ANIM_PRESETS[animBaseIdx].name() + MODIFIED_SUFFIX);
+            setLastItemText(colorPresetCombo, colorPresetItems,
+                    CursorPresets.COLOR_PRESETS[colorBaseIdx].name() + MODIFIED_SUFFIX);
             animPresetCombo.setSelectedIndex(
                     a == null ? animPresetItems.size() - 1 : indexOfAnim(a));
             colorPresetCombo.setSelectedIndex(
                     c == null ? colorPresetItems.size() - 1 : indexOfColor(c));
+            refreshRestoreButtonText();
         } finally {
             syncingControls = false;
         }
+    }
+
+    /**
+     * 改写下拉末项文案（M5）。
+     *
+     * <p>{@code ComboBox} 没有「就地改一项文本」的 API，必须 remove + insert；
+     * 这两步都会发 model 事件，所以调用点一律在 {@code syncingControls} 保护内，
+     * 否则会触发 {@code onAnimPresetPicked()} → 把用户刚改的值又写回预设值。
+     */
+    private static void setLastItemText(com.intellij.openapi.ui.ComboBox<String> combo,
+                                        List<String> items, String text) {
+        int last = items.size() - 1;
+        if (last < 0 || text.equals(items.get(last))) {
+            return;
+        }
+        items.set(last, text);
+        javax.swing.DefaultComboBoxModel<String> model =
+                (javax.swing.DefaultComboBoxModel<String>) combo.getModel();
+        int sel = combo.getSelectedIndex();
+        model.removeElementAt(last);
+        model.insertElementAt(text, last);
+        if (sel == last) {
+            combo.setSelectedIndex(last);
+        }
+    }
+
+    /** 刷新两个「恢复为「X」默认值」按钮的文案（基准预设可能刚变过）。 */
+    private void refreshRestoreButtonText() {
+        if (animRestoreBtn != null) {
+            animRestoreBtn.setText(String.format(RESTORE_TPL,
+                    CursorPresets.ANIM_PRESETS[animBaseIdx].name()));
+        }
+        if (colorRestoreBtn != null) {
+            colorRestoreBtn.setText(String.format(RESTORE_TPL,
+                    CursorPresets.COLOR_PRESETS[colorBaseIdx].name()));
+        }
+    }
+
+    /** M5：把基准动画预设的 6 个常量重新写进 pending（与手动选预设同一条路径）。 */
+    private void restoreAnimPreset() {
+        if (animBaseIdx < 0 || animBaseIdx >= CursorPresets.ANIM_PRESETS.length) {
+            return;
+        }
+        CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[animBaseIdx];
+        pending.animationLength = p.animationLength();
+        pending.shortAnimationLength = p.shortAnimationLength();
+        pending.trailSize = p.trailSize();
+        pending.glowLayers = p.glowLayers();
+        pending.shadowBlurFactor = p.shadowBlurFactor();
+        pending.glowOpacity = p.glowOpacity();
+        syncAllControlsFromPending();
+    }
+
+    /** M5：把基准颜色预设的 2 个 HEX 重新写进 pending。 */
+    private void restoreColorPreset() {
+        if (colorBaseIdx < 0 || colorBaseIdx >= CursorPresets.COLOR_PRESETS.length) {
+            return;
+        }
+        CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[colorBaseIdx];
+        pending.tailColor = p.tailColor();
+        pending.shadowColor = p.shadowColor();
+        syncAllControlsFromPending();
     }
 
     private static int indexOfAnim(CursorPresets.AnimPreset p) {
@@ -1610,6 +1708,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     }
 
     /** 探针/调试用：颜色预设下拉。 */
+    /** 探针/调试用：动画预设「恢复为「X」默认值」按钮（0.9.6 / M5）。 */
+    public javax.swing.JButton animRestoreButtonForProbe() {
+        return animRestoreBtn;
+    }
+
+    /** 探针/调试用：颜色预设「恢复为「X」默认值」按钮（0.9.6 / M5）。 */
+    public javax.swing.JButton colorRestoreButtonForProbe() {
+        return colorRestoreBtn;
+    }
+
     /** 探针/调试用：拖尾渲染模式下拉（M2 / U24）。 */
     public com.intellij.openapi.ui.ComboBox<String> trailModeComboForProbe() {
         return trailModeCombo;
