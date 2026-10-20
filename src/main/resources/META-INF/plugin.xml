@@ -112,32 +112,6 @@
           方案原文写的 AnActionGroup 在本机 381 jar 里【不存在】（javap 实测）。
         -->
 
-        <!--
-          t7 / R-04（t9 / t8-R12 订正）：契约 §8.4 的线框在「既有 5 个开关」与
-          「两个预设子菜单」之间要求一条分隔符。
-
-          【为什么不带 id（t9 订正）】
-          (1) 我扫了 381 个 jar：顶层 <separator> + <add-to-group> = 0 例，
-              顶层 <separator> 带 id 的也 = 0 例；
-          (2) javap 确认 ActionElementMisc ***没有 id 字段*** —— 写了也不会被读取，
-              属于「看起来配置了、实际无效」的假配置，容易误导后来者。
-          因此去掉 id，只保留 separator 本身。
-
-          【本插件是首例，渲染效果需真机确认】
-          本插件是「顶层 separator + add-to-group」的首例，平台内 0 先例。
-          依据仅是 javap ActionManagerImpl 的分派路径：
-          "action"(698) → "separator"(712) → "add-to-group"(726) → "group"(740)
-          走同一个方法，故 separator 与 action/group 一样接受 <add-to-group>。
-          **真机上若不显示这条分隔符，属「该路径未被平台支持」，不是实现错误**；
-          届时补救方式是把契约 §8.4 的线框降级为「示意，不强制」。
-
-          anchor="last" 的多个元素按文档顺序依次追加，因此本分隔符会落在两个预设组之前、
-          既有 5 项之后。
-        -->
-        <separator>
-            <add-to-group group-id="ToolsMenu" anchor="last"/>
-        </separator>
-
         <group id="NeovideCursor.AnimPresetGroup"
                class="com.github.yyyolo7a79.neovidecursor.ui.AnimPresetGroup"
                text="Neovide 光标：动画预设"
