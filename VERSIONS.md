@@ -33,6 +33,7 @@
 | 10-19 12:29 | `0.9.2-imetime-fade` | ✅ | 8ms | 8 | 无 | offset | `7AC9D80E58CD8567` |
 | **10-19 13:05** | **`0.9.3-imegeom`** | **✅** | **8ms** | **8** | **无** | **offset + 几何判据** | **`610AE7E9676E2392`** |
 | **10-19 23:40** | **`0.9.4-settings`** | **✅** | **8ms** | **8** | **无** | **offset + 几何判据**（未改） | **`plugin.xml 7D5CDEF493B4DFA6`**（见注） |
+| **10-20 本轮** | **`0.9.5-settings-ui`** | **✅** | **8ms** | **8**（默认，可调 1–12） | **无** | **offset + 几何判据**（未改） | **`31E1B177`**（96331 B） |
 
 > ⚠️ **本表 0.7.3 ～ 0.9.0 未记录**（那些构建发生在记录习惯中断期间）。
 > 不要为了"补齐"而编造内容；需要追溯请直接看 `dist\` 里的 jar 文件名与时间戳。
@@ -205,6 +206,54 @@ Tier 1（一项）：
 - 用户说"常驻刷新变得可用了"是在 `0.7.1-offset` 装完之后
 
 **所以「舒适」可能指 `uni` 本身，也可能指 `0.7.1`。仍需用户实测确认。**
+
+---
+
+### `0.9.5-settings-ui` 改动摘要（设置界面重做）
+
+**目标：修 4 个已实测缺陷 + 布局重排 + 预设机制 + 滑块吸附 + 放开两个动画参数。**
+**硬约束：观感常量默认值零改动（`NeovideConfig.java` 整文件零 diff，`core/` 零新增）。**
+
+**产物**
+- `dist\jetbrains-neovide-cursor-0.9.5-settings-ui.jar`
+- 字节数 **96331**
+- SHA256 **31E1B177E39A3AD4067DE75CE9855BC34E2CEE6214D4BCFB79E55661B2498170**
+- ⚠️ **整体 SHA256 不是可复现的**（jar 内条目时间戳随构建变化，与 0.9.4 同一个坑）。
+  要判断"是不是同一份内容"，看 **字节数 + 关键 class 的 SHA256**，不要拿整体哈希比。
+- 回退：`build\rollback-0.9.5.ps1`（回退到 0.9.4-settings，含哈希校验）
+
+**一、4 个已实测缺陷**
+1. **滑块不跟手（0/10 → 10/10）** —— `SliderKt.bindValue` 不在 JSlider 上注册 ChangeListener，拖动只改组件值。修法三条缺一不可：显式 `addChangeListener` + 重写 `isModified()` 比 pending-vs-state + 滑块 getter 返回 `snapToTick(pending)`。后两条是**对向陷阱**（只修一条会引入 B-1 或 B-2）。
+2. **刻度数字挤压（51/101/201 条 → 3 条）** —— `RowImpl.slider` 硬编码 `setPaintLabels(true)`。改为自建 min/mid/max 三关键刻度表 + **显式** `setPaintLabels(true)`（labelTable 不会替你打开）+ `setPaintTicks(false)`。
+3. **Tools 覆盖面板** —— `apply()` 原来无条件全量写 16 个字段。改为**逐字段脏标记 + baseline 快照**（不是 `if (dirtyAnyField) target = pending`，那是原缺陷）。
+4. **切主题后原生光标复活** —— 全仓库原本对 `EditorColorsListener` / `EditorColorsManager.TOPIC` **零引用**。修法：`applyNativeCaretHidden(boolean force)` + 新增 `ui/CaretSchemeWatcher.java` 订阅 TOPIC。
+
+**二、布局与功能**
+- 预设置顶（动画 / 颜色两组下拉）→ 总开关 → 淡出 → 颜色与辉光 → ▾拖尾手感（展开）→ ▾动画时序（折叠）
+- 10 个滑块改为「滑块（吸附）+ 输入框（任意值）+ 右侧数值实时跟随」三列
+- **7 动画预设 × 5 颜色预设，完全正交**：换动画不动颜色、换颜色不动动画
+- `animationLength` 0.05–0.35 / `shortAnimationLength` 0.02–0.25 放开为可调，进 `State`（字段数 16→18，加 `stateVersion` 共 19）
+- Tools 新增两个预设子菜单（`DefaultActionGroup` + `ToggleAction` 勾选，天然单选）
+
+**三、复审三轮修掉的 7 条（R-01/R-02/R-03/R-09/R-10/R-11/R-12）**
+- R-01：第二次点「应用」会冲掉 Tools 改动 → apply() 末尾 `pending` 与 baseline 同源前移 **+ `super.reset()` 回灌控件**（只前移 pending 不够：控件没跟上，第 2 次 `super.apply()` 会把陈旧控件值写回）
+- R-02：拖滑块后预设下拉不刷新 → 4 处入口补 `refreshPresetDisplay()`；键入路径用 `refreshPresetDisplayForInput()`（契约规定键入时 pending 不写，直接刷会无效）
+- R-03：旧 scheme 被永久写成透明 → `HIDDEN_SCHEMES`（IdentityHashMap，按对象身份）
+- R-09（t7 引入的新缺陷）：切回已隐藏过的 A 时 `sanitizeCaretColor` 只能返回兜底色 → `putIfAbsent` + 兜底段跳过「已由记录表处理」的 scheme。**两次独立变异证明两处都必需**
+- R-10：`run-v-mutations.ps1` 锚点失配 → 同步；并做了全仓 .ps1 字面量锚点扫描
+- R-11：多行文案被 HTML 折叠 → 用字面 `<br/>`（`HtmlChunk` 不在本机 classpath 上）
+- R-12：顶层 `<separator>` 去掉 id（`ActionElementMisc` 没有 id 字段，写了是假配置）
+
+**四、验证证据（可复跑）**
+- 一键复跑：`tools\settings-probe\run-t9-full.ps1` → **11 段 exit 全 0**
+- 三件套：parity ALL OK / audit DIFF=1 且是 `hideNativeCaret`、D 段排除 `settings/` 后=12 / IME 29-0
+- 探针：`Probe4Bugs`（4 缺陷 + 变异）、`ProbeSchemeChange`、`ProbeSettingsV2` 68 条、`ProbeT7`（R-01/R-02/R-03/R-09/R-17/R-18 + 7 变异）、`ProbeBrRendering` 4 条、`run-v-mutations.ps1` 6 变异
+- 契约核对：D0 零 diff、`core/` 零新增、35 项禁改缺失 0、`State` public 字段 19
+
+**五、未验（需真机）**
+真机面板渲染 / 真机 EDT 手感 / 真机切主题 / 安装后加载 / Tools 分隔符渲染 / 旧 XML 在老用户数据上的迁移 —— 见交付报告「诚实声明」。
+
+**文档**：`SETTINGS-UI-CONTRACT.md`（契约 v1.2）、`SETTINGS-UI-REDESIGN.md`（方案）、`VERIFY-SETTINGS-V2.md`（验证）、`REVIEW-SETTINGS-V2.md`（3 轮复审，最终 verdict=pass）
 
 ---
 

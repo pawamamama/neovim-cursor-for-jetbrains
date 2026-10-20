@@ -8,8 +8,18 @@
 
 ## 0. 一句话现状（2026-10-20）
 
-**插件能用，用户认可。四轮已交付并安装：`0.9.4-settings`（第一个带设置界面的版本）。**
-**工作区干净，HEAD = `3c3944d`。上游 issue/PR 已提 6 条。**
+**插件能用，用户认可。五轮已交付：`0.9.5-settings-ui`（本轮，待安装）。**
+**上一版 `0.9.4-settings` 是第一个带设置界面的版本。**
+
+**0.9.5 交付了什么**（详见 `VERSIONS.md` 的 0.9.5 节）：
+- **修掉 §6.5 的 4 个已实测缺陷**（滑块跟手 / 刻度挤压 / Tools 覆盖 / 切主题复活）
+- **布局重排**：预设置顶 → 总开关 / 淡出 / 颜色与辉光 → ▾拖尾手感 / ▾动画时序（折叠）
+- **7 动画预设 × 5 颜色预设，完全正交**（换一个不动另一个）
+- **10 个滑块改吸附式**：滑块（吸附刻度）+ 输入框（任意值）+ 右侧数值实时跟随
+- **放开 `animationLength` / `shortAnimationLength`** 为可调（0.05–0.35 / 0.02–0.25）
+- **Tools 新增两个预设子菜单**
+- **参数默认值仍零改动**（`NeovideConfig.java` 零 diff、`core/` 零新增）
+- 产物：`dist\jetbrains-neovide-cursor-0.9.5-settings-ui.jar`，回退脚本 `build\rollback-0.9.5.ps1`
 
 **0.9.4 交付了什么**（详见 `VERSIONS.md`）：
 - 新增 `Settings | Tools | Neovide Cursor` 设置页（16 项参数）
@@ -20,7 +30,7 @@
 - 修掉 `alwaysHighFps` 读不到时兜底 `false` 的 bug
 - **参数默认值零改动**（`NeovideConfig.java` 零 diff，三件套全过）
 
-**但设置界面有 4 个已实测确认的缺陷，见 §6.5 —— 这是下一轮的全部工作。**
+**§6.5 的 4 个已实测缺陷已在 0.9.5 全部修掉**（每条的修法与证据见 §6.5 顶部的「已修」标注）。
 
 **不要再做的三件事**（已验证走到尽头）：
 
@@ -176,12 +186,23 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\
 
 ---
 
-## 6.5 【重要】设置界面已实测确认的 4 个缺陷（下一轮必修）
+## 6.5 【已修·0.9.5】设置界面 4 个已实测缺陷
 
-> 这些是 2026-10-20 由 captain 写探针**实机复现**的，不是猜的。
-> 探针源码在临时目录（未入库），复现方法见每条的「证据」。
+> ✅ **四条全部已在 `0.9.5-settings-ui` 修掉**（2026-10-20）。
+> 每条下面是当时的实测记录，保留作史料；**修法与可复跑证据**在
+> `SETTINGS-UI-CONTRACT.md` §1–§4、`VERIFY-SETTINGS-V2.md`、`REVIEW-SETTINGS-V2.md`。
+>
+> 快速复验：`pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\run-t9-full.ps1`
+> → 应输出 `ALL T9 VERIFICATION PASSED`（11 段 exit 全 0）。
 
-### 缺陷 1（高）：8 个滑块的数值标签拖动时**一个都不更新**
+| 缺陷 | 修法一句话 | 探针断言 | 变异 |
+|---|---|---|---|
+| **1** 滑块不跟手（0/10） | 显式 `addChangeListener` + 重写 `isModified()` + getter 返回 `snapToTick(pending)`（**三条缺一不可**，后两条是对向陷阱） | B1-1/B1-2/B1-3、D1-1/D1-2 | MUT-3 删 listener → 红 12 条 |
+| **2** 刻度挤压（51/101/201 条） | 自建 min/mid/max 三刻度 + **显式** `setPaintLabels(true)` + `setPaintTicks(false)` | B2-1..B2-4、D2-1 | MUT-B → 红 11 条 |
+| **3** Tools 覆盖面板 | `apply()` 逐字段脏标记 + baseline 快照（**不是** `if (dirtyAnyField) target = pending`） | B3-1..B3-5、D3-1..D3-4 | MUT-C → 红 3 条 |
+| **4** 切主题光标复活 | `applyNativeCaretHidden(boolean force)` + 新增 `CaretSchemeWatcher` 订阅 `EditorColorsManager.TOPIC` | S1..S5b、S-2..S-4d | MUT-D/MUT-4 → 红 4–5 条 |
+
+### 缺陷 1（高） ✅已修：8 个滑块的数值标签拖动时**一个都不更新**
 
 **现象**：拖滑块，右边 `50 ms` / `0.55` / `8 层` 这些数字不动。
 
@@ -197,7 +218,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\
 **修法方向**：给每个 slider 显式 `addChangeListener`，或用 `Cell.onChanged`（注意它带
 `@ApiStatus.NonExtendable`，第一期契约刻意没用），或改用 `slider + intTextField` 双向绑定。
 
-### 缺陷 2（中）：刻度数字**挤成一团**
+### 缺陷 2（中） ✅已修：刻度数字**挤成一团**
 
 **现象**：滑块下方一串数字糊在一起（截图已确认）。
 
@@ -211,7 +232,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\
 **修法方向**：`SliderKt.labelTable(cell, Map)` 只给关键刻度画标签，或 `setPaintLabels(false)`
 改用 `showValueHint()` + 右侧数值标签。
 
-### 缺陷 3（高）：**面板打开期间点 Tools 菜单，操作会被覆盖**
+### 缺陷 3（高） ✅已修：**面板打开期间点 Tools 菜单，操作会被覆盖**
 
 **现象**：面板开着 → 去点 Tools 菜单取消「辉光淡出」→ 回来点 OK → **取消被撤销了**。
 
@@ -229,7 +250,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\
 - (b) `apply()` 前重新读 state，只写用户真正改过的字段（脏字段跟踪）
 - (c) Tools 菜单改动时通知已打开的面板刷新 `pending`
 
-### 缺陷 4（中）：切主题后原生光标**复活**，插件以为它还隐藏着
+### 缺陷 4（中） ✅已修：切主题后原生光标**复活**，插件以为它还隐藏着
 
 **根因**（代码已确认）：全仓库搜 `EditorColorsListener` / `ColorsListener` / `schemeChanged`
 → **零命中**。而 `applyNativeCaretHidden()` 有早退：
