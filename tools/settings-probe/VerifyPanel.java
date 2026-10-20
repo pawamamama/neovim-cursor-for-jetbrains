@@ -201,6 +201,83 @@ public final class VerifyPanel {
         check("U18 契约 §2.2 的警告文案 + §2.4 的下拉文案全部出现在面板中", missing == 0,
                 "缺失 " + missing + " 条");
 
+        // ================= M2：Tools 侧改值 → 面板显示必须同源（2026-10-20）=================
+        //
+        // 用户 0.9.5 反馈：「tools 和主设置的总开关那一栏有些设置好像没有同步」。
+        // 状态层早就有护栏（t7 的 T-01 覆盖「两次 apply 不冲掉 Tools 的值」），
+        // 但【显示层】没有一条断言 —— 面板打开时若不复算，用户看到的就是旧勾选状态。
+        //
+        //  faithfulness：Tools 侧改值的真实路径是 setXxx() → CONFIG → syncConfigToState() → state，
+        // 面板只读 state（reset 时）。这里直接写 state 与之一一对应，且不依赖 EditorFactory。
+        List<JCheckBox> boxes = new ArrayList<>();
+        for (JComponent c : all) {
+            if (c instanceof JCheckBox) { boxes.add((JCheckBox) c); }
+        }
+        check("U19 复选框数量=6（新增的性能诊断在末位，顺序=构建顺序）", boxes.size() == 6, "实际 " + boxes.size());
+
+        String[] names = {"enabled", "hideNativeCaret", "alwaysHighFps", "overlayFadeOut", "useShadow"};
+
+        // A：全部关掉 → reset → 一个都不许勾（显示不能残留上一轮的值）
+        svc.getState().enabled = false;
+        svc.getState().hideNativeCaret = false;
+        svc.getState().alwaysHighFps = false;
+        svc.getState().overlayFadeOut = false;
+        svc.getState().useShadow = false;
+        conf.reset();
+        int sel = 0;
+        for (JCheckBox b : boxes) { if (b.isSelected()) { sel++; } }
+        check("U20 五个布尔全 false 时 reset 后勾选数=0（含性能诊断）", sel == 0, "实际勾选 " + sel);
+
+        // B：逐个只打开一个 → reset → 必须只有它自己勾上（下标即构建顺序，自校验）
+        boolean displayOk = true;
+        String displayDetail = "";
+        for (int i = 0; i < names.length; i++) {
+            svc.getState().enabled = false;
+            svc.getState().hideNativeCaret = false;
+            svc.getState().alwaysHighFps = false;
+            svc.getState().overlayFadeOut = false;
+            svc.getState().useShadow = false;
+            switch (i) {
+                case 0: svc.getState().enabled = true; break;
+                case 1: svc.getState().hideNativeCaret = true; break;
+                case 2: svc.getState().alwaysHighFps = true; break;
+                case 3: svc.getState().overlayFadeOut = true; break;
+                default: svc.getState().useShadow = true; break;
+            }
+            conf.reset();
+            for (int k = 0; k < boxes.size(); k++) {
+                boolean expect = (k == i);
+                if (boxes.get(k).isSelected() != expect) {
+                    displayOk = false;
+                    displayDetail += names[i] + "→box" + k + "(期望" + expect + "," +
+                            "实际" + boxes.get(k).isSelected() + ") ";
+                }
+            }
+        }
+        check("U21 Tools 侧逐个改布尔后 reset，只有对应的复选框勾上（显示与 state 同源）",
+                displayOk, displayDetail.isEmpty() ? "5 个字段全部正确" : displayDetail);
+
+        // C：Tools 关掉常驻刷新 → 面板 reset 显示未勾选 → 点 apply 不得把它改回 true
+        svc.getState().alwaysHighFps = true;
+        conf.reset();
+        svc.getState().alwaysHighFps = false;      // ← Tools「常驻刷新」取消勾选
+        conf.reset();                              // ← 用户重新打开设置页
+        check("U22 Tools 关掉常驻刷新后，面板复选框显示未勾选",
+                !boxes.get(2).isSelected(), "实际勾选=" + boxes.get(2).isSelected());
+        conf.apply();
+        check("U23 面板 apply 不得把 Tools 的 alwaysHighFps=false 冲回 true",
+                !svc.getState().alwaysHighFps, "state.alwaysHighFps=" + svc.getState().alwaysHighFps);
+
+        // D：最后一个原 Tools 项 —— 残影模式。Tools 切到 AFTERIMAGE 后，面板下拉必须跟着变。
+        svc.getState().trailMode = NeovideConfig.TrailMode.SPRING;
+        conf.reset();
+        svc.getState().trailMode = NeovideConfig.TrailMode.AFTERIMAGE;   // ← Tools「残影模式」
+        conf.reset();
+        Object modeItem = conf.trailModeComboForProbe().getSelectedItem();
+        check("U24 Tools 切到残影模式后，面板下拉显示「残影轨迹」",
+                modeItem != null && String.valueOf(modeItem).contains("残影"),
+                "下拉显示=" + modeItem);
+
         System.out.println();
         System.out.printf("=== 结果：通过 %d，失败 %d ===%n", pass, fail);
         System.out.flush();

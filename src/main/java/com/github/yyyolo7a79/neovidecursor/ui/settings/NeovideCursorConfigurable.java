@@ -374,6 +374,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     private JLabel singleMoveHint;
     private JLabel crossMoveHint;
 
+    /** 「拖尾渲染模式」下拉。仅为探针保留引用（M2 的 U24：Tools 改模式后下拉必须跟着变）。 */
+    private com.intellij.openapi.ui.ComboBox<String> trailModeCombo;
+
     /**
      * 性能诊断（高级区）。**唯一不持久化**的开关：不进 State、不进 CONFIG、不进 isModified，
      * 只在 {@code apply()} 时下发给 {@link com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager}。
@@ -474,6 +477,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                                 @Override public void set(String v) { pending.trailMode = textToMode(v); }
                             });
                     com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
+                    trailModeCombo = box;
                     // 下拉一改就刷新置灰；只改 enabled 状态，不碰 CONFIG
                     box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
                     return kotlin.Unit.INSTANCE;
@@ -1580,6 +1584,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     }
 
     /** 探针/调试用：颜色预设下拉。 */
+    /** 探针/调试用：拖尾渲染模式下拉（M2 / U24）。 */
+    public com.intellij.openapi.ui.ComboBox<String> trailModeComboForProbe() {
+        return trailModeCombo;
+    }
+
     public com.intellij.openapi.ui.ComboBox<String> colorPresetComboForProbe() {
         return colorPresetCombo;
     }

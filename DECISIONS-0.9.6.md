@@ -193,13 +193,31 @@ trailFactors          需要更陡的梯度（如 {1.0, 0.85, 0.6, 0.35}）
 | Neovide 光标：辉光淡出 | 主设置 → 淡出 分组（已有） |
 | Neovide 光标：性能诊断 | 主设置 → 高级（诊断）折叠区 |
 
-### 3.3 不同步是个真 bug —— 要复现
+### 3.3 不同步：是双入口造成的，不是状态同步 bug —— **已查明（2026-10-20 夜）**
 
-用户说 Tools 和主设置的总开关有些设置好像没有同步。
-可能原因：
-1. R-01 类残留（pending 与 state 不一致）
-2. ToggleXxxAction.setSelected 没触发面板刷新
-3. install() 里某些路径没有走 applyConfig()
+用户说 Tools 和主设置的总开关有些设置好像没有同步。原先列的三个可能原因，逐条查过：
+
+| 猜测 | 结论 | 证据 |
+|---|---|---|
+| R-01 类残留（pending 与 state 不一致） | ❌ 不是。0.9.5 的 A6/A7/A8 已修，t7 的 T-01 守着 | `run-t7-probe.ps1` 全绿；本次新增 U23 也绿 |
+| ToggleXxxAction 不刷新面板 | ✅ **这是真因的一半**，但它只在「面板同时开着」时可见 | 面板是模态对话框，菜单点不到；实际表现是**下次打开面板时看到旧勾选** |
+| install() 路径没走 applyConfig | ❌ 不是。所有 setter 都调 `syncConfigToStateAndPersist()` | 代码核对：setTrailMode/setHideNativeCaret/setOverlayFadeOut/setAlwaysHighFps/setEnabled 五处全有 |
+
+**M2 加的护栏（U19–U23，在 `VerifyPanel.java`）**：
+
+- U19：复选框数量与构建顺序（6 个）；
+- U20：五个布尔全 false → reset → 一个都不许勾（显示不能残留）；
+- U21：逐个只开一个 → reset → 只有它自己勾上（显示与 state 同源）；
+- U22：Tools 关掉常驻刷新 → 面板显示未勾选；
+- U23：面板 apply **不得**把 Tools 的 `alwaysHighFps=false` 冲回 true。
+
+**探针有效性（变异证明，2026-10-20 夜实测）**：把 `reset()` 里的 `pending = cur;` 注释掉后，
+U20/U21/U22/U23 **全部变红**（U23：`state.alwaysHighFps=true` ← 被冲回）。
+恢复后 23/23 全绿。**所以这 5 条断言真的能抓这一类 bug，不是假绿。**
+
+**真正的根因（因此 M1 就是修法）**：同一个开关有**两个入口**（菜单 + 面板），
+两边各持一份快照。删掉菜单里那 5 个重复开关之后，唯一入口只剩面板，
+「两处不同步」在结构上不可能再发生 —— 这比再补一条同步代码更彻底。
 
 **必须写探针复现，不能猜。**
 
