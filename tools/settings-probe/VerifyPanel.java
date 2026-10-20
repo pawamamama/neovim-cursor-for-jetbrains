@@ -87,11 +87,14 @@ public final class VerifyPanel {
         }
         System.out.println("  组件统计： 总数=" + all.size() + " slider=" + sliders + " checkbox=" + checks
                 + " combo=" + combos + " colorPanel=" + colors + " label=" + labels);
-        check("U7 8 个滑块（cursorDisappearDelay / cursorFadeOutDuration / tailOpacity / glowOpacity / glowLayers / shadowBlurFactor / trailSize / 拉伸强度）",
-                sliders == 8, "实际 " + sliders);
+        // 0.9.5 的 t3 把 animationLength / shortAnimationLength 也做成可调 → 8 变 10。
+        // 断言随之更新，但语义不变：滑块总数必须等于「可调数值参数」的个数。
+        check("U7 10 个滑块（8 既有 + animationLength / shortAnimationLength）",
+                sliders == 10, "实际 " + sliders);
         check("U8 5 个复选框（enabled / hideNativeCaret / alwaysHighFps / overlayFadeOut / useShadow）",
                 checks == 5, "实际 " + checks);
-        check("U9 1 个下拉（trailMode）", combos == 1, "实际 " + combos);
+        // 0.9.5 的 t3 新增两个预设下拉（动画 / 颜色），加上 trailMode = 3 个。
+        check("U9 3 个下拉（trailMode + 动画预设 + 颜色预设）", combos == 3, "实际 " + combos);
         check("U10 2 个 ColorPanel（tailColor / shadowColor）", colors == 2, "实际 " + colors);
 
         // reset 回显
@@ -288,6 +291,97 @@ public final class VerifyPanel {
                 }
             };
 
+    /**
+     * headless 探针用的 ActionManager 桩（collapsibleGroup 构造时要 CollapsiblePanel-toggle）。
+     *
+     * <p>ActionManager 是抽象类，只能手写不能 Proxy。
+     */
+    static final class FakeActionManager extends com.intellij.openapi.actionSystem.ActionManager {
+        static final FakeActionManager INSTANCE = new FakeActionManager();
+        @Override public com.intellij.openapi.actionSystem.ActionPopupMenu createActionPopupMenu(String place, com.intellij.openapi.actionSystem.ActionGroup g) { return null; }
+        @Override public com.intellij.openapi.actionSystem.ActionToolbar createActionToolbar(String place, com.intellij.openapi.actionSystem.ActionGroup g, boolean h) { return null; }
+        @Override public com.intellij.openapi.actionSystem.AnAction getAction(String id) { return null; }
+        @Override public String getId(com.intellij.openapi.actionSystem.AnAction a) { return null; }
+        @Override public void registerAction(String id, com.intellij.openapi.actionSystem.AnAction a) { }
+        @Override public void registerAction(String id, com.intellij.openapi.actionSystem.AnAction a, com.intellij.openapi.extensions.PluginId p) { }
+        @Override public void unregisterAction(String id) { }
+        @Override public void replaceAction(String id, com.intellij.openapi.actionSystem.AnAction a) { }
+        @Override public String[] getActionIds(String prefix) { return new String[0]; }
+        @Override public List<String> getActionIdList(String prefix) { return new ArrayList<>(); }
+        @Override public boolean isGroup(String id) { return false; }
+        @Override public com.intellij.openapi.actionSystem.AnAction getActionOrStub(String id) { return null; }
+        @Override public void addTimerListener(com.intellij.openapi.actionSystem.TimerListener l) { }
+        @Override public void removeTimerListener(com.intellij.openapi.actionSystem.TimerListener l) { }
+        @Override public com.intellij.openapi.util.ActionCallback tryToExecute(com.intellij.openapi.actionSystem.AnAction a, java.awt.event.InputEvent e, java.awt.Component c, String place, boolean now) { return null; }
+        @Override public com.intellij.openapi.actionSystem.KeyboardShortcut getKeyboardShortcut(String id) { return null; }
+    }
+
+    /** SingleAlarmSharedCoroutineScopeHolder 替身（包私有类，反射建）。 */
+    private static Object newAlarmHolder(Class<?> holderClass) {
+        try {
+            Class<?> scopeClass = Class.forName("kotlinx.coroutines.CoroutineScope");
+            Object globalScope = Class.forName("kotlinx.coroutines.GlobalScope").getField("INSTANCE").get(null);
+            java.lang.reflect.Constructor<?> ctor = holderClass.getConstructor(scopeClass);
+            ctor.setAccessible(true);
+            return ctor.newInstance(globalScope);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * headless 探针用的 {@code JBPopupFactory} 桩。
+     *
+     * <p>0.9.5 起每个滑块配一个 {@code intTextField}，它注册的文本校验器在文本变化时会走
+     * {@code ComponentValidator.updateInfo} → {@code JBPopupFactory.getInstance()} 建提示气泡；
+     * headless 下为 null → NPE。同属探针环境缺失，不是被测代码的缺陷。
+     *
+     * <p>必须手写而不是 Proxy：{@code JBPopupFactory} 是抽象类。
+     */
+    static final class FakePopupFactory extends com.intellij.openapi.ui.popup.JBPopupFactory {
+        static final FakePopupFactory INSTANCE = new FakePopupFactory();
+
+        @Override public <T> com.intellij.openapi.ui.popup.IPopupChooserBuilder<T> createPopupChooserBuilder(List<? extends T> list) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createConfirmation(String t, Runnable r, int d) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createConfirmation(String t, String y, String n, Runnable yr, int d) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createConfirmation(String t, String y, String n, Runnable yr, Runnable nr, int d) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopupStep createActionsStep(com.intellij.openapi.actionSystem.ActionGroup g, com.intellij.openapi.actionSystem.DataContext c, String title, boolean dbl, boolean left, String s, java.awt.Component comp, boolean b, int n, boolean x) { return null; }
+        @Override public com.intellij.ui.awt.RelativePoint guessBestPopupLocation(javax.swing.JComponent c) { return null; }
+        @Override public com.intellij.ui.awt.RelativePoint guessBestPopupLocation(com.intellij.openapi.actionSystem.DataContext c) { return null; }
+        @Override public com.intellij.ui.awt.RelativePoint guessBestPopupLocation(com.intellij.openapi.editor.Editor e) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createActionGroupPopup(String title, com.intellij.openapi.actionSystem.ActionGroup g, com.intellij.openapi.actionSystem.DataContext c, boolean a, boolean b, boolean d, Runnable r, int n, com.intellij.openapi.util.Condition<? super com.intellij.openapi.actionSystem.AnAction> cond) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createActionGroupPopup(String title, com.intellij.openapi.actionSystem.ActionGroup g, com.intellij.openapi.actionSystem.DataContext c, com.intellij.openapi.ui.popup.JBPopupFactory.ActionSelectionAid aid, boolean cancel, Runnable r, int n, com.intellij.openapi.util.Condition<? super com.intellij.openapi.actionSystem.AnAction> cond, String place) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createListPopup(com.intellij.openapi.ui.popup.ListPopupStep s) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createListPopup(com.intellij.openapi.ui.popup.ListPopupStep s, int w) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ListPopup createListPopup(com.intellij.openapi.project.Project p, com.intellij.openapi.ui.popup.ListPopupStep s, java.util.function.Function<? super javax.swing.ListCellRenderer, ? extends javax.swing.ListCellRenderer> f) { return null; }
+        @Override public com.intellij.openapi.ui.popup.TreePopup createTree(com.intellij.openapi.ui.popup.JBPopup p, com.intellij.openapi.ui.popup.TreePopupStep s, Object o) { return null; }
+        @Override public com.intellij.openapi.ui.popup.TreePopup createTree(com.intellij.openapi.ui.popup.TreePopupStep s) { return null; }
+        @Override public com.intellij.openapi.ui.popup.ComponentPopupBuilder createComponentPopupBuilder(javax.swing.JComponent content, javax.swing.JComponent focused) { return popupBuilder(); }
+        @Override public boolean isBestPopupLocationVisible(com.intellij.openapi.editor.Editor e) { return false; }
+        @Override public java.awt.Point getCenterOf(javax.swing.JComponent a, javax.swing.JComponent b) { return null; }
+        @Override public List<com.intellij.openapi.ui.popup.JBPopup> getChildPopups(java.awt.Component c) { return new ArrayList<>(); }
+        @Override public boolean isPopupActive() { return false; }
+        @Override public com.intellij.openapi.ui.popup.BalloonBuilder createBalloonBuilder(javax.swing.JComponent c) { return null; }
+        @Override public com.intellij.openapi.ui.popup.BalloonBuilder createDialogBalloonBuilder(javax.swing.JComponent c, String title) { return null; }
+        @Override public com.intellij.openapi.ui.popup.BalloonBuilder createHtmlTextBalloonBuilder(String html, javax.swing.Icon icon, java.awt.Color fg, java.awt.Color bg, javax.swing.event.HyperlinkListener l) { return null; }
+        @Override public com.intellij.openapi.ui.popup.BalloonBuilder createHtmlTextBalloonBuilder(com.intellij.util.ui.Html html, javax.swing.Icon icon, java.awt.Color fg, java.awt.Color bg, javax.swing.event.HyperlinkListener l) { return null; }
+        @Override public com.intellij.openapi.ui.popup.BalloonBuilder createHtmlTextBalloonBuilder(String html, com.intellij.openapi.ui.MessageType type, javax.swing.event.HyperlinkListener l) { return null; }
+        @Override public com.intellij.openapi.ui.popup.JBPopup createMessage(String msg) { return null; }
+        @Override public com.intellij.openapi.ui.popup.Balloon getParentBalloonFor(java.awt.Component c) { return null; }
+        @Override protected <T> com.intellij.openapi.ui.popup.PopupChooserBuilder.PopupComponentAdapter<T> createPopupComponentAdapter(com.intellij.openapi.ui.popup.PopupChooserBuilder<T> b, javax.swing.JList<T> l) { return null; }
+        @Override protected <T> com.intellij.openapi.ui.popup.PopupChooserBuilder.PopupComponentAdapter<T> createPopupComponentAdapter(com.intellij.openapi.ui.popup.PopupChooserBuilder<T> b, javax.swing.JTree t) { return null; }
+        @Override protected <T> com.intellij.openapi.ui.popup.PopupChooserBuilder.PopupComponentAdapter<T> createPopupComponentAdapter(com.intellij.openapi.ui.popup.PopupChooserBuilder<T> b, javax.swing.JTable t) { return null; }
+    }
+
+    /** ComponentPopupBuilder 是接口 → Proxy 可行；链式 setter 返回 this。
+     */
+    private static com.intellij.openapi.ui.popup.ComponentPopupBuilder popupBuilder() {
+        return (com.intellij.openapi.ui.popup.ComponentPopupBuilder) Proxy.newProxyInstance(
+                VerifyPanel.class.getClassLoader(),
+                new Class<?>[]{com.intellij.openapi.ui.popup.ComponentPopupBuilder.class},
+                (pr, m, a) -> m.getReturnType().isInstance(pr) ? pr : null);
+    }
+
     private static void installFakeApp() {
         Application proxy = (Application) Proxy.newProxyInstance(
                 VerifyPanel.class.getClassLoader(),
@@ -303,6 +397,9 @@ public final class VerifyPanel {
                                 if (c == PropertiesComponent.class) {
                                     return pc;
                                 }
+                                if (c == com.intellij.openapi.actionSystem.ActionManager.class) { return FakeActionManager.INSTANCE; }
+                                if (c == com.intellij.openapi.ui.popup.JBPopupFactory.class) { return FakePopupFactory.INSTANCE; }
+                                if ("SingleAlarmSharedCoroutineScopeHolder".equals(c.getSimpleName())) { return newAlarmHolder(c); }
                                 if (c == com.intellij.ui.ExperimentalUI.class) {
                                     return EXPERIMENTAL_UI;
                                 }

@@ -9,13 +9,32 @@
 #
 # 用法：
 #   pwsh -NoProfile -ExecutionPolicy Bypass -File D:\deepseekwork\neovim-cursor-pr\tools\frame-probe\run-frame-compare.ps1
-#   -Rounds 3（默认）  -BaseRef 8906609（默认 = 0.9.3-imegeom，即本批改动前的 HEAD）
+#   -Rounds 3（默认）  -BaseRef 0e323df（默认 = "本批改动前的 HEAD"，见下方订正）
+#
+# ============================ t7 / R-07 订正 ============================
+# 【旧值 8906609 为什么是错的】
+#   8906609 是 0.9.3-imegeom，它比 0e323df 早 **10 个提交**，
+#   两者之间的 src/ 差异是 **5 个文件 / +1704 −59 行**（含新建的
+#   NeovideCursorSettings.java、NeovideCursorConfigurable.java，以及
+#   NeovideCaretManager.java 的大改）。把 8906609 当基线等于**跨了一整批改动**比较，
+#   量出来的差异无法归因给本批。
+#
+# 【正确定义】「本批改动前的 HEAD」= 0e323df
+#   （它正是 0.9.5 工作的起点：settings 面板与 4 个 bug 修法都还没进来）。
+#
+# 【V10 口径同步】V10「帧率不回归」的正确措辞是
+#   「与 0e323df（本批改动前的 HEAD）同档」，而不是「与 0.9.3-imegeom 同档」。
+#   两者不是同一个东西，混用会让结论无法复核。
+#
+# 【-BaseRef 仍可覆盖】想跟更早的版本比时显式传，例如
+#   -BaseRef 8906609，脚本会照做，但报告里必须写明基线是哪个 ref。
+# ======================================================================
 #
 # 安全：不使用 PowerShell 自动变量名（$home/$env/$args/$input/$PSHOME/$host/$pwd/$error/$matches）做赋值。
 
 param(
     [string]$Repo = 'D:\deepseekwork\neovim-cursor-pr',
-    [string]$BaseRef = '8906609',
+    [string]$BaseRef = '0e323df',
     [string]$Libs = 'D:\deepseekwork\_idea-anim\idea-libs',
     [string]$Work = (Join-Path $Repo 'build\verify-t4\frame'),
     [int]$Rounds = 3
@@ -29,6 +48,13 @@ New-Item -ItemType Directory -Force -Path $Work | Out-Null
 
 $cp = (Get-ChildItem -LiteralPath $Libs -Filter '*.jar' | ForEach-Object { $_.FullName }) -join ';'
 Step "idea-libs jar 数 = $((Get-ChildItem -LiteralPath $Libs -Filter '*.jar').Count)"
+
+# ---------- 基线自检：把基线 ref 的身份打进报告，避免"基线标错"再现 ----------
+$baseSubject = (& git -C $Repo log -1 --format='%h %s' $BaseRef) -join ''
+if ([string]::IsNullOrWhiteSpace($baseSubject)) { throw "基线 ref 不存在：$BaseRef" }
+Step "基线 $BaseRef = $baseSubject"
+$headSubject = (& git -C $Repo log -1 --format='%h %s' HEAD) -join ''
+Step "当前 HEAD = $headSubject"
 
 # ---------- 基线源码（git archive，不碰工作区）----------
 $baseSrcRoot = Join-Path $Work 'base-src'
