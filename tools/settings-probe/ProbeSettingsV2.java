@@ -2,6 +2,7 @@ import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
 import com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier;
+import com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.Application;
@@ -71,6 +72,7 @@ public final class ProbeSettingsV2 {
         orthogonality(conf);
         snapping(conf);
         animationTiming(conf);
+        typingSmoothness(conf);
         toolsMenu();
         componentDump();
 
@@ -103,10 +105,10 @@ public final class ProbeSettingsV2 {
                 "实际 " + conf.colorPresetComboForProbe().getItemCount());
 
         // L5：10 个滑块（8 既有 + 2 新增）
-        check("L5 面板里有 10 个滑块（8 既有 + animationLength/shortAnimationLength）",
-                conf.slidersForProbe().size() == 10, "实际 " + conf.slidersForProbe().size());
-        check("L6 面板里有 10 个输入框（与滑块一一对应）",
-                conf.textFieldsForProbe().size() == 10, "实际 " + conf.textFieldsForProbe().size());
+        check("L5 面板里有 11 个滑块（8 既有 + animationLength/shortAnimationLength + typingSmoothness）",
+                conf.slidersForProbe().size() == 11, "实际 " + conf.slidersForProbe().size());
+        check("L6 面板里有 11 个输入框（与滑块一一对应）",
+                conf.textFieldsForProbe().size() == 11, "实际 " + conf.textFieldsForProbe().size());
 
         // L7：折叠组存在（CollapsibleRow 会带一个「展开箭头」按钮，标题文字可查）
         StringBuilder text = new StringBuilder();
@@ -372,10 +374,10 @@ public final class ProbeSettingsV2 {
                         .append("->").append(got).append(") ");
             }
         }
-        check("S1 10/10 滑块拖到非刻度值都会自动落到刻度上", snapOk == 10,
+        check("S1 11/11 滑块拖到非刻度值都会自动落到刻度上（M4 起含输入平滑）", snapOk == 11,
                 snapOk + "/10" + (detail.length() > 0 ? "  违规: " + detail : ""));
 
-        // S2：标签实时跟随（延续 t2 的 8/8，现在是 10/10）
+        // S2：标签实时跟随（t2 的 8/8 → t3 的 10/10 → M4 的 11/11）
         resetState();
         conf.reset();
         int follow = 0;
@@ -391,7 +393,7 @@ public final class ProbeSettingsV2 {
                 follow++;
             }
         }
-        check("S2 10/10 滑块拖动时数值标签实时跟随", follow == 10, follow + "/10");
+        check("S2 11/11 滑块拖动时数值标签实时跟随", follow == 11, follow + "/11");
 
         // S3：每个滑块恰好 1 个 ChangeListener
         int one = 0;
@@ -400,7 +402,7 @@ public final class ProbeSettingsV2 {
                 one++;
             }
         }
-        check("S3 10/10 滑块 ChangeListener 数恰为 1", one == 10, one + "/10");
+        check("S3 11/11 滑块 ChangeListener 数恰为 1", one == 11, one + "/11");
 
         // S4：输入框 → 滑块位置同步，但标签显示用户输入的精确值
         resetState();
@@ -540,6 +542,63 @@ public final class ProbeSettingsV2 {
             check("A13 跨行耦合提示随 animationLength 动态变化",
                     c1 != null && c2 != null && !c1.equals(c2), "「" + c1 + "」→「" + c2 + "」");
         }
+    }
+
+    // ---------------------------------------------------------------- M4 输入平滑
+    /**
+     * M4：输入平滑只压平「短跳四角梯度」，**总时长不变**。
+     *
+     * <p>这是 0.9.6 的 A 组根因修复的调参面：短跳前缘时长 = shortAnimationLength × trailFactors[3]，
+     * 0.04s 时前缘只有 8.8ms（8ms 一帧 ⇒ 一帧到位），抬到 ≥3 帧才不会「跳」。
+     */
+    private static void typingSmoothness(NeovideCursorConfigurable conf) {
+        System.out.println("--- S. 输入平滑（M4：只压平短跳梯度，不改总时长）---");
+
+        float[] off = NeovideCursorSettings.deriveTrailFactors(4.5f, 0f);
+        check("S-1 平滑=0 时四档系数与旧版逐位相同（parity / 预设匹配依赖）",
+                off[0] == 1.0f && off[1] == 0.72f && off[2] == 0.42f && off[3] == 0.22f,
+                "实际 " + java.util.Arrays.toString(off));
+
+        float[] on = NeovideCursorSettings.deriveTrailFactors(4.5f, 1f);
+        check("S-2 平滑=100% 时后缘（rank0）仍是 1.0 ⇒ 总时长不变",
+                on[0] == 1.0f, "实际 f0=" + on[0]);
+        check("S-3 平滑=100% 时前缘（rank3）被抬起，但仍是四档里最短的",
+                on[3] > 0.22f && on[3] < on[2] && on[2] < on[1] && on[1] < on[0],
+                "实际 " + java.util.Arrays.toString(on));
+
+        int framesOff = Math.round(0.04f * off[3] * 1000f / 8f);
+        int framesOn = Math.round(0.04f * on[3] * 1000f / 8f);
+        check("S-4 短跳 0.04s 时前缘帧数：关=1~2 帧、100%=≥4 帧（这就是「跳 vs 顺」的数字）",
+                framesOff <= 2 && framesOn >= 4,
+                "关=" + framesOff + " 帧（" + Math.round(0.04f * off[3] * 1000f) + " ms）,"
+                        + " 开=" + framesOn + " 帧（" + Math.round(0.04f * on[3] * 1000f) + " ms）");
+
+        boolean mono = true;
+        float prev = -1f;
+        for (int pct = 0; pct <= 100; pct += 10) {
+            float f3 = NeovideCursorSettings.deriveTrailFactors(4.5f, pct / 100f)[3];
+            if (f3 < prev) { mono = false; }
+            prev = f3;
+        }
+        check("S-5 平滑从 0% 到 100% 时前缘系数单调不减", mono, "ok");
+
+        svc.getState().stretchRatioK = 4.5f;
+        svc.getState().typingSmoothness = 1f;
+        svc.syncStateToConfig();
+        float[] cfg = NeovideCaretManager.getConfig().trailFactors;
+        check("S-6 syncStateToConfig 落地：CONFIG.trailFactors == deriveTrailFactors(4.5, 1)",
+                cfg[0] == 1.0f && cfg[3] > 0.22f, "实际 " + java.util.Arrays.toString(cfg));
+
+        svc.getState().typingSmoothness = 0f;
+        svc.syncStateToConfig();
+        check("S-7 面板上确有第 11 个滑块（输入平滑）且量程 0–100",
+                conf.slidersForProbe().size() == 11
+                        && conf.slidersForProbe().get(10).getMinimum() == 0
+                        && conf.slidersForProbe().get(10).getMaximum() == 100,
+                conf.slidersForProbe().size() > 10
+                        ? ("min=" + conf.slidersForProbe().get(10).getMinimum()
+                        + " max=" + conf.slidersForProbe().get(10).getMaximum()) : "滑块数不足");
+        System.out.println();
     }
 
     // ---------------------------------------------------------------- Tools 菜单

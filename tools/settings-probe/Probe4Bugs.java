@@ -53,11 +53,12 @@ public final class Probe4Bugs {
     private static final String[] SLIDER_NAMES = {
             "淡出前保持时长", "淡出时长", "拖尾不透明度", "辉光峰值不透明度",
             "辉光层数", "辉光外扩幅度", "拖尾密度", "拖尾拉伸强度",
-            "跨行动画时长", "短动画时长"
+            "跨行动画时长", "短动画时长", "输入平滑"
     };
 
     /** 每个滑块拖动后的目标值（都在各自刻度网格上：50 / 25 / 5 / 5 / 1 / 5 / 5 / 5 / 1 / 1）。 */
-    private static final int[] SLIDER_TARGET = {250, 500, 40, 20, 4, 10, 30, 20, 20, 10};
+    // M4 起 11 个滑块：最后一个 typingSmoothness 拖到 60（0–100 步长 5）
+    private static final int[] SLIDER_TARGET = {250, 500, 40, 20, 4, 10, 30, 20, 20, 10, 60};
 
     public static void main(String[] args) throws Exception {
         System.out.println("=== t2 探针：4 个缺陷（滑块跟手 / 刻度挤压 / Tools 覆盖 / 切主题复活）===");
@@ -79,8 +80,9 @@ public final class Probe4Bugs {
         // ============ 缺陷 1 / 2 ============
         List<JSlider> sliders = conf.slidersForProbe();
         List<JLabel> labels = conf.labelsForProbe();
-        check("B1-0 面板里有 10 个滑块（与 labelsForProbe 等长；t3 起含两个动画时序参数）",
-                sliders.size() == 10 && labels.size() == 10,
+        // 0.9.6 / M4：新增第 11 个滑块「输入平滑」
+        check("B1-0 面板里有 11 个滑块（与 labelsForProbe 等长；t3 起含两个动画时序参数 + M4 输入平滑）",
+                sliders.size() == 11 && labels.size() == 11,
                 "sliders=" + sliders.size() + " labels=" + labels.size());
 
         defect1(sliders, labels, conf);
@@ -133,10 +135,10 @@ public final class Probe4Bugs {
                     + "  listener=" + n + "  「" + before + "」→「" + after + "」"
                     + "  pendingTick=" + pendingTick + "  sliderValue=" + s.getValue());
         }
-        check("B1-1 10/10 滑块拖动时数值标签跟随（修复前 0/8）", followed == 10,
-                followed + "/10 跟随");
+        check("B1-1 11/11 滑块拖动时数值标签跟随（修复前 0/8；M4 起 11 个）", followed == 11,
+                followed + "/11 跟随");
         check("B1-2 每个滑块恰好 1 个 ChangeListener（不用 showValueHint 污染判据）",
-                listenerOk == 10, listenerOk + "/10 恰为 1");
+                listenerOk == 11, listenerOk + "/11 恰为 1");
 
         // 幂等：吸附下一轮 setValue 可能触发两次 ChangeEvent，结果必须相同
         JSlider s0 = sliders.get(0);
@@ -163,13 +165,13 @@ public final class Probe4Bugs {
                     + "  labelTable=" + n + "  paintLabels=" + s.getPaintLabels()
                     + "  paintTicks=" + s.getPaintTicks());
         }
-        check("B2-1 10/10 滑块的 labelTable 条目数 ≤ 3 且 ≥ 2", okCount == 10, okCount + "/10");
-        check("B2-2 10/10 滑块 paintLabels=true（labelTable 不会自动打开它）",
-                countPaintLabels(sliders), "期望 10");
-        check("B2-3 10/10 滑块 paintTicks=false（不画刻度线，只留 label 位置语义）",
-                countPaintTicks(sliders), "期望 10");
+        check("B2-1 11/11 滑块的 labelTable 条目数 ≤ 3 且 ≥ 2", okCount == 11, okCount + "/11");
+        check("B2-2 11/11 滑块 paintLabels=true（labelTable 不会自动打开它）",
+                countPaintLabels(sliders), "期望 11");
+        check("B2-3 11/11 滑块 paintTicks=false（不画刻度线，只留 label 位置语义）",
+                countPaintTicks(sliders), "期望 11");
         check("B2-4 吸附仍开启（setSnapToTicks(true)，关掉 paintTicks 不影响吸附）",
-                countSnap(sliders), "期望 10");
+                countSnap(sliders), "期望 11");
     }
 
     private static boolean countPaintLabels(List<JSlider> sliders) {
@@ -179,7 +181,7 @@ public final class Probe4Bugs {
                 n++;
             }
         }
-        return n == 10;
+        return n == 11;
     }
 
     private static boolean countPaintTicks(List<JSlider> sliders) {
@@ -189,7 +191,7 @@ public final class Probe4Bugs {
                 n++;
             }
         }
-        return n == 10;
+        return n == 11;
     }
 
     private static boolean countSnap(List<JSlider> sliders) {
@@ -199,7 +201,7 @@ public final class Probe4Bugs {
                 n++;
             }
         }
-        return n == 10;
+        return n == 11;
     }
 
     // ---------------------------------------------------------------- 缺陷 3
@@ -318,6 +320,7 @@ public final class Probe4Bugs {
             case 7: return Math.round(p.stretchRatioK * 10f);
             case 8: return Math.round(p.animationLength * 100f);
             case 9: return Math.round(p.shortAnimationLength * 100f);
+            case 10: return Math.round(p.typingSmoothness * 100f);   // M4：输入平滑
             default: return Integer.MIN_VALUE;
         }
     }

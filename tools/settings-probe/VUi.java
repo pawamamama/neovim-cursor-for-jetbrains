@@ -104,7 +104,7 @@ public final class VUi {
     public static String nameOf(int index) {
         String[] names = {"cursorDisappearDelay", "cursorFadeOutDuration", "tailOpacity", "glowOpacity",
                 "glowLayers", "shadowBlurFactor", "trailSize", "stretchRatioK",
-                "animationLength", "shortAnimationLength"};
+                "animationLength", "shortAnimationLength", "typingSmoothness"};
         return index >= 0 && index < names.length ? names[index] : ("#" + index);
     }
 }

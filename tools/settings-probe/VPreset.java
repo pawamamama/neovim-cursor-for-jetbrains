@@ -224,9 +224,10 @@ public final class VPreset {
     private static void gridCoverage() {
         System.out.println();
         System.out.println("--- V3：默认值与全部预设值都必须落在滑块刻度网格上 ---");
-        int[] steps = {50, 25, 5, 5, 1, 5, 5, 5, 1, 1};
-        int[] mins = {0, 0, 0, 0, 1, 5, 0, 10, 5, 2};
-        int[] maxs = {500, 1000, 100, 100, 12, 60, 100, 80, 35, 25};
+        // 第 11 项 typingSmoothness 是 0.9.6 / M4 新增的「输入平滑」（刻度 0–100，步长 5）
+        int[] steps = {50, 25, 5, 5, 1, 5, 5, 5, 1, 1, 5};
+        int[] mins = {0, 0, 0, 0, 1, 5, 0, 10, 5, 2, 0};
+        int[] maxs = {500, 1000, 100, 100, 12, 60, 100, 80, 35, 25, 100};
         // 每个滑块参与的全部取值（默认 + 预设）
         java.util.List<int[]> values = new java.util.ArrayList<>();
         values.add(new int[]{50});                       // cursorDisappearDelay 默认
@@ -266,6 +267,8 @@ public final class VPreset {
         violations += gridCheck("stretchRatioK", toArray(stretch), mins[7], maxs[7], steps[7]);
         violations += gridCheck("animationLength", toArray(animLen), mins[8], maxs[8], steps[8]);
         violations += gridCheck("shortAnimationLength", toArray(shortLen), mins[9], maxs[9], steps[9]);
+        // 输入平滑没有预设值（预设不写它），只校验默认 0 落在网格上
+        violations += gridCheck("typingSmoothness", new int[]{0}, mins[10], maxs[10], steps[10]);
 
         check("V3-1 默认值 + 全部预设值的越界数 = 0", violations == 0, "越界 " + violations + " 项");
 
@@ -280,7 +283,7 @@ public final class VPreset {
                         + "] 契约=[" + mins[i] + "," + maxs[i] + "]");
             }
         }
-        check("V3-2 面板 10 个滑块的量程与契约 §6.2 逐项一致", mismatch == 0, mismatch + " 项不符");
+        check("V3-2 面板 11 个滑块的量程与契约 §6.2 + M4 增补逐项一致", mismatch == 0, mismatch + " 项不符");
     }
 
     private static int[] toArray(java.util.List<Integer> list) {

@@ -143,6 +143,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         target.shortAnimationLength =
                 clamp(from.shortAnimationLength, SHORT_LENGTH_MIN, SHORT_LENGTH_MAX);
 
+        // 19（0.9.6 / M4）：输入平滑。老 XML 没有这一项 → 平台填字段初值 0f = 行为不变。
+        target.typingSmoothness = clamp(from.typingSmoothness, 0f, 1f);
+
         state = target;
 
         // 先逐字段落地，再迁移 —— 迁移只在 stateVersion < 1 时才会覆盖两个布尔。
@@ -323,7 +326,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         c.shortAnimationLength = s.shortAnimationLength;
 
         // 派生量：新建数组，绝不复用 State 的对象引用
-        c.trailFactors = deriveTrailFactors(s.stretchRatioK);
+        // 输入平滑（M4）也在这里落地：它只改这四档系数，而 trailFactors 只在短跳分支被读
+        // （TrailCorner.jump():220），因此对跨行分支零影响。
+        c.trailFactors = deriveTrailFactors(s.stretchRatioK, s.typingSmoothness);
     }
 
     /** 运行期 → 持久化：把 CONFIG 里能持久化的 15 项回写进 State（不含 stateVersion）。 */
@@ -409,6 +414,30 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         };
     }
 
+
+    /**
+     * 输入平滑（0.9.6 / M4）：把四角梯度朝「四角同长」压平，**总时长不变**。
+     *
+     * <p>{@code f'[i] = round2(f[i] + (1 - f[i]) × smooth × 0.8)}，rank0 恒为 1 ⇒
+     * 后缘（最长的那一角）时长完全不动，改的只是前三档滞后量 —— 这正是「只调短跳梯度」。
+     *
+     * <p><b>smooth ≤ 0 时必须原样返回</b>：parity 的逐字节比对、audit 的常量审计、
+     * 以及预设匹配（{@code CursorPresetApplier} 逐项比较）都依赖「默认值下数组与旧版完全一致」。
+     *
+     * @param smooth 0–1（面板 0–100）；0 = 关闭
+     */
+    public static float[] deriveTrailFactors(float k, float smooth) {
+        float[] base = deriveTrailFactors(k);
+        float s = clamp(smooth, 0f, 1f) * 0.8f;
+        if (s <= 0f) {
+            return base;
+        }
+        float[] out = new float[base.length];
+        for (int i = 0; i < base.length; i++) {
+            out[i] = round2(base[i] + (1.0 - base[i]) * s);
+        }
+        return out;
+    }
 
     private static float round2(double x) {
         return (float) (Math.round(x * 100) / 100.0);
@@ -662,6 +691,21 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          */
         public float shortAnimationLength = 0.11f;
 
+        /**
+         * 19. 输入平滑（0.9.6 / M4 新增）。内部存 0–1，面板刻度 0–100。
+         *
+         * <p><b>它只压平「四角梯度」，不改任何总时长</b>：短跳每个角的有效时长 =
+         * {@code shortAnimationLength × trailFactors[rank]}（{@code TrailCorner.jump():221}），
+         * 而这里把 {@code trailFactors} 朝 1 靠：
+         * <pre>
+         *   f'[i] = f[i] + (1 - f[i]) × smooth × 0.8        // rank0 恒为 1 → 总时长不变
+         * </pre>
+         * 于是前缘（rank3，默认 0.22）被抬起来，单行打字不会「前缘一帧到位」。
+         *
+         * <p><b>默认 0 = 逐位不变</b>：parity / audit / 预设匹配都依赖「smooth=0 时数组与旧版完全一致」。
+         */
+        public float typingSmoothness = 0f;
+
         public State() {
         }
 
@@ -689,6 +733,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             stretchRatioK = from.stretchRatioK;
             animationLength = from.animationLength;
             shortAnimationLength = from.shortAnimationLength;
+            typingSmoothness = from.typingSmoothness;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
@@ -713,6 +758,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                     + ", stretchRatioK=" + stretchRatioK
                     + ", animationLength=" + animationLength
                     + ", shortAnimationLength=" + shortAnimationLength
+                    + ", typingSmoothness=" + typingSmoothness
                     + "}";
         }
     }

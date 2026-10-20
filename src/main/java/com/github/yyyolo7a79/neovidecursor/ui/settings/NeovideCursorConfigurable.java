@@ -158,6 +158,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     private static final String W_ANIM_COUPLING =
             "这两个值只影响【动画时长】，不改变拉伸倍率；拉伸倍率见上方「拖尾拉伸强度」。";
 
+    /** 动画时序：「输入平滑」的说明（M4）。必须说清「不改总时长」，否则会被当成第二个短动画时长。 */
+    private static final String W_TYPING_SMOOTH =
+            "只压平「同一行打字/退格」时四个角的时长梯度，<b>不改变拖尾总时长</b>："
+            + "后缘（最长的一角）时长完全不变，抬起来的只是前缘。" + BR
+            + "0% = 保持原样；100% = 前缘延时抬到约 80%，单行打字不再「一帧跳到新位置」。" + BR
+            + "跨行移动完全不受它影响 —— 那一路由「跨行动画时长」和「拖尾密度」决定。";
+
     /** 高级（诊断）区：性能诊断开关的说明。该项不持久化。 */
     private static final String W_PAINT_DIAG =
             "只跑物理计算、跳过重绘，用于分离瓶颈：开启后 fps 大幅回升说明瓶颈在绘制；"
@@ -324,6 +331,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                     (s, v) -> s.shortAnimationLength = v / 100f,
                     (c, v) -> fmt2(v / 100f) + " s",
                     v -> fmt2(v / 100f)),
+
+            // 11. 输入平滑：刻度 = 百分比（0.9.6 / M4 新增）。它只压平短跳的四角梯度，
+            // 不改任何总时长 —— 派生公式见 NeovideCursorSettings#deriveTrailFactors(float, float)。
+            new SliderSpec("typingSmoothness", PCT_MIN, PCT_MAX, PCT_STEP, " %",
+                    s -> Math.round(s.typingSmoothness * 100f),
+                    (s, v) -> s.typingSmoothness = v / 100f,
+                    (c, v) -> v + " %",
+                    v -> v + "%"),
     };
 
     // ==================== 预览副本 + 基线 + 抑制标志 ====================
@@ -608,6 +623,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 g.row("短动画时长", row -> {
                     addSlider(row, SPECS[9], null);
                     row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // M4：输入平滑。放在短动画时长正下方 —— 它是那个值的「形状」而不是「长度」。
+                g.row("输入平滑（只影响单行打字/退格）", row -> {
+                    addSlider(row, SPECS[10], null);
+                    row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
                     return kotlin.Unit.INSTANCE;
                 });
 
@@ -1200,6 +1222,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         }
         if (Float.compare(pending.shortAnimationLength, baseline.shortAnimationLength) != 0) {
             target.shortAnimationLength = pending.shortAnimationLength;
+        }
+        // 19（0.9.6 / M4）：输入平滑
+        if (Float.compare(pending.typingSmoothness, baseline.typingSmoothness) != 0) {
+            target.typingSmoothness = pending.typingSmoothness;
         }
         // 预设不持久化（契约 §5.2 的 P-1），因此不在此处写任何「当前预设」字段
 

@@ -89,8 +89,9 @@ public final class VerifyPanel {
                 + " combo=" + combos + " colorPanel=" + colors + " label=" + labels);
         // 0.9.5 的 t3 把 animationLength / shortAnimationLength 也做成可调 → 8 变 10。
         // 断言随之更新，但语义不变：滑块总数必须等于「可调数值参数」的个数。
-        check("U7 10 个滑块（8 既有 + animationLength / shortAnimationLength）",
-                sliders == 10, "实际 " + sliders);
+        // 0.9.6 / M4：新增第 11 个滑块「输入平滑」（只压平短跳四角梯度，不改总时长）
+        check("U7 11 个滑块（8 既有 + animationLength / shortAnimationLength + typingSmoothness）",
+                sliders == 11, "实际 " + sliders);
         // 0.9.6 / M1：性能诊断从 Tools 菜单挪进面板「高级（诊断）」折叠组 → 5 变 6。
         // 断言随之更新，语义不变：复选框总数必须等于「面板上的布尔开关」个数
         // （性能诊断是唯一不持久化的那个，见 NeovideCursorConfigurable#paintDiag）。

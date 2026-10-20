@@ -34,7 +34,7 @@ public final class VDefects {
         conf = new NeovideCursorConfigurable();
         ui = VUi.build(conf);
 
-        check("D0  面板建成且找到 10 个滑块", ui.sliders.size() == 10,
+        check("D0  面板建成且找到 11 个滑块（M4 起含输入平滑）", ui.sliders.size() == 11,
                 "sliders=" + ui.sliders.size());
         check("D0b 每个滑块都有紧跟的输入框与数值标签",
                 ui.textFields.size() == 10 && ui.valueLabels.size() == 10
