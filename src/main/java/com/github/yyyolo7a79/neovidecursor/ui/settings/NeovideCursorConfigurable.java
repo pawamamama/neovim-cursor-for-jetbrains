@@ -81,7 +81,8 @@ import java.util.function.IntFunction;
 public final class NeovideCursorConfigurable extends BoundConfigurable implements SearchableConfigurable {
 
     /** 配置页 id —— 必须是插件 id 前缀（官方原话 "The FQN should be based on the plugin id"）。 */
-    public static final String ID = "com.github.yyyolo7a79.neovidecursor.settings";
+    /** 0.9.7 起 fork 独立 id（与 plugin.xml 的 applicationConfigurable id 必须一致）。 */
+    public static final String ID = "com.pawamamama.neovidecursor.settings";
 
     /** 页面名称。**同时**写在 plugin.xml 的 displayName 里（平台取名字时不必实例化本类）。 */
     public static final String DISPLAY_NAME = "Neovide Cursor";

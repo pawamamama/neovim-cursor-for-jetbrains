@@ -54,7 +54,8 @@ public final class VerifyPanel {
 
         NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
         check("U1 构造器不创建 Swing 组件即可成功（无参构造）", conf != null, conf.getClass().getName());
-        check("U2 getId() 是插件 id 前缀", NeovideCursorConfigurable.ID.startsWith("com.github.yyyolo7a79.neovidecursor"),
+        // 0.9.7 起 fork 独立 id：com.pawamamama.neovidecursor.settings
+        check("U2 getId() 是插件 id 前缀", NeovideCursorConfigurable.ID.startsWith("com.pawamamama.neovidecursor"),
                 NeovideCursorConfigurable.ID);
         check("U3 实现 SearchableConfigurable", conf instanceof com.intellij.openapi.options.SearchableConfigurable,
                 "ok");
