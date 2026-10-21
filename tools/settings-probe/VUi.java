@@ -100,11 +100,70 @@ public final class VUi {
         }
     }
 
-    /** 滑块字段名（按契约 §6.2 的面板顺序，用最小/最大与步长交叉核对）。 */
+    // ==================================================================
+    // 字段名 + 量程表（探针侧【唯一】刻度来源）
+    //
+    // 【为什么必须有这张表】0.9.8 之前，探针把「第几个滑块 = 哪个字段 = 什么步长」
+    // 抄成两份：VDefects.stepOf(int) 一份、VSnap.snapOnDrag() 的 steps[] 一份。
+    // 结果 M4 加了第 11 个滑块（typingSmoothness）之后：
+    //   · VDefects 的 steps 数组只有 10 项 → 第 11 项走兜底，且 D0b/D1-1/D1-2/D2-1
+    //     四条的判据写死 "10/10" → 永远红（假失败）；
+    //   · VSnap 的 steps 数组只有 10 项，但循环上界是 sliders.size()=11
+    //     → 第 11 次迭代直接 AIOOBE，**整个探针在第一条断言处就中断**，
+    //       后面的 TYP / ILL / BND 十几条断言根本没执行（这是最坏的形态：
+    //       红的地方看不见，绿的地方是假的）。
+    //   · 两处都把 shadowBlurFactor 的步长抄成 5，实际是 1（见下面的 SPEC）
+    //     → 探针强行写 16 并期望落到 5 的网格上，必然失败。
+    //
+    // 所以：**量程与步长只在下面这张表里写一次**，任何探针要步长都来这里取。
+    // 这张表是探针侧的独立副本（不读生产代码的 SliderSpec），因为它就是被校验的对象 —
+    // 用被测方的值去校验被测方，等于自证。
+    // ==================================================================
+
+    /** 面板从上到下的 11 个滑块字段名（顺序 = 契约 §6.2 + M4 增补的书写顺序）。 */
+    public static final String[] KEYS = {
+            "cursorDisappearDelay", "cursorFadeOutDuration", "tailOpacity", "glowOpacity",
+            "glowLayers", "shadowBlurFactor", "trailSize", "stretchRatioK",
+            "animationLength", "shortAnimationLength", "typingSmoothness"};
+
+    /** {min, max, step}，下标与 {@link #KEYS} 一一对应。 */
+    private static final int[][] SPEC = {
+            {0, 500, 50},      // cursorDisappearDelay   —— 50ms 一档
+            {0, 1000, 25},     // cursorFadeOutDuration  —— 25ms 一档
+            {0, 100, 5},       // tailOpacity            —— 5% 一档
+            {0, 100, 5},       // glowOpacity            —— 5% 一档
+            {1, 12, 1},        // glowLayers             —— 逐层
+            {0, 100, 1},       // shadowBlurFactor       —— 显示层是「锐度 0–100」，步长 1
+            {0, 100, 5},       // trailSize              —— 5% 一档
+            {10, 80, 5},       // stretchRatioK          —— 0.5 倍一档
+            {5, 35, 1},        // animationLength        —— 10ms 一档
+            {2, 25, 1},        // shortAnimationLength   —— 10ms 一档
+            {0, 100, 5},       // typingSmoothness       —— 5% 一档（M4 新增，第 11 个）
+    };
+
+    /** 滑块字段名（按面板从上到下的顺序）。 */
     public static String nameOf(int index) {
-        String[] names = {"cursorDisappearDelay", "cursorFadeOutDuration", "tailOpacity", "glowOpacity",
-                "glowLayers", "shadowBlurFactor", "trailSize", "stretchRatioK",
-                "animationLength", "shortAnimationLength", "typingSmoothness"};
-        return index >= 0 && index < names.length ? names[index] : ("#" + index);
+        return index >= 0 && index < KEYS.length ? KEYS[index] : ("#" + index);
+    }
+
+    /** 第 index 个滑块的 {min, max, step} 副本；越界返回 null（调用方必须据此判 FAIL）。 */
+    public static int[] spec(int index) {
+        return index >= 0 && index < SPEC.length ? SPEC[index].clone() : null;
+    }
+
+    /** 第 index 个滑块的步长；越界返回 -1（不得静默退化成 1）。 */
+    public static int stepOf(int index) {
+        int[] s = spec(index);
+        return s == null ? -1 : s[2];
+    }
+
+    /** 字段名 → 面板下标；找不到返回 -1。 */
+    public static int indexOfKey(String key) {
+        for (int i = 0; i < KEYS.length; i++) {
+            if (KEYS[i].equals(key)) {
+                return i;
+            }
+        }
+        return -1;
     }
 }

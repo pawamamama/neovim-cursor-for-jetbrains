@@ -36,11 +36,16 @@ public final class VDefects {
 
         check("D0  面板建成且找到 11 个滑块（M4 起含输入平滑）", ui.sliders.size() == 11,
                 "sliders=" + ui.sliders.size());
+        // 【reviewer F1】M4 起滑块是 11 个（多了 typingSmoothness），旧判据写死 10 会永远红。
+        // 判据改成「与滑块数同源」：每个滑块都必须有输入框和数值标签，且总数为 11。
         check("D0b 每个滑块都有紧跟的输入框与数值标签",
-                ui.textFields.size() == 10 && ui.valueLabels.size() == 10
+                ui.sliders.size() == 11
+                        && ui.textFields.size() == ui.sliders.size()
+                        && ui.valueLabels.size() == ui.sliders.size()
                         && ui.textFields.stream().allMatch(t -> t != null)
                         && ui.valueLabels.stream().allMatch(l -> l != null),
-                "tf=" + ui.textFields.size() + " labels=" + ui.valueLabels.size());
+                "sliders=" + ui.sliders.size() + " tf=" + ui.textFields.size()
+                        + " labels=" + ui.valueLabels.size());
 
         defect1();
         defect2();
@@ -102,19 +107,22 @@ public final class VDefects {
                     + " listeners=" + n + "  max:「" + before + "」→「" + after + "」"
                     + "  mid:「" + midBefore + "」→「" + midAfter + "」");
         }
-        check("D1-1 10/10 滑块拖动时数值标签跟随（两次不同目标都跟随）", followed == 10,
-                followed + "/10");
+        // 【reviewer F1】判据与滑块数同源，不再写死 10；总数钉死 11 防止「少测了却全绿」。
+        int total = ui.sliders.size();
+        check("D1-1 全部滑块拖动时数值标签跟随（两次不同目标都跟随）",
+                followed == total && total == 11, followed + "/" + total);
         check("D1-2 每个滑块恰好 1 个 ChangeListener（未受 showValueHint 污染）",
-                singleListener == 10, singleListener + "/10");
+                singleListener == total && total == 11, singleListener + "/" + total);
     }
 
     private static int stepOf(int i) {
-        JSlider s = ui.sliders.get(i);
-        // 用 labelTable 无法直接拿步长，这里用已知的 10 档规格（与 max/min 交叉核对过）
-        int[] steps = {50, 25, 5, 5, 1, 5, 5, 5, 1, 1};
-        if (i < steps.length) {
-            return steps[i];
+        // 【reviewer F1】步长只在 VUi.SPEC 里写一次。原来这里另抄了一份 10 项数组
+        // （且把 shadowBlurFactor 抄成 5，实际是 1），M4 之后第 11 项直接走兜底。
+        int step = VUi.stepOf(i);
+        if (step > 0) {
+            return step;
         }
+        JSlider s = ui.sliders.get(i);
         return Math.max(1, (s.getMaximum() - s.getMinimum()) / 10);
     }
 
@@ -141,8 +149,9 @@ public final class VDefects {
                     + " labelTable=" + n + " paintLabels=" + s.getPaintLabels()
                     + " paintTicks=" + s.getPaintTicks() + " snap=" + s.getSnapToTicks());
         }
-        check("D2-1 10/10 滑块：labelTable ∈ [2,3] 且 paintLabels=true / paintTicks=false / snap=true",
-                okCount == 10, okCount + "/10");
+        check("D2-1 全部滑块：labelTable ∈ [2,3] 且 paintLabels=true / paintTicks=false / snap=true",
+                okCount == ui.sliders.size() && ui.sliders.size() == 11,
+                okCount + "/" + ui.sliders.size());
     }
 
     // ---------------------------------------------------------------- 缺陷 3

@@ -324,16 +324,38 @@ public final class VPreset {
                 fields++;
             }
         }
-        check("V14-1 State 的 public 实例字段数 == 19（stateVersion + 16 既有 + 2 新增）",
-                fields == 19, "fields=" + fields);
+        // 【reviewer F2】22 = stateVersion(1) + 19 个参数 + animPresetBase + animPresetOverrides。
+        // 旧判据写死 19，那是 0.9.5【之前】的字段数 —— 那时还没有 M4 的 typingSmoothness
+        // 与 0.9.8 的两个预设元数据字段。数字变了不是缺陷，是参数确实多了。
+        // 每次加参数都必须同步改这里（这也正是 NEXT-REFACTOR.md 说的「加参数要改 8 处」之一，
+        // 等字段表重构落地后这里会变成「从表导出」，届时本断言自动跟随）。
+        check("V14-1 State 的 public 实例字段数 == 22（stateVersion + 19 参数 + 2 预设元数据）",
+                fields == 22, "fields=" + fields);
 
-        boolean hasPresetField = false;
+        // 契约 §5.2 的 P-1 语义是「预设是纯动作，不持久化『当前选中了哪个预设的哪个值副本』」，
+        // 但它允许两个**元数据**字段：
+        //   · animPresetBase      —— 当前停在哪一个预设（M5，用于「X（已修改）」显示）
+        //   · animPresetOverrides —— 每个预设各自的覆盖值（0.9.8）
+        // 这两个都不是「第二真相源」：真正的观感值仍在 19 个参数字段里，
+        // 它们只记录「用户改过哪个预设」。删掉它们才会丢用户数据。
+        // 因此判据改成「除这两个白名单之外，State 里没有其它 preset 字段」。
+        java.util.Set<String> allowedPreset = new java.util.HashSet<>(java.util.Arrays.asList(
+                "animPresetBase", "animPresetOverrides"));
+        java.util.List<String> illegalPreset = new java.util.ArrayList<>();
+        java.util.Set<String> presentPreset = new java.util.HashSet<>();
         for (java.lang.reflect.Field f : NeovideCursorSettings.State.class.getDeclaredFields()) {
-            if (f.getName().toLowerCase(java.util.Locale.ROOT).contains("preset")) {
-                hasPresetField = true;
+            String name = f.getName();
+            if (name.toLowerCase(java.util.Locale.ROOT).contains("preset")) {
+                if (allowedPreset.contains(name)) {
+                    presentPreset.add(name);
+                } else {
+                    illegalPreset.add(name);
+                }
             }
         }
-        check("V14-2 State 里没有任何 preset 字段（预设是纯动作，不持久化）", !hasPresetField, "");
+        check("V14-2 State 里除 animPresetBase/animPresetOverrides 外没有其它 preset 字段",
+                illegalPreset.isEmpty() && presentPreset.equals(allowedPreset),
+                "越界=" + illegalPreset + " 白名单实存=" + presentPreset);
 
         // Tools 与应用器两条写入路径的匹配判据必须同源
         NeovideCursorSettings.State s = new NeovideCursorSettings.State();

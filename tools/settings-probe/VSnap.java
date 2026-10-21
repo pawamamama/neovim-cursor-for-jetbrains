@@ -50,39 +50,73 @@ public final class VSnap {
 
     // ---------------------------------------------------------------- 吸附
 
-    /** 把滑块设到一个明显不在刻度上的值，断言最终落位在刻度网格上。 */
+    /**
+     * 把滑块设到一个明显不在刻度上的值，断言最终落位在刻度网格上。
+     *
+     * <p><b>【reviewer F1】这条曾经把整个探针打断。</b>旧实现自带一份
+     * {@code int[] steps = {50,25,5,5,1,5,5,5,1,1}}（10 项），而循环上界是
+     * {@code ui.sliders.size()}（M4 之后 = 11）。于是第 11 次迭代 {@code steps[10]}
+     * 抛 {@link ArrayIndexOutOfBoundsException}，main 直接逃出去 ——
+     * 后面的 TYP / ILL / BND 一共十几条断言【一条都没执行】，
+     * 而报告上只显示 "VSnap FAIL=1"，看不出是崩溃。这是最坏的形态：
+     * 红的地方被掩盖，绿的地方是假的。
+     *
+     * <p>现在步长与量程一律从 {@link VUi#spec(int)} 取（探针侧唯一刻度来源），
+     * 越界立刻判 FAIL 而不是崩。
+     */
     private static void snapOnDrag() {
         System.out.println();
         System.out.println("--- 吸附：非刻度值必须落到刻度 ---");
+        int measured = 0;
         int ok = 0;
-        int[] steps = {50, 25, 5, 5, 1, 5, 5, 5, 1, 1};
         for (int i = 0; i < ui.sliders.size(); i++) {
             JSlider s = ui.sliders.get(i);
-            int step = steps[i];
-            int min = s.getMinimum();
-            int max = s.getMaximum();
-            // 取一个「一定不是刻度」的值（刻度 + step/3，且 step>1 才有意义）
-            int off = min + step * 3 + Math.max(1, step / 3);
-            if (step == 1) {
-                continue;                        // 步长 1 没有「非刻度整数」可测
+            int[] spec = VUi.spec(i);
+            if (spec == null) {
+                check("SNAP-0 滑块 " + i + " 在 VUi.SPEC 里有刻度定义", false,
+                        "spec=null key=" + VUi.nameOf(i));
+                continue;
             }
+            int min = spec[0];
+            int max = spec[1];
+            int step = spec[2];
+            // 探针表必须与面板实际量程一致，否则下面的期望值算错
+            boolean rangeOk = s.getMinimum() == min && s.getMaximum() == max;
+            if (step == 1) {
+                // 步长 1 没有「非刻度整数」可测；但仍要核对量程
+                if (!rangeOk) {
+                    check("SNAP-0b 滑块 " + VUi.nameOf(i) + " 量程与 VUi.SPEC 一致", false,
+                            "面板=[" + s.getMinimum() + "," + s.getMaximum()
+                                    + "] 表=[" + min + "," + max + "]");
+                }
+                continue;
+            }
+            measured++;
+            // 取一个「一定不是刻度」的值：min + 3 又 half 档
+            int off = min + step * 3 + step / 2;
             if (off > max) {
-                off = min + step * 2 + Math.max(1, step / 3);
+                off = max - step / 2;            // 兜底：贴着上限的反向偏离
             }
             s.setValue(off);
             int got = s.getValue();
-            boolean onGrid = (got - min) % step == 0 && got >= min && got <= max;
+            boolean onGrid = got >= min && got <= max && (got - min) % step == 0;
             boolean nearest = Math.abs(got - off) <= step / 2;
             boolean recentered = got == min + Math.round((off - min) / (float) step) * step;
-            if (onGrid && nearest && recentered) {
+            if (rangeOk && onGrid && nearest && recentered) {
                 ok++;
             }
-            System.out.println("    " + (onGrid && recentered ? "PASS " : "FAIL ")
+            System.out.println("    " + (rangeOk && onGrid && nearest && recentered ? "PASS " : "FAIL ")
                     + String.format("%-22s", VUi.nameOf(i))
-                    + " 请求 " + off + " → 落位 " + got + "（step=" + step
-                    + " 网格=" + onGrid + " 最近=" + nearest + " 就近取整=" + recentered + "）");
+                    + " 量程=[" + min + "," + max + "] step=" + step
+                    + " 面板=[" + s.getMinimum() + "," + s.getMaximum() + "]"
+                    + " 请求 " + off + " → 落位 " + got + "（网格=" + onGrid
+                    + " 最近=" + nearest + " 就近取整=" + recentered + "）");
         }
-        check("SNAP-1 7/7 可测滑块（step>1）的 setValue(非刻度) 全部落到最近刻度", ok == 7, ok + "/7");
+        // 契约里步长 >1 的滑块恒为 7 个：50/25/5/5/5/5/5 那七个
+        // （cursorDisappearDelay / cursorFadeOutDuration / tailOpacity / glowOpacity /
+        //  trailSize / stretchRatioK / typingSmoothness）。
+        check("SNAP-1 全部可测滑块（step>1）的 setValue(非刻度) 都落到最近刻度",
+                measured == 7 && ok == 7, ok + "/" + measured + "（契约里 step>1 恒为 7 个）");
     }
 
     // ---------------------------------------------------------------- 精确值

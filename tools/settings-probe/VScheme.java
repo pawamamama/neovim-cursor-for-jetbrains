@@ -54,10 +54,34 @@ public final class VScheme {
                 OLD_CARET.equals(NeovideCaretManager.savedCaretColorForProbe()),
                 str(NeovideCaretManager.savedCaretColorForProbe()));
 
-        // ---- S-1：切主题，无参版本必须早退（否则老调用点会重复写配置）----
+        // ---- S-1：切主题后，无参版本也必须隐藏【新的这个】scheme ----
+        //
+        // 【本条曾被写成相反语义，为什么改了】
+        // 原断言是「无参版在已隐藏时早退 → 新 scheme 的光标仍可见」，理由是
+        // 「怕老调用点重复写配置」。但那描述的是 R-18 修复【之前】的代码：
+        // 那时早退判据是全局的 savedCaretColor != null，切主题后它对
+        // 【新的】scheme 对象仍然非 null，于是早退 —— 新 scheme 的 CARET_COLOR
+        // 从未被写过，原生光标复活，与覆盖层叠成两套绘制。这正是缺陷 4 本体。
+        //
+        // 0.9.8 的 applyNativeCaretHidden(boolean) 已经把判据换成
+        // 「【当前】scheme 是否在 HIDDEN_SCHEMES 里」（per-object），
+        // 所以新 scheme 对象不在表里 → 不早退 → 正常隐藏它。这是修好的行为。
+        // 继续断言「仍可见」等于要求把 R-18 的修复回滚。
+        //
+        // 因此正确断言是：**新 scheme 必须被隐藏**。
         V0Env.colors.scheme = newScheme;
         NeovideCaretManager.applyNativeCaretHidden();
-        check("S-1 【修复前行为必须保留】无参版本在已隐藏时早退：新 scheme 光标仍可见",
+        check("S-1 【R-18】切主题后无参版本也隐藏【当前】scheme（不因全局标记早退）",
+                isTransparent(newScheme.getColor(EditorColors.CARET_COLOR)),
+                str(newScheme.getColor(EditorColors.CARET_COLOR)));
+
+        // ---- S-1b：【按对象幂等】同一 scheme 已记录过时，无参版本必须早退 ----
+        // 这才是「怕老调用点重复写配置」的正确表达：按【对象】幂等，不是按【全局标记】早退。
+        // 判据：手改成一个可见色，再调无参版；若早退逻辑正确
+        // （该对象已在 HIDDEN_SCHEMES 里），它不会覆盖我们的手改 → 仍是可见色。
+        newScheme.setColor(EditorColors.CARET_COLOR, NEW_CARET);
+        NeovideCaretManager.applyNativeCaretHidden();
+        check("S-1b 【按对象幂等】同一 scheme 已记录过时无参版本早退，不覆盖手改的可见色",
                 NEW_CARET.equals(newScheme.getColor(EditorColors.CARET_COLOR)),
                 str(newScheme.getColor(EditorColors.CARET_COLOR)));
 

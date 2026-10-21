@@ -99,13 +99,23 @@ public final class VTools {
                 VFields.countDiff(before, after, java.util.Collections.emptySet()) == 0,
                 "");
 
-        // ---- setSelected(true) 应用且只改 6 个动画字段 ----
+        // ---- setSelected(true) 应用且只改动画字段 ----
         before = VFields.snapshot(svc.getState());
         ((ToggleAction) animItems[6]).setSelected(null, true);            // 高对比
         after = VFields.snapshot(svc.getState());
+        // 【F7 的连带影响，必须写清楚】
+        // F7 之后 applyAnimPreset 会同步前移 animPresetBase（与面板 onAnimPresetPicked() 一致），
+        // 否则「Tools 切到有覆盖的预设」后面板下拉仍指着上一个预设，
+        // 下一次面板 apply 会把覆盖写到【错误的 key】上（见 CursorPresetApplier 的 javadoc）。
+        //
+        // animPresetBase 是**预设元数据**（当前停在第几个预设），不是观感参数 ——
+        // 它不参与 matchAnimPreset 的逐字段比对，也不进 NeovideConfig。
+        // 所以它归入「应用预设时允许变化」这一侧，而不是「其余字段逐位不变」那一侧。
+        // 这不是放宽断言：动画字段之外的 18 个字段仍然要求 0 变化。
         java.util.Set<String> animFields = new java.util.HashSet<>(java.util.Arrays.asList(
                 "animationLength", "shortAnimationLength", "trailSize", "glowLayers",
-                "shadowBlurFactor", "glowOpacity"));
+                "shadowBlurFactor", "glowOpacity",
+                "animPresetBase"));
         java.util.Set<String> others = new java.util.HashSet<>(before.keySet());
         others.removeAll(animFields);
         // 「只改 6 个动画字段」的精确判据是：动画字段之外 0 变化；
@@ -120,7 +130,7 @@ public final class VTools {
         // countDiff 的第三参是「忽略集合」：忽略动画字段 → 数出非动画字段的变化数。
         int nonAnimChanged = VFields.countDiff(before, after, animFields);
         int animChanged = VFields.countDiff(before, after, others);
-        check("M-11 Tool 应用「高对比」只改动画字段（其余字段逐位不变）",
+        check("M-11 Tool 应用「高对比」只改动画字段 + animPresetBase（其余字段逐位不变）",
                 nonAnimChanged == 0 && animChanged > 0,
                 "非动画字段变化 = " + nonAnimChanged + "，动画字段变化 = " + animChanged);
 
