@@ -385,6 +385,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
      */
     private boolean syncingControls;
 
+    /**
+     * 「正在程序化装载/保存」标志 —— 期间<b>禁止自动派生自定义预设</b>。
+     *
+     * <p>{@link #afterPendingEdited()} 的语义是「用户刚改了参数，给他一个落脚点」。
+     * 但 {@code reset()} / {@code apply()} 也会经 {@code syncAllControlsFromPending()}
+     * 调到 {@code refreshPresetDisplay()} —— 那不是用户编辑。
+     * 不屏蔽的话，装载一份「与内置常量不同」的历史 state 会凭空派生出一个副本，
+     * 让 {@code isModified()} 恒为真（VDefects 的 V11-3c 当场抓到）。
+     */
+    private boolean suppressDerive;
+
     // 非 DSL 绑定控件：DialogPanel 不追踪它们，必须在 reset/apply/isModified 里手工同步
     private ColorPanel tailColorPanel;
     private ColorPanel shadowColorPanel;
@@ -463,251 +474,259 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
      */
     @Override
     public DialogPanel createPanel() {
-        pending = deepCopy(currentState());
-        baseline = deepCopy(currentState());     // 契约 §3.4：平台可能只调 createPanel 不调 reset
-        graphReset(pending);
-        bindings.clear();
-        animPresetItems.clear();
-        colorPresetItems.clear();
-        singleMoveHint = null;
-        crossMoveHint = null;
-        paintDiag = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.isPaintDisabled();
-        // M5-fix：基准预设从持久化状态里读（不是从值猜），否则重启后「缎带（已修改）」会退化成原版粉色
-        animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
-        colorBaseIdx = CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
+        // 构建面板是【程序化装载】，不是用户编辑 —— 期间禁止自动派生自定义预设。
+        // 否则一份「与当前内置常量不同」的历史 state（例如刚被 Tools 改过）
+        // 会在打开设置页时凭空多出一个副本，并让 isModified() 恒为真。
+        suppressDerive = true;
+        try {
+            pending = deepCopy(currentState());
+            baseline = deepCopy(currentState());     // 契约 §3.4：平台可能只调 createPanel 不调 reset
+            graphReset(pending);
+            bindings.clear();
+            animPresetItems.clear();
+            colorPresetItems.clear();
+            singleMoveHint = null;
+            crossMoveHint = null;
+            paintDiag = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.isPaintDisabled();
+            // M5-fix：基准预设从持久化状态里读（不是从值猜），否则重启后「缎带（已修改）」会退化成原版粉色
+            animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+            colorBaseIdx = CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
 
-        // 0.9.6 / M5-fix：下拉**只有真预设**，没有「已修改」伪条目。
-        // 「已修改」是把基准那一项**就地改名**（不新增条目），由 refreshPresetDisplay() 负责。
-        animPresetItems.addAll(animPresetNames());
-        colorPresetItems.addAll(colorPresetNames());
-        colorPresetItems.add(CursorPresets.CUSTOM_COLOR_LABEL);   // 颜色不参与预设语义，末项只是兜底
+            // 0.9.6 / M5-fix：下拉**只有真预设**，没有「已修改」伪条目。
+            // 「已修改」是把基准那一项**就地改名**（不新增条目），由 refreshPresetDisplay() 负责。
+            animPresetItems.addAll(animPresetNames());
+            colorPresetItems.addAll(colorPresetNames());
+            colorPresetItems.add(CursorPresets.CUSTOM_COLOR_LABEL);   // 颜色不参与预设语义，末项只是兜底
 
-        return BuilderKt.panel(panel -> {
+            return BuilderKt.panel(panel -> {
 
-            panel.row("", row -> {
-                row.comment("本页所有改动点「应用 / OK」后才生效；面板内不做实时预览。", COMMENT, NO_LINK);
-                return kotlin.Unit.INSTANCE;
-            });
+                panel.row("", row -> {
+                    row.comment("本页所有改动点「应用 / OK」后才生效；面板内不做实时预览。", COMMENT, NO_LINK);
+                    return kotlin.Unit.INSTANCE;
+                });
 
-            // ---------- 0. 预设置顶（契约 §9.1 的第一块）----------
-            panel.row("", row -> {
-                row.topGap(TopGap.MEDIUM);
-                row.bottomGap(BottomGap.SMALL);
-                row.label("动画预设");
-                animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
-                animPresetCombo.addActionListener(e -> onAnimPresetPicked());
-                row.label("颜色预设");
-                colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
-                colorPresetCombo.addActionListener(e -> onColorPresetPicked());
-                return kotlin.Unit.INSTANCE;
-            });
-
-            // 0b. 一键恢复（0.9.6 / M5）：把「基准预设」的常量重新写进 pending。
-            // 只改 pending（和选预设完全同一条路径），落库仍由「应用 / OK」完成。
-            panel.row("", row -> {
-                row.bottomGap(BottomGap.SMALL);
-                animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
-                animRestoreBtn.addActionListener(e -> restoreAnimPreset());
-                row.cell(animRestoreBtn);
-                colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
-                colorRestoreBtn.addActionListener(e -> restoreColorPreset());
-                row.cell(colorRestoreBtn);
-                return kotlin.Unit.INSTANCE;
-            });
-
-            // ---------- A. 总开关 ----------
-            panel.group("总开关", true, g -> {
-                g.row("启用拖尾光标（总开关）", row -> {
+                // ---------- 0. 预设置顶（契约 §9.1 的第一块）----------
+                panel.row("", row -> {
                     row.topGap(TopGap.MEDIUM);
-                    bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
+                    row.bottomGap(BottomGap.SMALL);
+                    row.label("动画预设");
+                    animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
+                    animPresetCombo.addActionListener(e -> onAnimPresetPicked());
+                    row.label("颜色预设");
+                    colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
+                    colorPresetCombo.addActionListener(e -> onColorPresetPicked());
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("拖尾渲染模式", row -> {
-                    Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
-                            row.comboBox(MODE_ITEMS, null),
-                            new MutableProperty<String>() {
-                                @Override public String get() { return modeText(pending.trailMode); }
-                                @Override public void set(String v) { pending.trailMode = textToMode(v); }
-                            });
-                    com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
-                    trailModeCombo = box;
-                    // 下拉一改就刷新置灰；只改 enabled 状态，不碰 CONFIG
-                    box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
+                // 0b. 一键恢复（0.9.6 / M5）：把「基准预设」的常量重新写进 pending。
+                // 只改 pending（和选预设完全同一条路径），落库仍由「应用 / OK」完成。
+                panel.row("", row -> {
+                    row.bottomGap(BottomGap.SMALL);
+                    animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                    animRestoreBtn.addActionListener(e -> restoreAnimPreset());
+                    row.cell(animRestoreBtn);
+                    colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                    colorRestoreBtn.addActionListener(e -> restoreColorPreset());
+                    row.cell(colorRestoreBtn);
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("隐藏原生光标（覆盖层充当光标）", row -> {
-                    bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
-                            .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
+                // ---------- A. 总开关 ----------
+                panel.group("总开关", true, g -> {
+                    g.row("启用拖尾光标（总开关）", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
+                        return kotlin.Unit.INSTANCE;
+                    });
 
-                g.row("常驻刷新（永远按 8ms 调度）", row -> {
-                    bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
-                            .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
+                    g.row("拖尾渲染模式", row -> {
+                        Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
+                                row.comboBox(MODE_ITEMS, null),
+                                new MutableProperty<String>() {
+                                    @Override public String get() { return modeText(pending.trailMode); }
+                                    @Override public void set(String v) { pending.trailMode = textToMode(v); }
+                                });
+                        com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
+                        trailModeCombo = box;
+                        // 下拉一改就刷新置灰；只改 enabled 状态，不碰 CONFIG
+                        box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
+                        return kotlin.Unit.INSTANCE;
+                    });
 
-                // 契约 §2.2：W_COUPLING 挂在 #3/#4 下方的 rowComment
-                g.row("", row -> {
-                    row.rowComment(W_COUPLING, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
-                return kotlin.Unit.INSTANCE;
-            });
+                    g.row("隐藏原生光标（覆盖层充当光标）", row -> {
+                        bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
+                                .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
 
-            // ---------- B. 淡出 ----------
-            panel.group("淡出", true, g -> {
-                g.row("辉光淡出（停止后柔和熄灭）", row -> {
-                    row.topGap(TopGap.MEDIUM);
-                    bindCheck(row, () -> pending.overlayFadeOut, v -> {
-                        pending.overlayFadeOut = v;
-                        fadeOn.set(v);
+                    g.row("常驻刷新（永远按 8ms 调度）", row -> {
+                        bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
+                                .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    // 契约 §2.2：W_COUPLING 挂在 #3/#4 下方的 rowComment
+                    g.row("", row -> {
+                        row.rowComment(W_COUPLING, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
                     });
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("淡出前保持时长", row -> {
-                    addSlider(row, SPECS[0], fadeOn);
-                    row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
-                    return kotlin.Unit.INSTANCE;
-                });
+                // ---------- B. 淡出 ----------
+                panel.group("淡出", true, g -> {
+                    g.row("辉光淡出（停止后柔和熄灭）", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        bindCheck(row, () -> pending.overlayFadeOut, v -> {
+                            pending.overlayFadeOut = v;
+                            fadeOn.set(v);
+                        });
+                        return kotlin.Unit.INSTANCE;
+                    });
 
-                g.row("淡出时长", row -> {
-                    addSlider(row, SPECS[1], fadeOn);
-                    return kotlin.Unit.INSTANCE;
-                });
-                return kotlin.Unit.INSTANCE;
-            });
+                    g.row("淡出前保持时长", row -> {
+                        addSlider(row, SPECS[0], fadeOn);
+                        row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
 
-            // ---------- C. 颜色与辉光 ----------
-            panel.group("颜色与辉光", true, g -> {
-                g.row("拖尾颜色", row -> {
-                    row.topGap(TopGap.MEDIUM);
-                    tailColorPanel = new ColorPanel();
-                    tailColorPanel.setSupportTransparency(false);
-                    // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
-                    // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
-                    tailColorPanel.addActionListener(e -> onColorPanelChanged());
-                    row.cell(tailColorPanel);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                g.row("拖尾不透明度（不随预设变化）", row -> {
-                    addSlider(row, SPECS[2], null);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                g.row("启用辉光（不随预设变化）", row -> {
-                    bindCheck(row, () -> pending.useShadow, v -> {
-                        pending.useShadow = v;
-                        shadowOn.set(v);
+                    g.row("淡出时长", row -> {
+                        addSlider(row, SPECS[1], fadeOn);
+                        return kotlin.Unit.INSTANCE;
                     });
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("辉光颜色", row -> {
-                    shadowColorPanel = new ColorPanel();
-                    shadowColorPanel.setSupportTransparency(false);
-                    shadowColorPanel.addActionListener(e -> onColorPanelChanged());
-                    row.cell(shadowColorPanel).enabledIf(shadowOn);
+                // ---------- C. 颜色与辉光 ----------
+                panel.group("颜色与辉光", true, g -> {
+                    g.row("拖尾颜色", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        tailColorPanel = new ColorPanel();
+                        tailColorPanel.setSupportTransparency(false);
+                        // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
+                        // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
+                        tailColorPanel.addActionListener(e -> onColorPanelChanged());
+                        row.cell(tailColorPanel);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("拖尾不透明度（不随预设变化）", row -> {
+                        addSlider(row, SPECS[2], null);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("启用辉光（不随预设变化）", row -> {
+                        bindCheck(row, () -> pending.useShadow, v -> {
+                            pending.useShadow = v;
+                            shadowOn.set(v);
+                        });
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光颜色", row -> {
+                        shadowColorPanel = new ColorPanel();
+                        shadowColorPanel.setSupportTransparency(false);
+                        shadowColorPanel.addActionListener(e -> onColorPanelChanged());
+                        row.cell(shadowColorPanel).enabledIf(shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光峰值不透明度", row -> {
+                        addSlider(row, SPECS[3], shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光层数", row -> {
+                        addSlider(row, SPECS[4], shadowOn);
+                        row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
+                        addSlider(row, SPECS[5], shadowOn);
+                        row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("辉光峰值不透明度", row -> {
-                    addSlider(row, SPECS[3], shadowOn);
+                // ---------- D. 拖尾手感（折叠，默认展开）----------
+                panel.collapsibleGroup("拖尾手感", true, g -> {
+                    g.row("拖尾密度", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        addSlider(row, SPECS[6], springMode);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("拖尾拉伸强度（不随预设变化）", row -> {
+                        addSlider(row, SPECS[7], springMode);
+                        row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                        return kotlin.Unit.INSTANCE;
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("辉光层数", row -> {
-                    addSlider(row, SPECS[4], shadowOn);
-                    row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
+                // ---------- E. 动画时序（折叠，默认折叠 = 高级）----------
+                panel.collapsibleGroup("动画时序", false, g -> {
+                    g.row("跨行动画时长", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        addSlider(row, SPECS[8], null);
+                        row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("短动画时长", row -> {
+                        addSlider(row, SPECS[9], null);
+                        row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    // M4：输入平滑。放在短动画时长正下方 —— 它是那个值的「形状」而不是「长度」。
+                    g.row("输入平滑（只影响单行打字/退格，不随预设变化）", row -> {
+                        addSlider(row, SPECS[10], null);
+                        row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    // 契约 §7.3 第三行：恒显示的耦合提示（逐字）
+                    g.row("", row -> {
+                        row.rowComment(W_ANIM_COUPLING, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    // 契约 §7.4：两条【必须】动态计算的耦合提示（禁止写死数字）
+                    g.row("", row -> {
+                        singleMoveHint = new JLabel();
+                        row.cell(singleMoveHint);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("", row -> {
+                        crossMoveHint = new JLabel();
+                        row.cell(crossMoveHint);
+                        return kotlin.Unit.INSTANCE;
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
-                    addSlider(row, SPECS[5], shadowOn);
-                    row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
+                // ---------- F. 高级（诊断）（折叠，默认折叠）----------
+                // 从 Tools 菜单挪进来（0.9.6 / M1）：菜单只留 3 项，诊断属于「偶尔用一次」的高级项。
+                // 注意它**不持久化** —— 所以也不参与 isModified()：勾选后点「应用」才生效，重启即失效。
+                panel.collapsibleGroup("高级（诊断）", false, g -> {
+                    g.row("性能诊断（跳过重绘，只跑计算）", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        bindCheck(row, () -> paintDiag, v -> paintDiag = v)
+                                .comment(W_PAINT_DIAG, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
+
                 return kotlin.Unit.INSTANCE;
             });
-
-            // ---------- D. 拖尾手感（折叠，默认展开）----------
-            panel.collapsibleGroup("拖尾手感", true, g -> {
-                g.row("拖尾密度", row -> {
-                    row.topGap(TopGap.MEDIUM);
-                    addSlider(row, SPECS[6], springMode);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                g.row("拖尾拉伸强度（不随预设变化）", row -> {
-                    addSlider(row, SPECS[7], springMode);
-                    row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
-                    return kotlin.Unit.INSTANCE;
-                });
-                return kotlin.Unit.INSTANCE;
-            });
-
-            // ---------- E. 动画时序（折叠，默认折叠 = 高级）----------
-            panel.collapsibleGroup("动画时序", false, g -> {
-                g.row("跨行动画时长", row -> {
-                    row.topGap(TopGap.MEDIUM);
-                    addSlider(row, SPECS[8], null);
-                    row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                g.row("短动画时长", row -> {
-                    addSlider(row, SPECS[9], null);
-                    row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // M4：输入平滑。放在短动画时长正下方 —— 它是那个值的「形状」而不是「长度」。
-                g.row("输入平滑（只影响单行打字/退格，不随预设变化）", row -> {
-                    addSlider(row, SPECS[10], null);
-                    row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // 契约 §7.3 第三行：恒显示的耦合提示（逐字）
-                g.row("", row -> {
-                    row.rowComment(W_ANIM_COUPLING, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // 契约 §7.4：两条【必须】动态计算的耦合提示（禁止写死数字）
-                g.row("", row -> {
-                    singleMoveHint = new JLabel();
-                    row.cell(singleMoveHint);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                g.row("", row -> {
-                    crossMoveHint = new JLabel();
-                    row.cell(crossMoveHint);
-                    return kotlin.Unit.INSTANCE;
-                });
-                return kotlin.Unit.INSTANCE;
-            });
-
-            // ---------- F. 高级（诊断）（折叠，默认折叠）----------
-            // 从 Tools 菜单挪进来（0.9.6 / M1）：菜单只留 3 项，诊断属于「偶尔用一次」的高级项。
-            // 注意它**不持久化** —— 所以也不参与 isModified()：勾选后点「应用」才生效，重启即失效。
-            panel.collapsibleGroup("高级（诊断）", false, g -> {
-                g.row("性能诊断（跳过重绘，只跑计算）", row -> {
-                    row.topGap(TopGap.MEDIUM);
-                    bindCheck(row, () -> paintDiag, v -> paintDiag = v)
-                            .comment(W_PAINT_DIAG, COMMENT, NO_LINK);
-                    return kotlin.Unit.INSTANCE;
-                });
-                return kotlin.Unit.INSTANCE;
-            });
-
-            return kotlin.Unit.INSTANCE;
-        });
+        } finally {
+            suppressDerive = false;
+        }
     }
 
     // ==================== 滑块构建（缺陷 1 + 缺陷 2 + 吸附 + 输入框）====================
@@ -935,29 +954,47 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     // ==================== 预设（契约 §5.7 / §8.6）====================
 
     /**
-     * 动画预设被选中。<b>只写 {@code pending}，绝不直接写 state / CONFIG</b>（契约 §5.7）。
+     * 动画预设被选中。<b>只写 {@code pending}，绝不直接写 state / CONFIG</b>。
      *
-     * <p>「自定义」项<b>不可被选中执行</b>：它只在 {@link #refreshPresetDisplay()} 里被程序置为当前项。
-     * 用户手动点到它时不写任何字段，只把显示刷新回去。
+     * <p><b>0.9.9 起下拉里有两类项</b>：
+     * <ul>
+     *   <li>下标 {@code < ANIM_PRESETS.length} → <b>内置预设</b>（永久只读，只写那 6 个动画字段）；</li>
+     *   <li>下标 {@code >= ANIM_PRESETS.length} → <b>自定义预设</b>（恢复它的<b>全参数快照</b>）。</li>
+     * </ul>
+     *
+     * <p>选内置预设时会把 {@code animCustomName} 清空 —— 于是此后任何参数改动都会
+     * 重新派生一份新副本（见 {@link #afterPendingEdited()}），内置那份永远不被污染。
      */
     private void onAnimPresetPicked() {
         if (syncingControls || animPresetCombo == null) {
             return;
         }
         int idx = animPresetCombo.getSelectedIndex();
-        if (idx < 0 || idx >= CursorPresets.ANIM_PRESETS.length) {
-            refreshPresetDisplay();          // 选中「自定义」→ 不改任何字段
+        if (idx < 0) {
+            refreshPresetDisplay();
             return;
         }
-        // 0.9.8：有覆盖就用覆盖，没有才用预设常量 —— 这是「每个预设各自记住改动」的落地。
-        // 只碰这 6 个字段 —— 颜色两个 HEX、stretchRatioK、trailMode 一概不动（正交性硬判据）
-        float[] override = CursorPresets.parseOverride(pending.animPresetOverrides, idx);
-        writeAnimValues(pending, override != null ? override : animConstantsOf(idx));
-        // 基准必须在这里显式前移（M5-13 的关键）：
-        // 选中「有覆盖」的预设时，6 个值 ≠ 该预设常量 → matchAnimPreset 匹配不上，
-        // 若不在选中时就把基准挪过去，「切回来」会显示上一个预设的名字（显示层撒谎）。
-        animBaseIdx = idx;
-        pending.animPresetBase = idx;
+        if (idx < CursorPresets.ANIM_PRESETS.length) {
+            // 内置预设：只写 6 个动画字段，其余 13 个参数一概不动（正交性硬判据）
+            writeAnimValues(pending, animConstantsOf(idx));
+            animBaseIdx = idx;
+            pending.animPresetBase = idx;
+            pending.animCustomName = "";
+        } else {
+            java.util.List<com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry> entries =
+                    com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                            .parse(pending.customAnimPresets);
+            int ci = idx - CursorPresets.ANIM_PRESETS.length;
+            if (ci < 0 || ci >= entries.size()) {
+                refreshPresetDisplay();
+                return;
+            }
+            com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry e = entries.get(ci);
+            // 自定义预设是【全参数快照】：恢复它 = 把 19 个参数一次性写回
+            com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                    .restore(pending, e.snapshot);
+            pending.animCustomName = e.name;
+        }
         syncAllControlsFromPending();
     }
 
@@ -1030,54 +1067,113 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     }
 
     /**
-     * 重算两个下拉的当前项（契约 §5.3：**逐字段比对**，不看历史）。
+     * 重算两个下拉的当前项，并在需要时<b>自动派生/更新自定义预设</b>。
      *
-     * <p>匹配失败时显示末项「自定义」。这是<b>显示态</b>，不是状态 —— 它不被持久化。
+     * <p><b>0.9.9 的两个关键变化</b>：
+     * <ol>
+     *   <li>先调 {@link #afterPendingEdited()} —— 用户改了参数就要有落脚点；</li>
+     *   <li>下拉项 = 7 个内置 + N 个自定义，<b>没有任何「（已修改）」后缀</b>
+     *       （内置预设不再被污染，这个后缀失去了存在理由）。</li>
+     * </ol>
      */
     private void refreshPresetDisplay() {
         if (animPresetCombo == null || colorPresetCombo == null) {
             return;
         }
-        // 基准的持久化真相是 pending.animPresetBase；animBaseIdx 只是它的 UI 镜像。
-        // 这里每次都从 pending 重新同步 —— 否则「选中某个预设」时字段还停在上一个，
-        // 下面的判定会拿错误的基准去比，把刚选的值判成「不属于任何预设」（真实踩过）。
+        // 1) 自动派生 / 更新自定义预设（必须先于重建下拉，否则新名字进不了列表）
+        afterPendingEdited();
+
+        // 2) 基准与颜色匹配
         animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
-        CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(pending);
         CursorPresets.ColorPreset c = CursorPresetApplier.matchColorPreset(pending);
-        // 0.9.8：基准判定必须**先看基准自己的有效值**（有效值 = 覆盖 ?? 预设常量）。
-        //
-        // 【为什么不能只用 matchAnimPreset】它是「当前值 vs 全部预设常量」的全局匹配。
-        // 用户把「原版粉色」的跨行时长改成 0.15 后，这 6 个值**恰好等于**「Neovide 官方」的常量：
-        //   · 旧逻辑 → 基准被抢到「Neovide 官方」，下拉显示干净名字，用户明明选的是原版粉色；
-        //   · 新逻辑 → 当前值 == 有效值(原版粉色) → 保持基准，名字显示「原版粉色（已修改）」。
-        //
-        // 「已修改」的参照物**必须是预设常量**（不是有效值）：用户切回自己改过的预设时，
-        // 当前值 == 有效值（覆盖），但值仍然 ≠ 官方常量，M5-13 要求这时名字带「（已修改）」。
-        float[] effective = CursorPresets.parseOverride(pending.animPresetOverrides, animBaseIdx);
-        if (effective == null) {
-            effective = animConstantsOf(animBaseIdx);
-        }
-        boolean onBase = sameAnimValues(animValuesOf(pending), effective);
-        if (!onBase && a != null) {
-            animBaseIdx = indexOfAnim(a);
-        }
-        pending.animPresetBase = animBaseIdx;
-        boolean modified = !sameAnimValues(animValuesOf(pending), animConstantsOf(animBaseIdx));
         if (c != null) {
             colorBaseIdx = indexOfColor(c);
         }
+
+        // 3) 下拉项 = 内置 + 自定义
+        java.util.List<String> names = new ArrayList<>(animPresetNames());
+        java.util.List<com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry> entries =
+                com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .parse(pending.customAnimPresets);
+        int selectedCustom = -1;
+        for (int i = 0; i < entries.size(); i++) {
+            names.add(entries.get(i).name);
+            if (entries.get(i).name.equals(pending.animCustomName)) {
+                selectedCustom = i;
+            }
+        }
+
         syncingControls = true;
         try {
-            rebuildPresetItems(animPresetCombo, animPresetItems, animPresetNames(), animBaseIdx, modified);
+            replaceModel(animPresetCombo, animPresetItems, names);
             rebuildColorItems(colorPresetCombo, colorPresetItems);
-            // 当前项恒为基准：0.9.8 起「值恰好等于别的预设常量」不再抢走基准（见上面的注释）
-            animPresetCombo.setSelectedIndex(animBaseIdx);
+            // 当前项：自定义优先（animCustomName 非空就是它），否则内置基准
+            int sel = selectedCustom >= 0
+                    ? CursorPresets.ANIM_PRESETS.length + selectedCustom
+                    : animBaseIdx;
+            if (sel >= 0 && sel < animPresetItems.size()) {
+                animPresetCombo.setSelectedIndex(sel);
+            }
             colorPresetCombo.setSelectedIndex(
                     c == null ? colorPresetItems.size() - 1 : indexOfColor(c));
             refreshRestoreButtonText();
         } finally {
             syncingControls = false;
         }
+    }
+
+    /**
+     * 用户改动参数后的<b>落脚点</b>（0.9.9 的核心交互）。
+     *
+     * <p>规则（IntelliJ 配色方案 / GIMP 工具预设的模型）：
+     * <ul>
+     *   <li>当前选中<b>自定义预设</b> → 把它的快照更新成当前值（这就是「随便改」）；</li>
+     *   <li>当前选中<b>内置预设</b> → 一旦 6 个动画字段偏离该预设常量，
+     *       <b>立刻派生</b>一个「{内置名} 副本」并切过去，内置那份一位数都不动；</li>
+     *   <li>没偏离 → 什么都不做（避免一打开面板就凭空多出一堆副本）。</li>
+     * </ul>
+     *
+     * <p><b>为什么判据只看那 6 个动画字段</b>：内置预设只定义这 6 项，
+     * 其余 13 个参数从来不属于预设（改它们不该fork 出新预设）。
+     * 但自定义预设的<b>快照存全部参数</b> —— 于是「存一份自定义预设」= 存下整套观感。
+     *
+     * <p>GIMP 官方文档的说法正好是这条规则的依据：编辑内置预设时自动创建副本，
+     * 所以「Duplicate Tool Preset」命令永远是禁用的 —— 不需要。
+     */
+    private void afterPendingEdited() {
+        if (syncingControls || suppressDerive) {
+            return;
+        }
+        // A. 已在自定义预设上 → 持续同步快照
+        if (!pending.animCustomName.isEmpty()) {
+            if (com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                    .has(pending.customAnimPresets, pending.animCustomName)) {
+                pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .put(pending.customAnimPresets, pending.animCustomName,
+                                com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                                        .snapshot(pending));
+            } else {
+                pending.animCustomName = "";     // 名字没了（被删/被手改坏）→ 退回内置
+            }
+            return;
+        }
+        // B. 在内置预设上 → 只在真的偏离时才派生
+        int base = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+        if (sameAnimValues(animValuesOf(pending), animConstantsOf(base))) {
+            return;                              // 没偏离，不派生
+        }
+        if (!com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .canAdd(pending.customAnimPresets)) {
+            return;                              // 到上限了，不再派生（保护下拉可用性）
+        }
+        String name = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .uniqueName(pending.customAnimPresets,
+                        CursorPresets.ANIM_PRESETS[base].name() + " 副本");
+        pending.animCustomName = name;
+        pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .put(pending.customAnimPresets, name,
+                        com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                                .snapshot(pending));
     }
 
     /**
@@ -1130,18 +1226,27 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     }
 
     /**
-     * M5：把基准动画预设的 6 个常量重新写进 pending（与手动选预设同一条路径）。
+     * 把<b>当前选中项</b>的值重新写进 pending。
      *
-     * <p>0.9.8：<b>同时清掉该预设的覆盖值</b> —— 这个按钮的语义就是「恢复为默认值」，
-     * 只把值写回常量而留着覆盖，会让「切走再切回」又把旧改动复活，
-     * 于是按钮看起来点了没效果（用户视角的「恢复不了」）。
+     * <p>0.9.9 起语义变了：内置预设只读，所以这里不再是「清掉覆盖、回到默认值」，
+     * 而是「丢弃面板里尚未保存的拖动，回到当前预设的已保存值」——
+     * 对内置预设 = 回到那 6 个常量；对自定义预设 = 回到它存的快照。
      */
     private void restoreAnimPreset() {
+        if (!pending.animCustomName.isEmpty()) {
+            String snap = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                    .get(pending.customAnimPresets, pending.animCustomName);
+            if (snap != null) {
+                com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                        .restore(pending, snap);
+                syncAllControlsFromPending();
+                return;
+            }
+            pending.animCustomName = "";
+        }
         if (animBaseIdx < 0 || animBaseIdx >= CursorPresets.ANIM_PRESETS.length) {
             return;
         }
-        pending.animPresetOverrides =
-                CursorPresets.removeOverride(pending.animPresetOverrides, animBaseIdx);
         writeAnimValues(pending, animConstantsOf(animBaseIdx));
         pending.animPresetBase = animBaseIdx;
         syncAllControlsFromPending();
@@ -1317,10 +1422,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
         // 程序化回灌期间抑制监听器：否则吸附会把「精确值」改写成「刻度值」（B-2 变体）
         syncingControls = true;
+        suppressDerive = true;      // 装载历史配置不是「用户编辑」，不派生副本
         try {
             super.reset();          // DialogPanel 按 pending 刷所有绑定控件
         } finally {
             syncingControls = false;
+            suppressDerive = false;
         }
         syncAllControlsFromPending();
     }
@@ -1354,10 +1461,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
         // A2：DialogPanel 把绑定控件的值写进 pending（滑块先、输入框后 —— 见 addSlider 的注释）
         syncingControls = true;
+        suppressDerive = true;
         try {
             super.apply();
         } finally {
             syncingControls = false;
+            suppressDerive = false;
         }
 
         NeovideCursorSettings svc = serviceOrNull();
@@ -1366,105 +1475,44 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         }
         NeovideCursorSettings.State target = svc.getState();
 
-        // A3：逐字段脏标记合并（缺陷 3 的修法本体）
-        // float 必须用 Float.compare：NaN != NaN（==）与 -0.0f == 0.0f 两个边界它都对；
-        // 颜色必须用 equalsIgnoreCase：sanitizeColor 统一成大写，用户手改 XML 可能留小写。
-        if (pending.enabled != baseline.enabled) {
-            target.enabled = pending.enabled;
-        }
-        if (pending.trailMode != baseline.trailMode) {
-            target.trailMode = pending.trailMode;
-        }
-        if (pending.hideNativeCaret != baseline.hideNativeCaret) {
-            target.hideNativeCaret = pending.hideNativeCaret;
-        }
-        if (pending.alwaysHighFps != baseline.alwaysHighFps) {
-            target.alwaysHighFps = pending.alwaysHighFps;
-        }
-        if (pending.overlayFadeOut != baseline.overlayFadeOut) {
-            target.overlayFadeOut = pending.overlayFadeOut;
-        }
-        if (pending.cursorDisappearDelay != baseline.cursorDisappearDelay) {
-            target.cursorDisappearDelay = pending.cursorDisappearDelay;
-        }
-        if (Float.compare(pending.cursorFadeOutDuration, baseline.cursorFadeOutDuration) != 0) {
-            target.cursorFadeOutDuration = pending.cursorFadeOutDuration;
-        }
-        if (!eqHex(pending.tailColor, baseline.tailColor)) {
-            target.tailColor = pending.tailColor;
-        }
-        if (Float.compare(pending.tailOpacity, baseline.tailOpacity) != 0) {
-            target.tailOpacity = pending.tailOpacity;
-        }
-        if (pending.useShadow != baseline.useShadow) {
-            target.useShadow = pending.useShadow;
-        }
-        if (!eqHex(pending.shadowColor, baseline.shadowColor)) {
-            target.shadowColor = pending.shadowColor;
-        }
-        if (Float.compare(pending.glowOpacity, baseline.glowOpacity) != 0) {
-            target.glowOpacity = pending.glowOpacity;
-        }
-        if (pending.glowLayers != baseline.glowLayers) {
-            target.glowLayers = pending.glowLayers;
-        }
-        if (Float.compare(pending.shadowBlurFactor, baseline.shadowBlurFactor) != 0) {
-            target.shadowBlurFactor = pending.shadowBlurFactor;
-        }
-        if (Float.compare(pending.trailSize, baseline.trailSize) != 0) {
-            target.trailSize = pending.trailSize;
-        }
-        // 标量真相：只有它会派生 trailFactors（NeovideCursorSettings#deriveTrailFactors）
-        if (Float.compare(pending.stretchRatioK, baseline.stretchRatioK) != 0) {
-            target.stretchRatioK = pending.stretchRatioK;
-        }
-        // ★ 0.9.5 新增 2 项（契约 §7.1）：不写就等于"XML 存了但运行期读不到"
-        if (Float.compare(pending.animationLength, baseline.animationLength) != 0) {
-            target.animationLength = pending.animationLength;
-        }
-        if (Float.compare(pending.shortAnimationLength, baseline.shortAnimationLength) != 0) {
-            target.shortAnimationLength = pending.shortAnimationLength;
-        }
-        // 19（0.9.6 / M4）：输入平滑
-        if (Float.compare(pending.typingSmoothness, baseline.typingSmoothness) != 0) {
-            target.typingSmoothness = pending.typingSmoothness;
-        }
-        // 20（M5-fix）：预设基准下标也要落库，否则重启后「缎带（已修改）」会退化成原版粉色
-        if (pending.animPresetBase != baseline.animPresetBase) {
-            target.animPresetBase = pending.animPresetBase;
-        }
-
-        // 21（0.9.8）：把「用户对当前基准预设的改动」写进覆盖表 —— 一处写，六处读。
+        // A3：逐字段脏标记合并（缺陷 3 的修法本体）—— 从 {@link SettingsField#FIELDS} 派生。
         //
-        // 【三支判据，缺一支就出错】
-        //   ① 当前 6 值 == 该预设常量 → 把覆盖删掉（值已经回到官方预设，留着覆盖会让下一次
-        //      「切走再切回」复活一个早已不存在的改动）；
-        //   ② 当前 6 值 != 有效值（覆盖 ?? 常量）→ 用户真的改了 → putOverride 记住这份值；
-        //   ③ 其余（当前值 == 已有覆盖）→ 原样保留，**不要**用当前值重写（否则会把 1 ulp 的
-        //      序列化差异写回去，覆盖串每 apply 一次就变一次）。
-        int overrideBase = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
-        float[] constants = animConstantsOf(overrideBase);
-        float[] current = animValuesOf(pending);
-        float[] effective = CursorPresets.parseOverride(pending.animPresetOverrides, overrideBase);
-        if (effective == null) {
-            effective = constants;
+        // 【0.9.9 / B2：为什么改成遍历表】
+        // 这里原来是 20 段手写的 if，每段自己记得用哪种比较（float 用 Float.compare、
+        // 颜色用 equalsIgnoreCase、其余用 !=）。它是「加一个参数要改 8 处」的第 6 处，
+        // 而漏掉的后果是静默的：存了但读不到、改了但应用按钮不亮。
+        // 现在比较语义由表项的 same 函数各自携带，遍历只负责「不同就拷」。
+        //
+        // 【语义一字未改】每个字段用的比较函数与旧代码逐条对应：
+        //   float → Float.compare（NaN / -0.0f 两个边界都对）
+        //   HEX   → equalsIgnoreCase（sanitizeColor 统一大写，手改 XML 可能留小写）
+        //   其余  → 值比较
+        for (com.github.yyyolo7a79.neovidecursor.settings.SettingsField sf
+                : com.github.yyyolo7a79.neovidecursor.settings.SettingsField.FIELDS) {
+            if (sf.differs(pending, baseline)) {
+                sf.copy(pending, target);
+            }
         }
-        String nextOverrides = pending.animPresetOverrides;
-        if (sameAnimValues(current, constants)) {
-            nextOverrides = CursorPresets.removeOverride(nextOverrides, overrideBase);
-        } else if (!sameAnimValues(current, effective)) {
-            nextOverrides = CursorPresets.putOverride(nextOverrides, overrideBase, current);
-        }
-        // 脏合并（缺陷 3 的同一套判据）：只有用户在面板里把覆盖串改过了才写 target。
-        if (!eqText(nextOverrides, baseline.animPresetOverrides)) {
-            target.animPresetOverrides = nextOverrides;
-        }
-        // pending 自身也必须同步：A6/A7 会把 pending 前移成 target 的深拷贝，
-        // 但本行的下一个调用点（同一轮 apply 末的 super.reset()/syncAllControlsFromPending）
-        // 会再读一次 pending —— 不同步就会让面板内的第二次 apply 把刚记住的覆盖算丢。
-        pending.animPresetOverrides = nextOverrides;
 
-        // 预设不持久化（契约 §5.2 的 P-1），因此不在此处写任何「当前预设」字段
+        // 21（0.9.9 / 自定义预设）：内置预设【永久只读】，用户改动不污染它。
+        //
+        // 【模型对比】
+        //   0.9.8：改动写进「该内置预设的覆盖值」→ 内置被污染 → 需要「（已修改）」后缀
+        //          + 「恢复为默认值」按钮来收场。
+        //   0.9.9：改动只落在<b>当前这个自定义预设</b>上；如果当前选的是内置预设，
+        //          那么在拖动那一刻就已经派生出了一份副本（见 syncCustomPresetIfNeeded），
+        //          内置那个一位数都不动。于是「已修改」概念消失。
+        //
+        // 这里只做「把 pending 里的自定义预设表/当前名同步到 target」这一件事。
+        if (!com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                .textSame(pending.customAnimPresets, baseline.customAnimPresets)) {
+            target.customAnimPresets = pending.customAnimPresets;
+        }
+        if (!com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                .textSame(pending.animCustomName, baseline.animCustomName)) {
+            target.animCustomName = pending.animCustomName;
+        }
+
 
         // A4：落盘
         svc.persistQuietly();
@@ -1505,10 +1553,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         // {@code super.reset()} 走的是 DialogPanel 自己的 reset 回调表（全部绑定控件），
         // 正好补齐这一块；两者配合才完整。
         syncingControls = true;
+        suppressDerive = true;
         try {
             super.reset();          // DialogPanel 把 pending 灌进【所有】绑定控件（含复选框/下拉）
         } finally {
             syncingControls = false;
+            suppressDerive = false;
         }
         syncAllControlsFromPending();
     }
@@ -1539,32 +1589,25 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 || dirtyAnyField(pending, cur);
     }
 
-    /** pending 与 state 是否有【任一】字段不同（isModified 的第 3 半，与 apply 的判据同源）。 */
+    /**
+     * pending 与 state 是否有【任一】字段不同（{@code isModified()} 的第 3 半）。
+     *
+     * <p><b>0.9.9 / B3：委托给 {@link SettingsField#dirtyAnyField}（全项目唯一实现）。</b>
+     *
+     * <p>这里原来是 21 行手写的链式 {@code ||}，与 {@code apply()} 里的 20 段 if
+     * <b>是同一套判据的两份手抄</b> —— 代码注释自己都写着「与 apply 的判据同源」。
+     * 两份手抄的后果是实打实的两个已修复缺陷：
+     * <ul>
+     *   <li>M4 加 {@code typingSmoothness} 时只补了 apply 这边 → isModified() 恒 false
+     *       → 用户实测「输入平滑拉不动应用」；</li>
+     *   <li>0.9.8 加覆盖串时同样漏了 → 改了预设覆盖后点不了「应用」。</li>
+     * </ul>
+     *
+     * <p>现在<b>只有一份实现</b>（在表类里），生产代码与探针调的是同一个函数 ——
+     * 结构上不可能再出现「补了一边忘了另一边」，也不可能出现「探针测影子实现」。
+     */
     static boolean dirtyAnyField(NeovideCursorSettings.State p, NeovideCursorSettings.State s) {
-        return p.enabled != s.enabled
-                || p.trailMode != s.trailMode
-                || p.hideNativeCaret != s.hideNativeCaret
-                || p.alwaysHighFps != s.alwaysHighFps
-                || p.overlayFadeOut != s.overlayFadeOut
-                || p.cursorDisappearDelay != s.cursorDisappearDelay
-                || Float.compare(p.cursorFadeOutDuration, s.cursorFadeOutDuration) != 0
-                || !eqHex(p.tailColor, s.tailColor)
-                || Float.compare(p.tailOpacity, s.tailOpacity) != 0
-                || p.useShadow != s.useShadow
-                || !eqHex(p.shadowColor, s.shadowColor)
-                || Float.compare(p.glowOpacity, s.glowOpacity) != 0
-                || p.glowLayers != s.glowLayers
-                || Float.compare(p.shadowBlurFactor, s.shadowBlurFactor) != 0
-                || Float.compare(p.trailSize, s.trailSize) != 0
-                || Float.compare(p.stretchRatioK, s.stretchRatioK) != 0
-                || Float.compare(p.animationLength, s.animationLength) != 0
-                || Float.compare(p.shortAnimationLength, s.shortAnimationLength) != 0
-                // M4 漏项（用户实测「输入平滑拉不动应用」）：漏了它 → isModified() 恒 false → 应用按钮不亮
-                || Float.compare(p.typingSmoothness, s.typingSmoothness) != 0
-                || p.animPresetBase != s.animPresetBase
-                // 0.9.8 漏项 = 应用按钮不亮：改了预设覆盖（或点了「恢复为默认值」清掉覆盖）之后
-                // 6 个值可能与 state 完全相同，只有覆盖串不同 → 漏了这行就点不了「应用」。
-                || !eqText(p.animPresetOverrides, s.animPresetOverrides);
+        return com.github.yyyolo7a79.neovidecursor.settings.SettingsField.dirtyAnyField(p, s);
     }
 
     /** HEX 必须忽略大小写：{@code sanitizeColor} 统一成大写，用户手改 XML 可能留小写。 */

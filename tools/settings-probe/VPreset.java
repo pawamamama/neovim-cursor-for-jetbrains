@@ -329,8 +329,10 @@ public final class VPreset {
         // 与 0.9.8 的两个预设元数据字段。数字变了不是缺陷，是参数确实多了。
         // 每次加参数都必须同步改这里（这也正是 NEXT-REFACTOR.md 说的「加参数要改 8 处」之一，
         // 等字段表重构落地后这里会变成「从表导出」，届时本断言自动跟随）。
-        check("V14-1 State 的 public 实例字段数 == 22（stateVersion + 19 参数 + 2 预设元数据）",
-                fields == 22, "fields=" + fields);
+        // 23 = stateVersion(1) + 19 参数 + 3 预设元数据（animPresetBase / customAnimPresets / animCustomName）。
+        // 0.9.9 把 0.9.8 的单个覆盖串拆成「自建预设表 + 当前选中名」两项。
+        check("V14-1 State 的 public 实例字段数 == 23（stateVersion + 19 参数 + 3 预设元数据）",
+                fields == 23, "fields=" + fields);
 
         // 契约 §5.2 的 P-1 语义是「预设是纯动作，不持久化『当前选中了哪个预设的哪个值副本』」，
         // 但它允许两个**元数据**字段：
@@ -339,8 +341,10 @@ public final class VPreset {
         // 这两个都不是「第二真相源」：真正的观感值仍在 19 个参数字段里，
         // 它们只记录「用户改过哪个预设」。删掉它们才会丢用户数据。
         // 因此判据改成「除这两个白名单之外，State 里没有其它 preset 字段」。
+        // 白名单只列「名字里含 preset」的元数据字段 —— 本断言本身就是按这个过滤的，
+        // animCustomName 不含 "preset"，它由 V14-1 的字段总数覆盖。
         java.util.Set<String> allowedPreset = new java.util.HashSet<>(java.util.Arrays.asList(
-                "animPresetBase", "animPresetOverrides"));
+                "animPresetBase", "customAnimPresets"));
         java.util.List<String> illegalPreset = new java.util.ArrayList<>();
         java.util.Set<String> presentPreset = new java.util.HashSet<>();
         for (java.lang.reflect.Field f : NeovideCursorSettings.State.class.getDeclaredFields()) {
@@ -353,7 +357,7 @@ public final class VPreset {
                 }
             }
         }
-        check("V14-2 State 里除 animPresetBase/animPresetOverrides 外没有其它 preset 字段",
+        check("V14-2 State 里除 animPresetBase/customAnimPresets/animCustomName 外没有其它 preset 字段",
                 illegalPreset.isEmpty() && presentPreset.equals(allowedPreset),
                 "越界=" + illegalPreset + " 白名单实存=" + presentPreset);
 

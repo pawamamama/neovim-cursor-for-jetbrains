@@ -250,12 +250,39 @@ public final class VDefects {
         String text = ui3.textFields.get(0) == null ? "" : ui3.textFields.get(0).getText();
         String label = ui3.valueLabels.get(0) == null ? "" : ui3.valueLabels.get(0).getText();
         boolean m3 = conf.isModified();
+        // 【0.9.9】失败时把「哪个字段被判脏」直接打出来 —— 否则只看到 true/false，
+        // 排查要重跑半个探针（这次就是这么找问题的）。
+        String why = "";
+        if (m3) {
+            StringBuilder sb = new StringBuilder();
+            for (com.github.yyyolo7a79.neovidecursor.settings.SettingsField f
+                    : com.github.yyyolo7a79.neovidecursor.settings.SettingsField.FIELDS) {
+                if (f.differs(conf.pendingForProbe(), svc.getState())) {
+                    sb.append(f.key).append(":pending=").append(f.readState(conf.pendingForProbe()))
+                            .append("/state=").append(f.readState(svc.getState())).append(' ');
+                }
+            }
+            if (!com.github.yyyolo7a79.neovidecursor.settings.SettingsField.textSame(
+                    conf.pendingForProbe().customAnimPresets, svc.getState().customAnimPresets)) {
+                sb.append("customAnimPresets:pending.len=")
+                        .append(conf.pendingForProbe().customAnimPresets == null ? -1
+                                : conf.pendingForProbe().customAnimPresets.length())
+                        .append("/state.len=")
+                        .append(svc.getState().customAnimPresets == null ? -1
+                                : svc.getState().customAnimPresets.length()).append(' ');
+            }
+            if (!com.github.yyyolo7a79.neovidecursor.settings.SettingsField.textSame(
+                    conf.pendingForProbe().animCustomName, svc.getState().animCustomName)) {
+                sb.append("animCustomName:").append(conf.pendingForProbe().animCustomName).append(' ');
+            }
+            why = sb.toString();
+        }
         check("V11-3a 精确值 333 → 滑块吸附显示 350", shown == 350, "slider=" + shown);
         check("V11-3b 精确值 333 → 输入框/标签显示精确值（不篡改用户数据）",
                 "333".equals(text) && label != null && label.startsWith("333"),
                 "tf=\"" + text + "\" label=\"" + label + "\"");
         check("V11-3c 【防 B-2】精确值 333 / 刻度 350 时 isModified()=false", !m3,
-                String.valueOf(m3));
+                String.valueOf(m3) + (why.isEmpty() ? "" : "  <- " + why));
 
         conf.apply();
         check("V11-4a apply() 后 isModified()=false", !conf.isModified(), String.valueOf(conf.isModified()));

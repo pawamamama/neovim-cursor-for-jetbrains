@@ -1,0 +1,284 @@
+import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
+import com.github.yyyolo7a79.neovidecursor.settings.CustomPresets;
+import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.github.yyyolo7a79.neovidecursor.settings.SettingsField;
+import com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier;
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * V-CUSTOM —— 自定义预设（0.9.9 的核心功能）。
+ *
+ * <p><b>为什么这条探针取代了 VOverride</b>：0.9.8 的 F7 描述的是
+ * 「Tools 应用预设时冲掉用户的覆盖值」。0.9.9 把模型换成
+ * 「内置预设永久只读 + 用户改动落在自定义预设上」，覆盖值这个概念不存在了，
+ * 那条 bug 路径随之消失。所以这里改为验证新模型本身。
+ *
+ * <p>覆盖四件事：
+ * <ol>
+ *   <li><b>快照往返</b>：snapshot → restore 后 19 个参数逐项相等（含 HEX 大小写与枚举）；</li>
+ *   <li><b>增删改查</b>：名称可含中文/空格/分号/等号；重名拒绝；删除幂等；</li>
+ *   <li><b>内置只读</b>：Tools 应用内置预设不动颜色、清空“当前自定义”指针、不删用户预设；</li>
+ *   <li><b>自动派生</b>：在内置预设上改一个动画字段 → 自动出现「X 副本」并切过去，
+ *       且内置常量表一位数都不变。</li>
+ * </ol>
+ */
+public final class VCustom {
+
+    private static int pass = 0;
+    private static int fail = 0;
+
+    public static void main(String[] args) {
+        System.out.println("=== V-CUSTOM：自定义预设（快照 / 增删改查 / 内置只读 / 自动派生）===");
+        V0Env.install();
+
+        snapshotRoundTrip();
+        crud();
+        builtinReadOnly();
+        autoDerive();
+
+        System.out.println();
+        System.out.printf("=== V-CUSTOM 结果：PASS %d，FAIL %d ===%n", pass, fail);
+        System.out.flush();
+        if (fail > 0) {
+            System.out.println("V-CUSTOM RESULT: FAILED");
+            System.exit(1);
+        }
+        System.out.println("V-CUSTOM RESULT: ALL PASS");
+        System.exit(0);
+    }
+
+    // ---------------------------------------------------------------- 1. 快照往返
+
+    private static void snapshotRoundTrip() {
+        System.out.println();
+        System.out.println("--- 1. 全参数快照往返 ---");
+        NeovideCursorSettings.State src = new NeovideCursorSettings.State();
+        src.enabled = false;
+        src.trailMode = NeovideConfig.TrailMode.AFTERIMAGE;
+        src.hideNativeCaret = false;
+        src.alwaysHighFps = false;
+        src.overlayFadeOut = false;
+        src.cursorDisappearDelay = 320;
+        src.cursorFadeOutDuration = 0.615f;
+        src.tailColor = "#0a1b2c";
+        src.tailOpacity = 0.625f;
+        src.useShadow = false;
+        src.shadowColor = "#3D4E5F";
+        src.glowOpacity = 0.375f;
+        src.glowLayers = 11;
+        src.shadowBlurFactor = 0.47f;
+        src.trailSize = 0.812f;
+        src.stretchRatioK = 6.2f;
+        src.animationLength = 0.22f;
+        src.shortAnimationLength = 0.07f;
+        src.typingSmoothness = 0.35f;
+
+        String snap = SettingsField.snapshot(src);
+        check("C-1 快照包含全部 19 个预设域字段",
+                snap.split(";").length == SettingsField.PRESET_FIELDS.size(),
+                "条目=" + snap.split(";").length + " 字段=" + SettingsField.PRESET_FIELDS.size());
+
+        NeovideCursorSettings.State dst = new NeovideCursorSettings.State();
+        int applied = SettingsField.restore(dst, snap);
+        check("C-2 restore 写入了全部字段",
+                applied == SettingsField.PRESET_FIELDS.size(), "写入=" + applied);
+
+        List<String> diffs = new ArrayList<>();
+        for (SettingsField f : SettingsField.PRESET_FIELDS) {
+            Object a = f.readState(src);
+            Object b = f.readState(dst);
+            if (a instanceof Float && b instanceof Float) {
+                if (Float.compare((Float) a, (Float) b) != 0) {
+                    diffs.add(f.key + " " + a + "!=" + b);
+                }
+            } else if (!String.valueOf(a).equalsIgnoreCase(String.valueOf(b))) {
+                diffs.add(f.key + " " + a + "!=" + b);
+            }
+        }
+        check("C-3 往返后 19 个参数逐项相等（HEX 忽略大小写）", diffs.isEmpty(), String.valueOf(diffs));
+
+        check("C-4 animPresetBase 不进快照（它是选中指针，不是参数）",
+                !snap.contains("animPresetBase"), "首段=" + snap.split(";")[0]);
+
+        NeovideCursorSettings.State tolerant = new NeovideCursorSettings.State();
+        int n = SettingsField.restore(tolerant, "glowLayers=9;不存在的键=1;tailColor=#ABCDEF;坏的");
+        check("C-5 未知键 / 坏条目被忽略，合法项照常写入", n == 2,
+                "写入=" + n + " glowLayers=" + tolerant.glowLayers
+                        + " tailColor=" + tolerant.tailColor);
+    }
+
+    // ---------------------------------------------------------------- 2. 增删改查
+
+    private static void crud() {
+        System.out.println();
+        System.out.println("--- 2. 增删改查（名称可含中文 / 空格 / 分号 / 等号）---");
+        String weird = "我的 预设;=1";
+        String snapA = SettingsField.snapshot(new NeovideCursorSettings.State());
+
+        String all = CustomPresets.put("", weird, snapA);
+        check("C-6 名称含中文/空格/分号/等号也能存取",
+                CustomPresets.has(all, weird) && snapA.equals(CustomPresets.get(all, weird)),
+                "name=" + weird);
+
+        String all2 = CustomPresets.put(all, "第二个", snapA);
+        check("C-7 追加第二个预设", CustomPresets.parse(all2).size() == 2,
+                "数量=" + CustomPresets.parse(all2).size());
+
+        NeovideCursorSettings.State changed = new NeovideCursorSettings.State();
+        changed.glowLayers = 3;
+        String snapB = SettingsField.snapshot(changed);
+        String all3 = CustomPresets.put(all2, weird, snapB);
+        check("C-8 同名 put 原位替换且顺序不变",
+                snapB.equals(CustomPresets.get(all3, weird))
+                        && CustomPresets.parse(all3).get(0).name.equals(weird),
+                "首项=" + CustomPresets.parse(all3).get(0).name);
+
+        check("C-9 改名到已存在的名字被拒绝（不静默覆盖别人的预设）",
+                CustomPresets.rename(all2, weird, "第二个") == null, "期望 null");
+        String renamed = CustomPresets.rename(all2, weird, "改名后");
+        check("C-10 改名成功且快照跟着走",
+                renamed != null && CustomPresets.has(renamed, "改名后")
+                        && CustomPresets.get(renamed, "改名后").equals(snapA),
+                String.valueOf(renamed != null));
+
+        String removed = CustomPresets.remove(renamed, "改名后");
+        check("C-11 删除后不再存在", !CustomPresets.has(removed, "改名后"),
+                "剩 " + CustomPresets.parse(removed).size() + " 个");
+        check("C-12 删除不存在的名字是幂等空操作",
+                removed.equals(CustomPresets.remove(removed, "根本没有")), "");
+
+        check("C-13 uniqueName 重名时追加 2（Windows/IntelliJ 复制命名习惯）",
+                "缎带 副本".equals(CustomPresets.uniqueName("", "缎带 副本"))
+                        && "缎带 副本 2".equals(CustomPresets.uniqueName(
+                                CustomPresets.put("", "缎带 副本", snapA), "缎带 副本")),
+                "");
+
+        check("C-14 空串与坏串解析不抛异常且返回空表",
+                CustomPresets.parse("").isEmpty()
+                        && CustomPresets.parse(";;;").isEmpty()
+                        && CustomPresets.parse("没有分隔符").isEmpty(),
+                "");
+    }
+
+    // ---------------------------------------------------------------- 3. 内置只读
+
+    private static void builtinReadOnly() {
+        System.out.println();
+        System.out.println("--- 3. 内置预设永久只读 ---");
+        NeovideCursorSettings.State s = V0Env.svc.getState();
+        s.tailColor = "#123456";
+        s.shadowColor = "#654321";
+        s.animCustomName = "某个自定义";
+        s.customAnimPresets = CustomPresets.put("", "某个自定义", SettingsField.snapshot(s));
+
+        int idx = 1;                                   // 「缎带」
+        CursorPresets.AnimPreset ribbon = CursorPresets.ANIM_PRESETS[idx];
+        CursorPresetApplier.applyAnimPreset(ribbon);
+
+        NeovideCursorSettings.State after = V0Env.svc.getState();
+        check("C-15 应用内置预设只写 6 个动画字段（值 = 预设常量）",
+                Math.abs(after.animationLength - ribbon.animationLength()) < 1e-6f
+                        && after.glowLayers == ribbon.glowLayers(),
+                "anim=" + after.animationLength + " layers=" + after.glowLayers);
+        check("C-16 应用内置预设不动颜色（正交性硬判据）",
+                "#123456".equalsIgnoreCase(after.tailColor)
+                        && "#654321".equalsIgnoreCase(after.shadowColor),
+                after.tailColor + " / " + after.shadowColor);
+        check("C-17 应用内置预设清空「当前自定义」指针（回到内置）",
+                "".equals(after.animCustomName), "animCustomName=\"" + after.animCustomName + "\"");
+        check("C-18 应用内置预设不删除任何自定义预设（用户数据不丢）",
+                CustomPresets.has(after.customAnimPresets, "某个自定义"),
+                "数量=" + CustomPresets.parse(after.customAnimPresets).size());
+    }
+
+    // ---------------------------------------------------------------- 4. 自动派生
+
+    private static void autoDerive() {
+        System.out.println();
+        System.out.println("--- 4. 改内置的字段 → 自动派生副本，内置不变 ---");
+        int base = 0;                                  // 「原版粉色」
+        float[] constants = constantsOf(base);
+
+        NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
+        // 必须走 VUi.build：它内部调 V0Env.disableValidators，
+        // 否则离线环境没有 JBPopupFactory，setText 时平台验证器会抛异常。
+        VUi.build(conf);
+        conf.reset();
+
+        NeovideCursorSettings.State p1 = conf.pendingForProbe();
+        p1.animPresetBase = base;
+        p1.animCustomName = "";
+        p1.customAnimPresets = "";
+        writeAnim(p1, constants);
+        conf.refreshPresetDisplayForProbe();
+        check("C-19 未改动时不派生任何自定义预设",
+                "".equals(conf.pendingForProbe().animCustomName)
+                        && CustomPresets.parse(conf.pendingForProbe().customAnimPresets).isEmpty(),
+                "name=\"" + conf.pendingForProbe().animCustomName + "\"");
+
+        // 模拟拖动滑块：改一个动画字段 → 自动派生
+        conf.pendingForProbe().glowLayers = 10;
+        conf.refreshPresetDisplayForProbe();
+        NeovideCursorSettings.State p2 = conf.pendingForProbe();
+        String derived = p2.animCustomName;
+        check("C-20 改一个动画字段后自动派生出「X 副本」并切过去",
+                !derived.isEmpty() && derived.startsWith(CursorPresets.ANIM_PRESETS[base].name()),
+                "name=\"" + derived + "\"");
+        check("C-21 派生的副本里存的就是当前值（glowLayers=10）",
+                CustomPresets.get(p2.customAnimPresets, derived) != null
+                        && CustomPresets.get(p2.customAnimPresets, derived).contains("glowLayers=10"),
+                "");
+        check("C-22 内置预设常量表未被污染（一位数都没变）",
+                CursorPresets.ANIM_PRESETS[base].glowLayers() == Math.round(constants[3]),
+                "常量=" + CursorPresets.ANIM_PRESETS[base].glowLayers());
+
+        // 继续改 → 更新同一个副本，不新增
+        conf.pendingForProbe().glowLayers = 11;
+        conf.refreshPresetDisplayForProbe();
+        NeovideCursorSettings.State p3 = conf.pendingForProbe();
+        check("C-23 继续改动只更新同一个副本，不重复新建",
+                p3.animCustomName.equals(derived)
+                        && CustomPresets.parse(p3.customAnimPresets).size() == 1,
+                "数量=" + CustomPresets.parse(p3.customAnimPresets).size());
+
+        // 切回内置 → 指针清空、值回常量
+        conf.pickAnimPresetForProbe(base);
+        NeovideCursorSettings.State p4 = conf.pendingForProbe();
+        check("C-24 切回内置预设后指针清空、值回到常量",
+                "".equals(p4.animCustomName) && p4.glowLayers == Math.round(constants[3]),
+                "name=\"" + p4.animCustomName + "\" glowLayers=" + p4.glowLayers);
+        check("C-25 切回内置后副本仍在列表里（不自动删用户数据）",
+                CustomPresets.parse(p4.customAnimPresets).size() == 1,
+                "数量=" + CustomPresets.parse(p4.customAnimPresets).size());
+    }
+
+    private static float[] constantsOf(int idx) {
+        CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[idx];
+        return new float[]{
+                p.animationLength(), p.shortAnimationLength(), p.trailSize(),
+                p.glowLayers(), p.shadowBlurFactor(), p.glowOpacity()};
+    }
+
+    private static void writeAnim(NeovideCursorSettings.State s, float[] v) {
+        s.animationLength = v[0];
+        s.shortAnimationLength = v[1];
+        s.trailSize = v[2];
+        s.glowLayers = Math.round(v[3]);
+        s.shadowBlurFactor = v[4];
+        s.glowOpacity = v[5];
+    }
+
+    private static void check(String name, boolean ok, String detail) {
+        if (ok) {
+            pass++;
+            System.out.println("  PASS  " + name + "   [" + detail + "]");
+        } else {
+            fail++;
+            System.out.println("  FAIL  " + name + "   [" + detail + "]");
+        }
+    }
+}

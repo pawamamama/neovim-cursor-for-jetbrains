@@ -147,11 +147,13 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         target.typingSmoothness = clamp(from.typingSmoothness, 0f, 1f);
         target.animPresetBase = clamp(from.animPresetBase, 0, 6);   // 动画预设只有 7 个（0–6）
 
-        // 21（0.9.8）：预设覆盖值。老 XML 没有这一项 → 平台给 null → 必须落成 ""。
-        // 【为什么不能留 null】解析器（CursorPresets.parseOverride）虽然容忍 null，但
-        // 面板 / 探针里的 String.equals 会 NPE；空串才是「无覆盖」的唯一表示。
-        target.animPresetOverrides =
-                (from.animPresetOverrides == null) ? "" : from.animPresetOverrides;
+        // 21/22（0.9.9）：自定义预设表 + 当前选中名。老 XML 没有这两项 → 平台给 null
+        // → 必须落成 ""。【为什么不能留 null】面板/探针里的 String.equals 会 NPE；
+        // 空串才是「没有自建预设」/「选中内置」的唯一表示。
+        target.customAnimPresets =
+                (from.customAnimPresets == null) ? "" : from.customAnimPresets;
+        target.animCustomName =
+                (from.animCustomName == null) ? "" : from.animCustomName;
 
         state = target;
 
@@ -311,26 +313,12 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         NeovideConfig c = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.getConfig();
         State s = state;
 
-        c.enabled = s.enabled;
-        c.trailMode = s.trailMode;
-        c.hideNativeCaret = s.hideNativeCaret;
-        c.alwaysHighFps = s.alwaysHighFps;
-        c.overlayFadeOut = s.overlayFadeOut;
-        c.cursorDisappearDelay = s.cursorDisappearDelay;
-        c.cursorFadeOutDuration = s.cursorFadeOutDuration;
-        c.tailColor = s.tailColor;
-        c.tailOpacity = s.tailOpacity;
-        c.useShadow = s.useShadow;
-        c.shadowColor = s.shadowColor;
-        c.glowOpacity = s.glowOpacity;
-        c.glowLayers = s.glowLayers;
-        c.shadowBlurFactor = s.shadowBlurFactor;
-        c.trailSize = s.trailSize;
-
-        // 17/18：动画时序（0.9.5 新增可调，契约 §7.1）。
-        // 【必须】写进 CONFIG —— 否则 XML 存了但绘制路径读不到（TrailCorner/DampedSpring 都读 CONFIG）。
-        c.animationLength = s.animationLength;
-        c.shortAnimationLength = s.shortAnimationLength;
+        // 【0.9.9 / B3】从 SettingsField 表派生（原来是 17 行手写赋值）。
+        // 谁参与由表项的 syncsToConfig 标志决定；不参与的两类见 SettingsField 注释
+        // （stretchRatioK / typingSmoothness 派生成 trailFactors）。
+        for (SettingsField f : SettingsField.FIELDS) {
+            f.stateToConfig(s, c);
+        }
 
         // 派生量：新建数组，绝不复用 State 的对象引用
         // 输入平滑（M4）也在这里落地：它只改这四档系数，而 trailFactors 只在短跳分支被读
@@ -338,28 +326,19 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         c.trailFactors = deriveTrailFactors(s.stretchRatioK, s.typingSmoothness);
     }
 
-    /** 运行期 → 持久化：把 CONFIG 里能持久化的 15 项回写进 State（不含 stateVersion）。 */
+    /**
+     * 运行期 → 持久化：把 CONFIG 里能持久化的字段回写进 State（不含 stateVersion）。
+     *
+     * <p><b>0.9.9 / B3：从 {@link SettingsField} 表派生</b>（原来是 17 行手写赋值）。
+     */
     public void syncConfigToState() {
         NeovideConfig c = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.getConfig();
         State s = state;
 
-        s.enabled = c.enabled;
-        s.trailMode = c.trailMode;
-        s.hideNativeCaret = c.hideNativeCaret;
-        s.alwaysHighFps = c.alwaysHighFps;
-        s.overlayFadeOut = c.overlayFadeOut;
-        s.cursorDisappearDelay = c.cursorDisappearDelay;
-        s.cursorFadeOutDuration = c.cursorFadeOutDuration;
-        s.tailColor = c.tailColor;
-        s.tailOpacity = c.tailOpacity;
-        s.useShadow = c.useShadow;
-        s.shadowColor = c.shadowColor;
-        s.glowOpacity = c.glowOpacity;
-        s.glowLayers = c.glowLayers;
-        s.shadowBlurFactor = c.shadowBlurFactor;
-        s.trailSize = c.trailSize;
-        s.animationLength = c.animationLength;
-        s.shortAnimationLength = c.shortAnimationLength;
+        for (SettingsField f : SettingsField.FIELDS) {
+            f.configToState(c, s);
+        }
+
         // stretchRatioK 不在这里回写：它是 trailFactors 的「派生源」而不是派生值。
         // 若从 trailFactors 反推 k，round2 会把 4.5 变回 4.545，面板滑块就会自己漂移。
         // 反推逻辑第一期【不做】（见 SETTINGS-CONTRACT.md v2 §2.5 的裁决），
@@ -722,26 +701,34 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         public int animPresetBase = 0;
 
         /**
-         * 21（0.9.8）：<b>每个预设各自的覆盖值</b>（持久化）。
+         * 21（0.9.9 / 自定义预设）：<b>用户自建的预设表</b>（持久化）。
          *
-         * <p>格式：{@code idx=v1,v2,v3,v4,v5,v6;idx=...}，值的顺序
-         * = {@link CursorPresets.ANIM_PRESETS} 的 6 个字段
-         * （animationLength, shortAnimationLength, trailSize, glowLayers,
-         * shadowBlurFactor, glowOpacity）。空串 = 没有任何覆盖。
+         * <p>格式：{@code 名称[U+0001]快照;名称[U+0001]快照;...}，其中「快照」是
+         * {@link SettingsField#snapshot} 产出的 {@code key=value;key=value;...}。
+         * 空串 = 用户还没有自建预设。
          *
-         * <p><b>为什么需要它</b>：预设常量表是「一组成套取值」，切换时整组覆盖 ——
-         * 用户改过的值因此<b>没有落脚点</b>，切走再切回就坍缩回预设常量
-         * （用户实测：「已修改之后没有持久化，换了一个后失效了」）。
+         * <p><b>为什么是「全参数快照」而不是 0.9.8 的「6 字段覆盖」</b>：
+         * 0.9.8 的模型是「覆盖某个内置预设的值」，于是内置预设会被用户改动<b>污染</b>，
+         * 需要「（已修改）」后缀 + 「恢复为默认值」按钮来收场。
+         * 0.9.9 改用 IntelliJ 配色方案 / GIMP 工具预设的模型：
+         * <b>内置预设永久只读</b>，用户一旦改动任何参数就<b>自动派生</b>
+         * 一个自定义预设，内置那份一位数都不动。
+         * 于是「已修改」这个概念连同它的后缀一起消失。
          *
-         * <p><b>只存预设域的 6 个字段</b>：颜色 2 项 / 拉伸强度 / 输入平滑 /
-         * 拖尾不透明度 / 辉光开关 / 总开关组从来不属于预设，改它们永远不产生覆盖
-         * （否则「已修改」会被无关字段污染）。
+         * <p><b>名称允许出现任何字符</b>（含 {@code ;} {@code =} 与中文）：
+         * 分隔符用 {@code U+0001}（ASCII 1，用户不可能从面板键入），
+         * 名称本身不转义也不编码，所以「原版粉色 副本」这类名字原样保存。
+         * 解析时缺分隔符的条目整条忽略（宁可丢一个坏条目，不能让整页打不开）。
          *
-         * <p>解析与序列化是纯函数（{@link CursorPresets#parseOverride} /
-         * {@link CursorPresets#putOverride} / {@link CursorPresets#removeOverride}），
-         * 非法内容一律当「无覆盖」，<b>绝不抛异常</b>。
+         * <p>解析与序列化是纯函数（{@link CustomPresets}），非法内容一律当「无此预设」，
+         * <b>绝不抛异常</b>。
          */
-        public String animPresetOverrides = "";
+        public String customAnimPresets = "";
+
+        /**
+         * 22（0.9.9）：当前选中的<b>自定义预设名</b>；空串 = 当前选中内置预设。
+         */
+        public String animCustomName = "";
 
         public State() {
         }
@@ -772,7 +759,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             shortAnimationLength = from.shortAnimationLength;
             typingSmoothness = from.typingSmoothness;
             animPresetBase = from.animPresetBase;
-            animPresetOverrides = from.animPresetOverrides;
+            customAnimPresets = from.customAnimPresets;
+            animCustomName = from.animCustomName;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
@@ -799,7 +787,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                     + ", shortAnimationLength=" + shortAnimationLength
                     + ", typingSmoothness=" + typingSmoothness
                     + ", animPresetBase=" + animPresetBase
-                    + ", animPresetOverrides=" + animPresetOverrides
+                    + ", customAnimPresets=" + customAnimPresets
+                    + ", animCustomName=" + animCustomName
                     + "}";
         }
     }
