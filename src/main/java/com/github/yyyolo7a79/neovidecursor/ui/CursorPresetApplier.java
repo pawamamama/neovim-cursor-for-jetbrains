@@ -33,6 +33,23 @@ public final class CursorPresetApplier {
      * {@code stretchRatioK} / {@code trailFactors}（方案 §4.1：预设一律沿用 4.5×）、
      * {@code trailMode}（独立开关）。
      *
+     * <p><b>【reviewer F7】必须先查覆盖表，再退回预设常量。</b>
+     *
+     * <p>原实现只写 {@code p.xxx()} 常量，完全不看 {@code animPresetOverrides}。
+     * 后果是一条会<b>静默销毁用户工作</b>的路径：
+     * <ol>
+     *   <li>用户在面板里把「缎带」的跨行时长改成 0.15 → apply 后写进覆盖表；</li>
+     *   <li>用户从 Tools 菜单点「缎带」→ 本方法把 6 项<b>改回预设常量</b>，
+     *       用户刚改的值被冲掉（界面上就是「我的改动没了」）；</li>
+     *   <li>用户在面板再点一次「应用」→ {@code apply()} 的三支判据里
+     *       {@code current == constants} 成立 → 走第 ① 支 <b>removeOverride</b>
+     *       → 覆盖值被删除，改动<b>永久丢失</b>。</li>
+     * </ol>
+     *
+     * <p>修法：应用前先 {@link CursorPresets#parseOverride} 查该预设有没有覆盖值，
+     * 有就用覆盖值（与面板 {@code onAnimPresetPicked()} 完全同一条语义），没有才用常量。
+     * 这样「Tools 点预设」与「面板选预设」两条入口对同一份数据给出一致结果。
+     *
      * @return 实际被应用的预设；{@code null} 输入时不做任何事并返回 {@code null}
      */
     public static CursorPresets.AnimPreset applyAnimPreset(CursorPresets.AnimPreset p) {
@@ -44,16 +61,52 @@ public final class CursorPresetApplier {
             return null;
         }
         NeovideCursorSettings.State s = svc.getState();
-        s.animationLength = p.animationLength();
-        s.shortAnimationLength = p.shortAnimationLength();
-        s.trailSize = p.trailSize();
-        s.glowLayers = p.glowLayers();
-        s.shadowBlurFactor = p.shadowBlurFactor();
-        s.glowOpacity = p.glowOpacity();
+
+        int idx = indexOf(p);
+        float[] fromOverride = (idx >= 0)
+                ? CursorPresets.parseOverride(s.animPresetOverrides, idx)
+                : null;
+
+        if (fromOverride != null) {
+            // 有覆盖：用用户改过的值（6 项，顺序见 CursorPresets.OVERRIDE_FIELDS）
+            s.animationLength = fromOverride[0];
+            s.shortAnimationLength = fromOverride[1];
+            s.trailSize = fromOverride[2];
+            s.glowLayers = Math.round(fromOverride[3]);
+            s.shadowBlurFactor = fromOverride[4];
+            s.glowOpacity = fromOverride[5];
+        } else {
+            // 无覆盖：用预设常量（0.9.8 原行为，一字未改）
+            s.animationLength = p.animationLength();
+            s.shortAnimationLength = p.shortAnimationLength();
+            s.trailSize = p.trailSize();
+            s.glowLayers = p.glowLayers();
+            s.shadowBlurFactor = p.shadowBlurFactor();
+            s.glowOpacity = p.glowOpacity();
+        }
+
+        // 基准也必须前移（与面板 onAnimPresetPicked() 一致）：
+        // 否则「Tools 切到有覆盖的预设」后，面板下拉仍指着上一个预设（显示层撒谎），
+        // 且下一次面板 apply 会把覆盖写到【错误的 key】上。
+        if (idx >= 0) {
+            s.animPresetBase = idx;
+        }
+
         svc.persistQuietly();
         NeovideCaretManager.applyConfig();      // ← S1..S8 唯一生效入口（既有）
-        LOG.info("neovide-cursor: 已应用动画预设 " + p.name());
+        LOG.info("neovide-cursor: 已应用动画预设 " + p.name()
+                + (fromOverride != null ? "（含用户覆盖值）" : "（预设常量）"));
         return p;
+    }
+
+    /** 预设对象在 {@link CursorPresets#ANIM_PRESETS} 里的下标；找不到返回 -1。 */
+    static int indexOf(CursorPresets.AnimPreset p) {
+        for (int i = 0; i < CursorPresets.ANIM_PRESETS.length; i++) {
+            if (CursorPresets.ANIM_PRESETS[i] == p) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
