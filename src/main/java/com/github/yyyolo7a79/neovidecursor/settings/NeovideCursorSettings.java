@@ -147,6 +147,12 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         target.typingSmoothness = clamp(from.typingSmoothness, 0f, 1f);
         target.animPresetBase = clamp(from.animPresetBase, 0, 6);   // 动画预设只有 7 个（0–6）
 
+        // 21（0.9.8）：预设覆盖值。老 XML 没有这一项 → 平台给 null → 必须落成 ""。
+        // 【为什么不能留 null】解析器（CursorPresets.parseOverride）虽然容忍 null，但
+        // 面板 / 探针里的 String.equals 会 NPE；空串才是「无覆盖」的唯一表示。
+        target.animPresetOverrides =
+                (from.animPresetOverrides == null) ? "" : from.animPresetOverrides;
+
         state = target;
 
         // 先逐字段落地，再迁移 —— 迁移只在 stateVersion < 1 时才会覆盖两个布尔。
@@ -715,6 +721,28 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          */
         public int animPresetBase = 0;
 
+        /**
+         * 21（0.9.8）：<b>每个预设各自的覆盖值</b>（持久化）。
+         *
+         * <p>格式：{@code idx=v1,v2,v3,v4,v5,v6;idx=...}，值的顺序
+         * = {@link CursorPresets.ANIM_PRESETS} 的 6 个字段
+         * （animationLength, shortAnimationLength, trailSize, glowLayers,
+         * shadowBlurFactor, glowOpacity）。空串 = 没有任何覆盖。
+         *
+         * <p><b>为什么需要它</b>：预设常量表是「一组成套取值」，切换时整组覆盖 ——
+         * 用户改过的值因此<b>没有落脚点</b>，切走再切回就坍缩回预设常量
+         * （用户实测：「已修改之后没有持久化，换了一个后失效了」）。
+         *
+         * <p><b>只存预设域的 6 个字段</b>：颜色 2 项 / 拉伸强度 / 输入平滑 /
+         * 拖尾不透明度 / 辉光开关 / 总开关组从来不属于预设，改它们永远不产生覆盖
+         * （否则「已修改」会被无关字段污染）。
+         *
+         * <p>解析与序列化是纯函数（{@link CursorPresets#parseOverride} /
+         * {@link CursorPresets#putOverride} / {@link CursorPresets#removeOverride}），
+         * 非法内容一律当「无覆盖」，<b>绝不抛异常</b>。
+         */
+        public String animPresetOverrides = "";
+
         public State() {
         }
 
@@ -744,6 +772,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             shortAnimationLength = from.shortAnimationLength;
             typingSmoothness = from.typingSmoothness;
             animPresetBase = from.animPresetBase;
+            animPresetOverrides = from.animPresetOverrides;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
@@ -770,6 +799,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                     + ", shortAnimationLength=" + shortAnimationLength
                     + ", typingSmoothness=" + typingSmoothness
                     + ", animPresetBase=" + animPresetBase
+                    + ", animPresetOverrides=" + animPresetOverrides
                     + "}";
         }
     }

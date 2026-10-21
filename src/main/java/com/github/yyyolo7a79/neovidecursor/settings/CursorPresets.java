@@ -1,5 +1,8 @@
 package com.github.yyyolo7a79.neovidecursor.settings;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 0.9.5 的预设表。<b>纯常量，不是真相源。</b>
  *
@@ -189,6 +192,183 @@ public final class CursorPresets {
     /** 把持久化的基准下标钳进合法范围（0..ANIM_PRESETS.length-1）。 */
     public static int clampAnimPresetIndex(int idx) {
         return Math.max(0, Math.min(ANIM_PRESETS.length - 1, idx));
+    }
+
+    // ==================== 预设覆盖值（0.9.8 / 每个预设各自记住改动）====================
+
+    /**
+     * 一个覆盖值里参与的字段个数 = 6，顺序与 {@link AnimPreset} 完全一致：
+     * animationLength, shortAnimationLength, trailSize, glowLayers, shadowBlurFactor, glowOpacity。
+     */
+    public static final int OVERRIDE_FIELDS = 6;
+
+    /** 覆盖值的合法下界（与 {@code NeovideCursorSettings.State} 的字段范围同源）。 */
+    private static final float[] OVERRIDE_MIN = {0.05f, 0.02f, 0f, 1f, 0.05f, 0f};
+
+    /** 覆盖值的合法上界。 */
+    private static final float[] OVERRIDE_MAX = {0.35f, 0.25f, 1f, 12f, 0.60f, 1f};
+
+    /**
+     * 从覆盖串里取出第 {@code idx} 个预设的覆盖值；没有覆盖 / 内容非法 → {@code null}。
+     *
+     * <p><b>非法内容绝不抛异常</b>（宁干净不崩）：条目缺失、字段数不对、数字解析失败、
+     * NaN / 无穷、越界 —— 一律当「无覆盖」，界面上就是干净的预设名，行为与 0.9.7 一致。
+     *
+     * <p><b>必须按字段逐项返回 float[6]</b>：调用方拿它直接写 State 的 6 个字段，
+     * 顺序错一位就会把「辉光层数」写进「拖尾密度」（历史教训：这种错只有肉眼能发现）。
+     */
+    public static float[] parseOverride(String all, int idx) {
+        if (all == null || all.isEmpty()) {
+            return null;
+        }
+        for (String raw : all.split(";")) {
+            if (raw == null) {
+                continue;
+            }
+            String entry = raw.trim();
+            if (entry.isEmpty() || keyOf(entry) != idx) {
+                continue;
+            }
+            return parseValues(entry.substring(entry.indexOf('=') + 1));
+        }
+        return null;
+    }
+
+    /**
+     * 写入 / 替换第 {@code idx} 个预设的覆盖值。
+     *
+     * <p>幂等且自愈：无法解析的旧条目会被丢掉（不会把坏内容一直带着走）；
+     * 同一个 key 重复出现只保留最后一次写入的位置。
+     *
+     * <p><b>序列化必须逐位可逆</b>：这里用 {@link Float#toString(float)}，
+     * 它是「能唯一还原该 float 的最短十进制」—— 往返 {@code parseFloat} 后<b>逐位相等</b>。
+     * <b>不能</b>用 {@code %.2f} / {@code %.4f}：预设匹配用 {@link #EPS}（1e-6）比对，
+     * 而「辉光锐度」那条滑块的刻度是 0.0055 的倍数（如外扩 0.1985），
+     * 两位小数会把它变成 0.20 —— 覆盖值一进一出就漂了。
+     */
+    public static String putOverride(String all, int idx, float[] v) {
+        if (v == null || v.length != OVERRIDE_FIELDS) {
+            return all == null ? "" : all;
+        }
+        List<String> out = new ArrayList<>();
+        boolean replaced = false;
+        for (String raw : splitEntries(all)) {
+            int key = keyOf(raw);
+            if (key < 0) {
+                continue;                       // 丢掉坏条目（自愈）
+            }
+            if (key == idx) {
+                if (!replaced) {
+                    out.add(formatEntry(idx, v));
+                    replaced = true;
+                }
+                continue;                       // 重复 key 只留一份
+            }
+            out.add(raw);
+        }
+        if (!replaced) {
+            out.add(formatEntry(idx, v));
+        }
+        return join(out);
+    }
+
+    /** 删除第 {@code idx} 个预设的覆盖值（幂等；删空后返回空串 = 无覆盖）。 */
+    public static String removeOverride(String all, int idx) {
+        List<String> out = new ArrayList<>();
+        for (String raw : splitEntries(all)) {
+            int key = keyOf(raw);
+            if (key < 0 || key == idx) {
+                continue;
+            }
+            out.add(raw);
+        }
+        return join(out);
+    }
+
+    /** {@code idx=v1,...,v6}；层数按整数写，其余用可逆的 {@code Float.toString}。 */
+    private static String formatEntry(int idx, float[] v) {
+        StringBuilder sb = new StringBuilder();
+        sb.append(idx).append('=');
+        for (int i = 0; i < OVERRIDE_FIELDS; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(i == 3 ? String.valueOf(Math.round(v[i])) : Float.toString(v[i]));
+        }
+        return sb.toString();
+    }
+
+    /** 解析 {@code v1,v2,v3,v4,v5,v6}；任何一项不合法 → {@code null}（整条作废）。 */
+    private static float[] parseValues(String body) {
+        String[] parts = body.split(",");
+        if (parts.length != OVERRIDE_FIELDS) {
+            return null;
+        }
+        float[] out = new float[OVERRIDE_FIELDS];
+        for (int i = 0; i < OVERRIDE_FIELDS; i++) {
+            float raw;
+            try {
+                raw = Float.parseFloat(parts[i].trim());
+            } catch (NumberFormatException ex) {
+                return null;
+            }
+            if (Float.isNaN(raw) || Float.isInfinite(raw)) {
+                return null;
+            }
+            // 边界容差：滑块派生值（如 0.05f + 100×0.0055f）可能差 1 ulp，先容差再 clamp
+            if (raw < OVERRIDE_MIN[i] - EPS || raw > OVERRIDE_MAX[i] + EPS) {
+                return null;
+            }
+            if (i == 3) {
+                int layers = Math.round(raw);
+                if (layers < (int) OVERRIDE_MIN[i] || layers > (int) OVERRIDE_MAX[i]) {
+                    return null;
+                }
+                out[i] = layers;
+            } else {
+                out[i] = Math.max(OVERRIDE_MIN[i], Math.min(OVERRIDE_MAX[i], raw));
+            }
+        }
+        return out;
+    }
+
+    /** 条目的 key；非法 / 越界 → -1。 */
+    private static int keyOf(String entry) {
+        int eq = entry.indexOf('=');
+        if (eq <= 0) {
+            return -1;
+        }
+        int key;
+        try {
+            key = Integer.parseInt(entry.substring(0, eq).trim());
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+        return (key >= 0 && key < ANIM_PRESETS.length) ? key : -1;
+    }
+
+    private static List<String> splitEntries(String all) {
+        List<String> out = new ArrayList<>();
+        if (all == null || all.isEmpty()) {
+            return out;
+        }
+        for (String raw : all.split(";")) {
+            if (raw == null) {
+                continue;
+            }
+            String entry = raw.trim();
+            if (!entry.isEmpty()) {
+                out.add(entry);
+            }
+        }
+        return out;
+    }
+
+    private static String join(List<String> entries) {
+        if (entries.isEmpty()) {
+            return "";
+        }
+        return String.join(";", entries);
     }
 
     // ==================== 颜色预设 ====================

@@ -74,6 +74,7 @@ public final class ProbeSettingsV2 {
         animationTiming(conf);
         typingSmoothness(conf);
         modifiedLabel(conf);
+        presetOverrideMemory(conf);
         shadowSharpness(conf);
         toolsMenu();
         componentDump();
@@ -651,6 +652,157 @@ public final class ProbeSettingsV2 {
         System.out.println();
     }
 
+    // ---------------------------------------------------------------- M5-13..16 预设覆盖值
+    /**
+     * 0.9.8：<b>每个预设各自记住用户的改动</b>（覆盖值持久化）。
+     *
+     * <p>用户实测的缺陷：「已修改之后没有持久化，换了一个后失效了，坍缩回原预设没有已修改字段」。
+     * 根因是预设表<b>纯常量</b>、切换即整组覆盖 —— 用户的改动没有落脚点。
+     * 这四条要证明：①切走再切回，值回到改过的；②重启还在；③「恢复为默认值」清得掉；
+     * ④不属于预设的字段改动**不产生**覆盖（否则「已修改」会被无关字段污染）。
+     */
+    private static void presetOverrideMemory(NeovideCursorConfigurable conf) {
+        System.out.println();
+        System.out.println("--- M5-13..16. 预设覆盖值持久化（每个预设各自记住改动）---");
+        String base = CursorPresets.ANIM_PRESETS[0].name();       // 原版粉色
+        String ribbon = CursorPresets.ANIM_PRESETS[1].name();     // 缎带
+        int glowIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
+
+        // ---------------- M5-13：改 → 切走 → 切回 ----------------
+        resetState();
+        conf.reset();
+        conf.slidersForProbe().get(glowIdx).setValue(3);          // 辉光层数 8 → 3
+        conf.apply();                                            // 用户点「应用」
+        float[] recorded = CursorPresets.parseOverride(svc.getState().animPresetOverrides, 0);
+        boolean recordedOk = recorded != null
+                && Math.abs(recorded[3] - 3f) < CursorPresets.EPS;
+        String afterApply = svc.getState().animPresetOverrides;
+
+        conf.pickAnimPresetForProbe(1);                          // 切「缎带」
+        boolean ribbonClean = Math.abs(conf.pendingForProbe().glowLayers - 8f) < CursorPresets.EPS
+                && ribbon.equals(conf.animPresetComboForProbe().getItemAt(1))
+                && conf.animPresetComboForProbe().getSelectedIndex() == 1;
+        conf.apply();
+
+        conf.pickAnimPresetForProbe(0);                          // 切回「原版粉色」
+        boolean backOk = Math.abs(conf.pendingForProbe().glowLayers - 3f) < CursorPresets.EPS
+                && (base + CursorPresets.MODIFIED_SUFFIX).equals(
+                        conf.animPresetComboForProbe().getItemAt(0))
+                && conf.animPresetComboForProbe().getSelectedIndex() == 0;
+        conf.apply();
+        check("M5-13 改「" + base + "」→ 切「" + ribbon + "」→ 切回：6 个值回到改过的，下拉仍显示「"
+                        + base + "（已修改）」",
+                recordedOk && ribbonClean && backOk,
+                "覆盖=" + afterApply + " 切缎带后层数干净=" + ribbonClean
+                        + " 切回后层数=" + conf.pendingForProbe().glowLayers
+                        + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
+
+        // ---------------- M5-14：新建 Configurable（= 重启）后覆盖仍在 ----------------
+        NeovideCursorConfigurable fresh = new NeovideCursorConfigurable();
+        fresh.createComponent();
+        fresh.reset();
+        boolean persisted = CursorPresets.parseOverride(svc.getState().animPresetOverrides, 0) != null
+                && Math.abs(fresh.pendingForProbe().glowLayers - 3f) < CursorPresets.EPS
+                && (base + CursorPresets.MODIFIED_SUFFIX).equals(
+                        fresh.animPresetComboForProbe().getItemAt(0))
+                && fresh.animPresetComboForProbe().getSelectedIndex() == 0;
+        check("M5-14 新建 Configurable（模拟重启）→ 覆盖仍在（值 + 名字）",
+                persisted,
+                "state 覆盖=" + svc.getState().animPresetOverrides
+                        + " 层数=" + fresh.pendingForProbe().glowLayers
+                        + " 首项=" + fresh.animPresetComboForProbe().getItemAt(0));
+
+        // ---------------- M5-15：点「恢复为默认值」→ 覆盖清空、名字变干净 ----------------
+        fresh.animRestoreButtonForProbe().doClick();
+        boolean clearedInPanel =
+                CursorPresets.parseOverride(fresh.pendingForProbe().animPresetOverrides, 0) == null
+                        && Math.abs(fresh.pendingForProbe().glowLayers - 8f) < CursorPresets.EPS
+                        && base.equals(fresh.animPresetComboForProbe().getItemAt(0))
+                        && fresh.animPresetComboForProbe().getSelectedIndex() == 0;
+        fresh.apply();
+        boolean clearedInState = svc.getState().animPresetOverrides.isEmpty()
+                && svc.getState().glowLayers == 8;
+        check("M5-15 点「恢复为「" + base + "」默认值」→ 覆盖被清掉、名字变干净、值回常量",
+                clearedInPanel && clearedInState,
+                "面板内清空=" + clearedInPanel + " 落库后覆盖=「" + svc.getState().animPresetOverrides
+                        + "」 层数=" + svc.getState().glowLayers);
+
+        // ---------------- M5-16：不属于预设的 4 个字段改动不产生覆盖 ----------------
+        resetState();
+        conf.reset();
+        int smoothIdx = conf.sliderKeysForProbe().indexOf("typingSmoothness");
+        int stretchIdx = conf.sliderKeysForProbe().indexOf("stretchRatioK");
+        int opacityIdx = conf.sliderKeysForProbe().indexOf("tailOpacity");
+        conf.slidersForProbe().get(smoothIdx).setValue(60);        // 输入平滑
+        conf.slidersForProbe().get(stretchIdx).setValue(80);        // 拉伸强度
+        conf.slidersForProbe().get(opacityIdx).setValue(50);        // 拖尾不透明度
+        javax.swing.JCheckBox glow = checkBoxNearLabel(panelComponent, "启用辉光");
+        if (glow != null && glow.isSelected()) {
+            glow.doClick();          // 必须 doClick：bindSelected 监听的是 ActionListener，
+                                     // setSelected() 只发 ItemEvent —— 写不进 pending（实测踩过）
+        }
+        boolean nameUnchanged = base.equals(conf.animPresetComboForProbe().getItemAt(0))
+                && conf.animPresetComboForProbe().getSelectedIndex() == 0
+                && conf.isModified();                                  // 字段确实改了（应用按钮该亮）
+        conf.apply();
+        boolean noOverride = svc.getState().animPresetOverrides.isEmpty()
+                && CursorPresets.parseOverride(svc.getState().animPresetOverrides, 0) == null;
+        check("M5-16 改「拉伸强度/输入平滑/不透明度/辉光开关」→ 不产生覆盖、预设名不变",
+                glow != null && nameUnchanged && noOverride
+                        && !svc.getState().useShadow
+                        && Math.abs(svc.getState().typingSmoothness - 0.6f) < CursorPresets.EPS,
+                "辉光开关=" + (glow == null ? "找不到" : String.valueOf(glow.isSelected()))
+                        + " 名字不变=" + nameUnchanged
+                        + " 覆盖=「" + svc.getState().animPresetOverrides + "」"
+                        + " 平滑=" + svc.getState().typingSmoothness);
+
+        // 收尾：回到干净态，避免污染后面的 M6 用例
+        resetState();
+        conf.reset();
+        System.out.println();
+    }
+
+    /** 按行内标签文字找同一个 row 里的复选框（面板行是 [JLabel, JBCheckBox, …] 的平铺容器）。 */
+    private static javax.swing.JCheckBox checkBoxNearLabel(Component root, String labelText) {
+        List<Component> all = new ArrayList<>();
+        collectAll(root, all);
+        for (Component c : all) {
+            if (!(c instanceof JLabel)) {
+                continue;
+            }
+            String t = ((JLabel) c).getText();
+            if (t == null || !t.contains(labelText)) {
+                continue;
+            }
+            Container row = c.getParent();
+            if (row == null) {
+                continue;
+            }
+            // 面板是【平铺】的：所有行的按钮/滑块/标签都是 DialogPanel 的直接子控件，
+            // 所以不能“在父容器里随便找一个复选框”（那样会拿到第一个 = 总开关），
+            // 只能取「紧跟在标签后面的那个控件」。
+            Component[] kids = row.getComponents();
+            for (int i = 0; i < kids.length - 1; i++) {
+                if (kids[i] == c && kids[i + 1] instanceof javax.swing.JCheckBox) {
+                    return (javax.swing.JCheckBox) kids[i + 1];
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void collectAll(Component c, List<Component> out) {
+        if (c == null) {
+            return;
+        }
+        out.add(c);
+        if (c instanceof Container) {
+            for (Component k : ((Container) c).getComponents()) {
+                collectAll(k, out);
+            }
+        }
+    }
+
     // ---------------------------------------------------------------- M4 输入平滑
     /**
      * M4：输入平滑只压平「短跳四角梯度」，**总时长不变**。
@@ -920,6 +1072,10 @@ public final class ProbeSettingsV2 {
         s.stretchRatioK = 4.5f;   // NeovideConfig 无此字段，它派生自 trailFactors（默认 4.5×）
         s.animationLength = d.animationLength;
         s.shortAnimationLength = d.shortAnimationLength;
+        // 0.9.8：预设基准 + 覆盖值也属于「干净态」的一部分 —— 漏了它们，
+        // 上一个用例写下的覆盖会让下一个用例的「干净预设名」判据随机失败。
+        s.animPresetBase = 0;
+        s.animPresetOverrides = "";
         svc.syncStateToConfig();
     }
 

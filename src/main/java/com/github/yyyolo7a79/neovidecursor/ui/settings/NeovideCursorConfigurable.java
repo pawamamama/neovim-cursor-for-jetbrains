@@ -949,14 +949,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             refreshPresetDisplay();          // 选中「自定义」→ 不改任何字段
             return;
         }
-        CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[idx];
+        // 0.9.8：有覆盖就用覆盖，没有才用预设常量 —— 这是「每个预设各自记住改动」的落地。
         // 只碰这 6 个字段 —— 颜色两个 HEX、stretchRatioK、trailMode 一概不动（正交性硬判据）
-        pending.animationLength = p.animationLength();
-        pending.shortAnimationLength = p.shortAnimationLength();
-        pending.trailSize = p.trailSize();
-        pending.glowLayers = p.glowLayers();
-        pending.shadowBlurFactor = p.shadowBlurFactor();
-        pending.glowOpacity = p.glowOpacity();
+        float[] override = CursorPresets.parseOverride(pending.animPresetOverrides, idx);
+        writeAnimValues(pending, override != null ? override : animConstantsOf(idx));
+        // 基准必须在这里显式前移（M5-13 的关键）：
+        // 选中「有覆盖」的预设时，6 个值 ≠ 该预设常量 → matchAnimPreset 匹配不上，
+        // 若不在选中时就把基准挪过去，「切回来」会显示上一个预设的名字（显示层撒谎）。
+        animBaseIdx = idx;
+        pending.animPresetBase = idx;
         syncAllControlsFromPending();
     }
 
@@ -1037,22 +1038,40 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         if (animPresetCombo == null || colorPresetCombo == null) {
             return;
         }
+        // 基准的持久化真相是 pending.animPresetBase；animBaseIdx 只是它的 UI 镜像。
+        // 这里每次都从 pending 重新同步 —— 否则「选中某个预设」时字段还停在上一个，
+        // 下面的判定会拿错误的基准去比，把刚选的值判成「不属于任何预设」（真实踩过）。
+        animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
         CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(pending);
         CursorPresets.ColorPreset c = CursorPresetApplier.matchColorPreset(pending);
-        // 匹配成功 → 基准跟着走（干净名）；匹配失败 → 基准**保持**，只把那一项改名为「X（已修改）」，
-        // 并把它选为当前项 —— 前提是值确实来自那次选择，而不是别的预设。
-        if (a != null) {
-            animBaseIdx = indexOfAnim(a);
-            pending.animPresetBase = animBaseIdx;
+        // 0.9.8：基准判定必须**先看基准自己的有效值**（有效值 = 覆盖 ?? 预设常量）。
+        //
+        // 【为什么不能只用 matchAnimPreset】它是「当前值 vs 全部预设常量」的全局匹配。
+        // 用户把「原版粉色」的跨行时长改成 0.15 后，这 6 个值**恰好等于**「Neovide 官方」的常量：
+        //   · 旧逻辑 → 基准被抢到「Neovide 官方」，下拉显示干净名字，用户明明选的是原版粉色；
+        //   · 新逻辑 → 当前值 == 有效值(原版粉色) → 保持基准，名字显示「原版粉色（已修改）」。
+        //
+        // 「已修改」的参照物**必须是预设常量**（不是有效值）：用户切回自己改过的预设时，
+        // 当前值 == 有效值（覆盖），但值仍然 ≠ 官方常量，M5-13 要求这时名字带「（已修改）」。
+        float[] effective = CursorPresets.parseOverride(pending.animPresetOverrides, animBaseIdx);
+        if (effective == null) {
+            effective = animConstantsOf(animBaseIdx);
         }
+        boolean onBase = sameAnimValues(animValuesOf(pending), effective);
+        if (!onBase && a != null) {
+            animBaseIdx = indexOfAnim(a);
+        }
+        pending.animPresetBase = animBaseIdx;
+        boolean modified = !sameAnimValues(animValuesOf(pending), animConstantsOf(animBaseIdx));
         if (c != null) {
             colorBaseIdx = indexOfColor(c);
         }
         syncingControls = true;
         try {
-            rebuildPresetItems(animPresetCombo, animPresetItems, animPresetNames(), animBaseIdx, a == null);
+            rebuildPresetItems(animPresetCombo, animPresetItems, animPresetNames(), animBaseIdx, modified);
             rebuildColorItems(colorPresetCombo, colorPresetItems);
-            animPresetCombo.setSelectedIndex(a == null ? animBaseIdx : indexOfAnim(a));
+            // 当前项恒为基准：0.9.8 起「值恰好等于别的预设常量」不再抢走基准（见上面的注释）
+            animPresetCombo.setSelectedIndex(animBaseIdx);
             colorPresetCombo.setSelectedIndex(
                     c == null ? colorPresetItems.size() - 1 : indexOfColor(c));
             refreshRestoreButtonText();
@@ -1110,18 +1129,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         }
     }
 
-    /** M5：把基准动画预设的 6 个常量重新写进 pending（与手动选预设同一条路径）。 */
+    /**
+     * M5：把基准动画预设的 6 个常量重新写进 pending（与手动选预设同一条路径）。
+     *
+     * <p>0.9.8：<b>同时清掉该预设的覆盖值</b> —— 这个按钮的语义就是「恢复为默认值」，
+     * 只把值写回常量而留着覆盖，会让「切走再切回」又把旧改动复活，
+     * 于是按钮看起来点了没效果（用户视角的「恢复不了」）。
+     */
     private void restoreAnimPreset() {
         if (animBaseIdx < 0 || animBaseIdx >= CursorPresets.ANIM_PRESETS.length) {
             return;
         }
-        CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[animBaseIdx];
-        pending.animationLength = p.animationLength();
-        pending.shortAnimationLength = p.shortAnimationLength();
-        pending.trailSize = p.trailSize();
-        pending.glowLayers = p.glowLayers();
-        pending.shadowBlurFactor = p.shadowBlurFactor();
-        pending.glowOpacity = p.glowOpacity();
+        pending.animPresetOverrides =
+                CursorPresets.removeOverride(pending.animPresetOverrides, animBaseIdx);
+        writeAnimValues(pending, animConstantsOf(animBaseIdx));
+        pending.animPresetBase = animBaseIdx;
         syncAllControlsFromPending();
     }
 
@@ -1152,6 +1174,61 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             }
         }
         return 0;
+    }
+
+    // ==================== 预设覆盖值（0.9.8）====================
+
+    /**
+     * 预设域的 6 个字段（顺序 = {@link CursorPresets#parseOverride} 的字段顺序）。
+     *
+     * <p><b>顺序是硬契约</b>：它必须与 {@code CursorPresets.AnimPreset} 的构造参数顺序逐位一致，
+     * 错一位就会出现「辉光层数写进拖尾密度」这种只有肉眼能发现的错。
+     */
+    static float[] animValuesOf(NeovideCursorSettings.State s) {
+        return new float[]{
+                s.animationLength,
+                s.shortAnimationLength,
+                s.trailSize,
+                s.glowLayers,
+                s.shadowBlurFactor,
+                s.glowOpacity
+        };
+    }
+
+    /** 把 6 个值写回 State（glowLayers 是整数：四舍五入，不截断）。 */
+    static void writeAnimValues(NeovideCursorSettings.State s, float[] v) {
+        s.animationLength = v[0];
+        s.shortAnimationLength = v[1];
+        s.trailSize = v[2];
+        s.glowLayers = Math.round(v[3]);
+        s.shadowBlurFactor = v[4];
+        s.glowOpacity = v[5];
+    }
+
+    /** 第 {@code idx} 个动画预设的 6 个常量（与 {@link #animValuesOf} 同序）。 */
+    static float[] animConstantsOf(int idx) {
+        CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[CursorPresets.clampAnimPresetIndex(idx)];
+        return new float[]{
+                p.animationLength(),
+                p.shortAnimationLength(),
+                p.trailSize(),
+                p.glowLayers(),
+                p.shadowBlurFactor(),
+                p.glowOpacity()
+        };
+    }
+
+    /** 6 个值是否逐项相等（必须用 {@link CursorPresets#EPS}，不用 {@code ==}）。 */
+    static boolean sameAnimValues(float[] a, float[] b) {
+        if (a == null || b == null || a.length != b.length) {
+            return false;
+        }
+        for (int i = 0; i < a.length; i++) {
+            if (Math.abs(a[i] - b[i]) >= CursorPresets.EPS) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ==================== 派生提示（契约 §7.4：禁止写死数字）====================
@@ -1356,6 +1433,37 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         if (pending.animPresetBase != baseline.animPresetBase) {
             target.animPresetBase = pending.animPresetBase;
         }
+
+        // 21（0.9.8）：把「用户对当前基准预设的改动」写进覆盖表 —— 一处写，六处读。
+        //
+        // 【三支判据，缺一支就出错】
+        //   ① 当前 6 值 == 该预设常量 → 把覆盖删掉（值已经回到官方预设，留着覆盖会让下一次
+        //      「切走再切回」复活一个早已不存在的改动）；
+        //   ② 当前 6 值 != 有效值（覆盖 ?? 常量）→ 用户真的改了 → putOverride 记住这份值；
+        //   ③ 其余（当前值 == 已有覆盖）→ 原样保留，**不要**用当前值重写（否则会把 1 ulp 的
+        //      序列化差异写回去，覆盖串每 apply 一次就变一次）。
+        int overrideBase = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+        float[] constants = animConstantsOf(overrideBase);
+        float[] current = animValuesOf(pending);
+        float[] effective = CursorPresets.parseOverride(pending.animPresetOverrides, overrideBase);
+        if (effective == null) {
+            effective = constants;
+        }
+        String nextOverrides = pending.animPresetOverrides;
+        if (sameAnimValues(current, constants)) {
+            nextOverrides = CursorPresets.removeOverride(nextOverrides, overrideBase);
+        } else if (!sameAnimValues(current, effective)) {
+            nextOverrides = CursorPresets.putOverride(nextOverrides, overrideBase, current);
+        }
+        // 脏合并（缺陷 3 的同一套判据）：只有用户在面板里把覆盖串改过了才写 target。
+        if (!eqText(nextOverrides, baseline.animPresetOverrides)) {
+            target.animPresetOverrides = nextOverrides;
+        }
+        // pending 自身也必须同步：A6/A7 会把 pending 前移成 target 的深拷贝，
+        // 但本行的下一个调用点（同一轮 apply 末的 super.reset()/syncAllControlsFromPending）
+        // 会再读一次 pending —— 不同步就会让面板内的第二次 apply 把刚记住的覆盖算丢。
+        pending.animPresetOverrides = nextOverrides;
+
         // 预设不持久化（契约 §5.2 的 P-1），因此不在此处写任何「当前预设」字段
 
         // A4：落盘
@@ -1453,12 +1561,28 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 || Float.compare(p.shortAnimationLength, s.shortAnimationLength) != 0
                 // M4 漏项（用户实测「输入平滑拉不动应用」）：漏了它 → isModified() 恒 false → 应用按钮不亮
                 || Float.compare(p.typingSmoothness, s.typingSmoothness) != 0
-                || p.animPresetBase != s.animPresetBase;
+                || p.animPresetBase != s.animPresetBase
+                // 0.9.8 漏项 = 应用按钮不亮：改了预设覆盖（或点了「恢复为默认值」清掉覆盖）之后
+                // 6 个值可能与 state 完全相同，只有覆盖串不同 → 漏了这行就点不了「应用」。
+                || !eqText(p.animPresetOverrides, s.animPresetOverrides);
     }
 
     /** HEX 必须忽略大小写：{@code sanitizeColor} 统一成大写，用户手改 XML 可能留小写。 */
     static boolean eqHex(String a, String b) {
         return a == null ? b == null : a.equalsIgnoreCase(b);
+    }
+
+    /**
+     * 字符串逐字相等，{@code null} 一律当 {@code ""}。
+     *
+     * <p>覆盖串永远是「有则非空、无则空串」（见 CursorPresets#removeOverride），
+     * 但 {@code State} 是可以被外部 new 出来并塞 null 的（探针 / 手写测试），
+     * 直接 {@code equals} 会 NPE —— 在 {@code isModified()} 里 NPE 就是整页打不开。
+     */
+    static boolean eqText(String a, String b) {
+        String x = (a == null) ? "" : a;
+        String y = (b == null) ? "" : b;
+        return x.equals(y);
     }
 
     /** ColorPanel 与 state 的颜色是否不同（不是 DialogPanel 的绑定控件，必须单独比）。 */

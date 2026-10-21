@@ -596,6 +596,12 @@ public final class ProbeT7 {
         s.stretchRatioK = 4.5f;   // NeovideConfig 无此字段，派生自 trailFactors 默认 4.5×
         s.animationLength = d.animationLength;
         s.shortAnimationLength = d.shortAnimationLength;
+        // 0.9.8：预设基准 + 每个预设的覆盖值也属于「干净态」。
+        // 【为什么必须清】T-01e 的 apply 会按设计把 glowLayers=5 记进覆盖表；
+        // 带着它进 T-02，「选中原版粉色」就会立刻恢复成改过的值（名字也带「（已修改）」），
+        // 于是 T-02c 在【变异版】里也照样绿 —— MUT-R02 失去鉴别力（实测踩过）。
+        s.animPresetBase = 0;
+        s.animPresetOverrides = "";
         svc.syncStateToConfig();
     }
 
