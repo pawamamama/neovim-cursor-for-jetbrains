@@ -145,6 +145,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
 
         // 19（0.9.6 / M4）：输入平滑。老 XML 没有这一项 → 平台填字段初值 0f = 行为不变。
         target.typingSmoothness = clamp(from.typingSmoothness, 0f, 1f);
+        target.animPresetBase = clamp(from.animPresetBase, 0, 6);   // 动画预设只有 7 个（0–6）
 
         state = target;
 
@@ -706,6 +707,14 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          */
         public float typingSmoothness = 0f;
 
+        /**
+         * 20. 当前动画预设的「基准」下标（0.9.6 / M5-fix 起持久化）。
+         *
+         * <p><b>只存「基准是谁」，不存「有没有改过」</b>：已修改是算出来的
+         * （6 个预设字段与该下标的预设常量逐项比对）。存布尔会撒谎 —— 值改回去它还是 true。
+         */
+        public int animPresetBase = 0;
+
         public State() {
         }
 
@@ -734,6 +743,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             animationLength = from.animationLength;
             shortAnimationLength = from.shortAnimationLength;
             typingSmoothness = from.typingSmoothness;
+            animPresetBase = from.animPresetBase;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
@@ -759,6 +769,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                     + ", animationLength=" + animationLength
                     + ", shortAnimationLength=" + shortAnimationLength
                     + ", typingSmoothness=" + typingSmoothness
+                    + ", animPresetBase=" + animPresetBase
                     + "}";
         }
     }

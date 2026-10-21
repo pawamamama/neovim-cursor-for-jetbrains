@@ -98,11 +98,10 @@ public final class ProbeSettingsV2 {
         // L1：两个预设下拉存在且在面板里
         check("L1 预设置顶：动画预设下拉存在", conf.animPresetComboForProbe() != null, "ok");
         check("L2 预设置顶：颜色预设下拉存在", conf.colorPresetComboForProbe() != null, "ok");
-        check("L3 动画预设下拉 = 7 个预设 + 1 个「自定义」",
-                conf.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length + 1,
-                "实际 " + conf.animPresetComboForProbe().getItemCount()
-                        + "（预设 " + CursorPresets.ANIM_PRESETS.length + " + 自定义 1）");
-        check("L4 颜色预设下拉 = 5 个预设 + 1 个「自定义」",
+        check("L3 动画预设下拉 = 7 个预设（M5-fix：不再有「已修改」伪条目）",
+                conf.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length,
+                "实际 " + conf.animPresetComboForProbe().getItemCount());
+        check("L4 颜色预设下拉 = 5 个预设 + 1 个「自定义颜色」",
                 conf.colorPresetComboForProbe().getItemCount() == CursorPresets.COLOR_PRESETS.length + 1,
                 "实际 " + conf.colorPresetComboForProbe().getItemCount());
 
@@ -553,6 +552,15 @@ public final class ProbeSettingsV2 {
      * <p>要证明三件事：①干净态显示的是预设名本身；②改一个值后末项文案仍带着「基准预设名」；
      * ③点恢复能回到该预设、且**只改 pending**（落库仍归 apply）。
      */
+    private static boolean noSuffix(javax.swing.JComboBox<?> combo) {
+        for (int i = 0; i < combo.getItemCount(); i++) {
+            if (String.valueOf(combo.getItemAt(i)).contains(CursorPresets.MODIFIED_SUFFIX)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static void modifiedLabel(NeovideCursorConfigurable conf) {
         System.out.println("--- M5. 预设名「X（已修改）」+ 一键恢复 ---");
         resetState();
@@ -565,18 +573,20 @@ public final class ProbeSettingsV2 {
         check("M5-1 干净态：下拉选中预设 1，不显示（已修改）",
                 conf.animPresetComboForProbe().getSelectedIndex() == 0,
                 "选中下标=" + conf.animPresetComboForProbe().getSelectedIndex());
-        check("M5-2 末项文案 = 「" + base + "（已修改）」",
-                (base + CursorPresets.MODIFIED_SUFFIX).equals(
-                        conf.animPresetComboForProbe().getItemAt(lastAnim)),
-                String.valueOf(conf.animPresetComboForProbe().getItemAt(lastAnim)));
+        check("M5-2 干净态：整个下拉里没有任何「（已修改）」字样",
+                noSuffix(conf.animPresetComboForProbe()),
+                "项数=" + conf.animPresetComboForProbe().getItemCount()
+                        + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
 
         conf.slidersForProbe().get(glowIdx).setValue(3);             // 用户改辉光层数 8 → 3
-        check("M5-3 改值后：选中末项，文案仍是「" + base + "（已修改）」",
-                conf.animPresetComboForProbe().getSelectedIndex() == lastAnim
+        check("M5-3 改值后：把【基准那一项】就地改名，且仍只有 7 项（不新增条目）",
+                conf.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length
+                        && conf.animPresetComboForProbe().getSelectedIndex() == 0
                         && (base + CursorPresets.MODIFIED_SUFFIX).equals(
-                        conf.animPresetComboForProbe().getItemAt(lastAnim)),
-                "下标=" + conf.animPresetComboForProbe().getSelectedIndex()
-                        + " 文案=" + conf.animPresetComboForProbe().getItemAt(lastAnim));
+                        conf.animPresetComboForProbe().getItemAt(0)),
+                "项数=" + conf.animPresetComboForProbe().getItemCount()
+                        + " 下标=" + conf.animPresetComboForProbe().getSelectedIndex()
+                        + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
 
         check("M5-4 恢复按钮存在且文案带基准预设名",
                 conf.animRestoreButtonForProbe() != null
@@ -599,25 +609,38 @@ public final class ProbeSettingsV2 {
         conf.animPresetComboForProbe().setSelectedIndex(1);          // 缎带
         conf.slidersForProbe().get(glowIdx).setValue(5);
         String ribbon = CursorPresets.ANIM_PRESETS[1].name();
-        check("M5-8 换到「" + ribbon + "」再改值：末项文案变成「" + ribbon + "（已修改）」",
+        check("M5-8 换到「" + ribbon + "」再改值：改名的是第 2 项「" + ribbon + "（已修改）」",
                 (ribbon + CursorPresets.MODIFIED_SUFFIX).equals(
-                        conf.animPresetComboForProbe().getItemAt(lastAnim)),
-                String.valueOf(conf.animPresetComboForProbe().getItemAt(lastAnim)));
+                        conf.animPresetComboForProbe().getItemAt(1)),
+                String.valueOf(conf.animPresetComboForProbe().getItemAt(1)));
+
+        // M5-12：持久化 —— 新建一个 Configurable（等价于重启后重新打开设置页）
+        svc.getState().glowLayers = 3;              // 用户改过的值
+        svc.getState().animPresetBase = 1;          // 基准 = 缎带（持久化字段）
+        NeovideCursorConfigurable fresh = new NeovideCursorConfigurable();
+        fresh.createComponent();
+        fresh.reset();
+        check("M5-12 重启后仍显示「" + ribbon + "（已修改）」（基准下标已持久化）",
+                (ribbon + CursorPresets.MODIFIED_SUFFIX).equals(
+                        fresh.animPresetComboForProbe().getItemAt(1))
+                        && fresh.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length,
+                "第 2 项=" + fresh.animPresetComboForProbe().getItemAt(1)
+                        + " 项数=" + fresh.animPresetComboForProbe().getItemCount());
 
         // 颜色侧同理
         resetState();
         conf.reset();
         int lastColor = conf.colorPresetComboForProbe().getItemCount() - 1;
         String colorBase = CursorPresets.COLOR_PRESETS[0].name();
-        check("M5-9 颜色末项文案 = 「" + colorBase + "（已修改）」",
-                (colorBase + CursorPresets.MODIFIED_SUFFIX).equals(
+        check("M5-9 颜色末项是「" + CursorPresets.CUSTOM_COLOR_LABEL + "」，不带「已修改」",
+                CursorPresets.CUSTOM_COLOR_LABEL.equals(
                         conf.colorPresetComboForProbe().getItemAt(lastColor)),
                 String.valueOf(conf.colorPresetComboForProbe().getItemAt(lastColor)));
         svc.getState().tailColor = "#123456";
         conf.reset();
-        check("M5-10 改过颜色后：颜色下拉落到末项、文案带原基准名",
+        check("M5-10 改过颜色后：颜色下拉落到末项「自定义颜色」，且不显示「已修改」",
                 conf.colorPresetComboForProbe().getSelectedIndex() == lastColor
-                        && (colorBase + CursorPresets.MODIFIED_SUFFIX).equals(
+                        && CursorPresets.CUSTOM_COLOR_LABEL.equals(
                         conf.colorPresetComboForProbe().getItemAt(lastColor)),
                 "下标=" + conf.colorPresetComboForProbe().getSelectedIndex()
                         + " 文案=" + conf.colorPresetComboForProbe().getItemAt(lastColor));

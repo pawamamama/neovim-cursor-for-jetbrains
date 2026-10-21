@@ -471,11 +471,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         singleMoveHint = null;
         crossMoveHint = null;
         paintDiag = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.isPaintDisabled();
+        // M5-fix：基准预设从持久化状态里读（不是从值猜），否则重启后「缎带（已修改）」会退化成原版粉色
+        animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+        colorBaseIdx = CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
 
+        // 0.9.6 / M5-fix：下拉**只有真预设**，没有「已修改」伪条目。
+        // 「已修改」是把基准那一项**就地改名**（不新增条目），由 refreshPresetDisplay() 负责。
         animPresetItems.addAll(animPresetNames());
-        animPresetItems.add(MODIFIED_SUFFIX);     // 末项：文案在 refreshPresetDisplay() 里动态改写
         colorPresetItems.addAll(colorPresetNames());
-        colorPresetItems.add(MODIFIED_SUFFIX);
+        colorPresetItems.add(CursorPresets.CUSTOM_COLOR_LABEL);   // 颜色不参与预设语义，末项只是兜底
 
         return BuilderKt.panel(panel -> {
 
@@ -589,12 +593,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("拖尾不透明度", row -> {
+                g.row("拖尾不透明度（不随预设变化）", row -> {
                     addSlider(row, SPECS[2], null);
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("启用辉光", row -> {
+                g.row("启用辉光（不随预设变化）", row -> {
                     bindCheck(row, () -> pending.useShadow, v -> {
                         pending.useShadow = v;
                         shadowOn.set(v);
@@ -637,7 +641,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                     return kotlin.Unit.INSTANCE;
                 });
 
-                g.row("拖尾拉伸强度", row -> {
+                g.row("拖尾拉伸强度（不随预设变化）", row -> {
                     addSlider(row, SPECS[7], springMode);
                     row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
                     return kotlin.Unit.INSTANCE;
@@ -661,7 +665,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 });
 
                 // M4：输入平滑。放在短动画时长正下方 —— 它是那个值的「形状」而不是「长度」。
-                g.row("输入平滑（只影响单行打字/退格）", row -> {
+                g.row("输入平滑（只影响单行打字/退格，不随预设变化）", row -> {
                     addSlider(row, SPECS[10], null);
                     row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
                     return kotlin.Unit.INSTANCE;
@@ -1034,21 +1038,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         }
         CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(pending);
         CursorPresets.ColorPreset c = CursorPresetApplier.matchColorPreset(pending);
-        // 匹配成功 → 基准预设跟着走（末项文案 = 它 +「已修改」）；匹配失败 → 基准保持不动。
+        // 匹配成功 → 基准跟着走（干净名）；匹配失败 → 基准**保持**，只把那一项改名为「X（已修改）」，
+        // 并把它选为当前项 —— 前提是值确实来自那次选择，而不是别的预设。
         if (a != null) {
             animBaseIdx = indexOfAnim(a);
+            pending.animPresetBase = animBaseIdx;
         }
         if (c != null) {
             colorBaseIdx = indexOfColor(c);
         }
         syncingControls = true;
         try {
-            setLastItemText(animPresetCombo, animPresetItems,
-                    CursorPresets.ANIM_PRESETS[animBaseIdx].name() + MODIFIED_SUFFIX);
-            setLastItemText(colorPresetCombo, colorPresetItems,
-                    CursorPresets.COLOR_PRESETS[colorBaseIdx].name() + MODIFIED_SUFFIX);
-            animPresetCombo.setSelectedIndex(
-                    a == null ? animPresetItems.size() - 1 : indexOfAnim(a));
+            rebuildPresetItems(animPresetCombo, animPresetItems, animPresetNames(), animBaseIdx, a == null);
+            rebuildColorItems(colorPresetCombo, colorPresetItems);
+            animPresetCombo.setSelectedIndex(a == null ? animBaseIdx : indexOfAnim(a));
             colorPresetCombo.setSelectedIndex(
                     c == null ? colorPresetItems.size() - 1 : indexOfColor(c));
             refreshRestoreButtonText();
@@ -1058,27 +1061,40 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     }
 
     /**
-     * 改写下拉末项文案（M5）。
+     * 重建动画预设下拉（0.9.6 / M5-fix）。
      *
-     * <p>{@code ComboBox} 没有「就地改一项文本」的 API，必须 remove + insert；
-     * 这两步都会发 model 事件，所以调用点一律在 {@code syncingControls} 保护内，
-     * 否则会触发 {@code onAnimPresetPicked()} → 把用户刚改的值又写回预设值。
+     * <p>下拉里**只有真预设**；「已修改」是把基准那一项**就地改名**，不是新增条目。
+     * 每次整体重建模型（7 项，代价可忽略）—— 比“记住上次改名了哪一项”更不容易出错。
+     * 调用点必须在 {@code syncingControls} 保护内，否则 setModel 的事件会触发
+     * {@code onAnimPresetPicked()} 把用户刚改的值写回预设值。
      */
-    private static void setLastItemText(com.intellij.openapi.ui.ComboBox<String> combo,
-                                        List<String> items, String text) {
-        int last = items.size() - 1;
-        if (last < 0 || text.equals(items.get(last))) {
+    private static void rebuildPresetItems(com.intellij.openapi.ui.ComboBox<String> combo,
+                                           List<String> items, List<String> names,
+                                           int baseIdx, boolean modified) {
+        List<String> next = new ArrayList<>(names);
+        if (modified && baseIdx >= 0 && baseIdx < next.size()) {
+            next.set(baseIdx, next.get(baseIdx) + MODIFIED_SUFFIX);
+        }
+        replaceModel(combo, items, next);
+    }
+
+    /** 颜色下拉：5 个预设 + 末项「自定义颜色」（颜色不参与预设语义，没有「已修改」）。 */
+    private static void rebuildColorItems(com.intellij.openapi.ui.ComboBox<String> combo,
+                                          List<String> items) {
+        List<String> next = new ArrayList<>(colorPresetNames());
+        next.add(CursorPresets.CUSTOM_COLOR_LABEL);
+        replaceModel(combo, items, next);
+    }
+
+    /** 内容没变就不动模型（避免每次 refresh 都重置选中项与发事件）。 */
+    private static void replaceModel(com.intellij.openapi.ui.ComboBox<String> combo,
+                                     List<String> items, List<String> next) {
+        if (items.equals(next)) {
             return;
         }
-        items.set(last, text);
-        javax.swing.DefaultComboBoxModel<String> model =
-                (javax.swing.DefaultComboBoxModel<String>) combo.getModel();
-        int sel = combo.getSelectedIndex();
-        model.removeElementAt(last);
-        model.insertElementAt(text, last);
-        if (sel == last) {
-            combo.setSelectedIndex(last);
-        }
+        items.clear();
+        items.addAll(next);
+        combo.setModel(new javax.swing.DefaultComboBoxModel<>(next.toArray(new String[0])));
     }
 
     /** 刷新两个「恢复为「X」默认值」按钮的文案（基准预设可能刚变过）。 */
@@ -1335,6 +1351,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         if (Float.compare(pending.typingSmoothness, baseline.typingSmoothness) != 0) {
             target.typingSmoothness = pending.typingSmoothness;
         }
+        // 20（M5-fix）：预设基准下标也要落库，否则重启后「缎带（已修改）」会退化成原版粉色
+        if (pending.animPresetBase != baseline.animPresetBase) {
+            target.animPresetBase = pending.animPresetBase;
+        }
         // 预设不持久化（契约 §5.2 的 P-1），因此不在此处写任何「当前预设」字段
 
         // A4：落盘
@@ -1429,7 +1449,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 || Float.compare(p.trailSize, s.trailSize) != 0
                 || Float.compare(p.stretchRatioK, s.stretchRatioK) != 0
                 || Float.compare(p.animationLength, s.animationLength) != 0
-                || Float.compare(p.shortAnimationLength, s.shortAnimationLength) != 0;
+                || Float.compare(p.shortAnimationLength, s.shortAnimationLength) != 0
+                // M4 漏项（用户实测「输入平滑拉不动应用」）：漏了它 → isModified() 恒 false → 应用按钮不亮
+                || Float.compare(p.typingSmoothness, s.typingSmoothness) != 0
+                || p.animPresetBase != s.animPresetBase;
     }
 
     /** HEX 必须忽略大小写：{@code sanitizeColor} 统一成大写，用户手改 XML 可能留小写。 */

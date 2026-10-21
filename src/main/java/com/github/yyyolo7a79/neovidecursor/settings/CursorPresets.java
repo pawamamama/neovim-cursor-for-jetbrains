@@ -183,6 +183,14 @@ public final class CursorPresets {
      */
     public static final String MODIFIED_SUFFIX = "（已修改）";
 
+    /** 颜色下拉末项的兜底文案（M5-fix）。颜色**不参与预设语义**，所以它不叫「已修改」。 */
+    public static final String CUSTOM_COLOR_LABEL = "自定义颜色";
+
+    /** 把持久化的基准下标钳进合法范围（0..ANIM_PRESETS.length-1）。 */
+    public static int clampAnimPresetIndex(int idx) {
+        return Math.max(0, Math.min(ANIM_PRESETS.length - 1, idx));
+    }
+
     // ==================== 颜色预设 ====================
 
     /**

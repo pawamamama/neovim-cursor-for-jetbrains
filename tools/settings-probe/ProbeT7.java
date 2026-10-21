@@ -158,7 +158,7 @@ public final class ProbeT7 {
         NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
         conf.createComponent();
 
-        int customIdxAnim = conf.animPresetComboForProbe().getItemCount() - 1;
+        int customIdxAnim = conf.animPresetComboForProbe().getItemCount() - 1;   // M5-fix 后 = 6（最后一个真预设）
         int customIdxColor = conf.colorPresetComboForProbe().getItemCount() - 1;
 
         // 起点：先应用「原版粉色」动画预设，让下拉显示预设 1
@@ -173,16 +173,16 @@ public final class ProbeT7 {
         int glowIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
         conf.slidersForProbe().get(glowIdx).setValue(3);
 
-        check("T-02b 拖 glowLayers 8→3 后，动画下拉变成末项「自定义」",
-                conf.animPresetComboForProbe().getSelectedIndex() == customIdxAnim,
-                "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex()
-                        + "（期望 " + customIdxAnim + "）");
+        // M5-fix：没有「自定义」末项了 —— 命中失败时停在【基准那一项】，并把它的文案加上「（已修改）」。
+        check("T-02b 拖 glowLayers 8→3 后，动画下拉停在基准项（下标 0，不再是末项）",
+                conf.animPresetComboForProbe().getSelectedIndex() == 0,
+                "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex());
         // 0.9.6 / M5：末项文案由固定的「自定义（当前值）」改成动态的「{基准预设}（已修改）」。
         // 基准 = 最近一次匹配成功/手选的预设；本用例里是预设 1（原版粉色）。
-        String expectLast = CursorPresets.ANIM_PRESETS[0].name() + CursorPresets.MODIFIED_SUFFIX;
-        check("T-02c 末项文案是「" + expectLast + "」（M5 起动态生成）",
-                expectLast.equals(conf.animPresetComboForProbe().getItemAt(customIdxAnim)),
-                String.valueOf(conf.animPresetComboForProbe().getItemAt(customIdxAnim)));
+        String expectFirst = CursorPresets.ANIM_PRESETS[0].name() + CursorPresets.MODIFIED_SUFFIX;
+        check("T-02c 基准项文案是「" + expectFirst + "」（就地改名，不新增条目）",
+                expectFirst.equals(conf.animPresetComboForProbe().getItemAt(0)),
+                String.valueOf(conf.animPresetComboForProbe().getItemAt(0)));
 
         // 颜色下拉此时仍应是「原版粉色」（颜色没被碰）—— 正交性 + 只刷该刷的
         check("T-02d 颜色下拉不受影响，仍是预设 1（动画改动不污染颜色显示）",
