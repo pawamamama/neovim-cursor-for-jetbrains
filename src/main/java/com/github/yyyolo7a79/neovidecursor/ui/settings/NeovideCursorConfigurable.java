@@ -81,7 +81,8 @@ import java.util.function.IntFunction;
  * </ol>
  * 修法 2 与修法 3 是<b>对向陷阱</b>：只修一个就会踩另一个。
  */
-public final class NeovideCursorConfigurable extends BoundConfigurable implements SearchableConfigurable {
+public final class NeovideCursorConfigurable extends BoundConfigurable
+        implements SearchableConfigurable, ProbeFacade {
 
     /** 配置页 id —— 必须是插件 id 前缀（官方原话 "The FQN should be based on the plugin id"）。 */
     /** 0.9.7 起 fork 独立 id（与 plugin.xml 的 applicationConfigurable id 必须一致）。 */
