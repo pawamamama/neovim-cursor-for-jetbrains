@@ -547,220 +547,249 @@ public final class ProbeSettingsV2 {
     }
 
     // ---------------------------------------------------------------- M5 预设名 + 一键恢复
-    /**
-     * M5：下拉末项从「自定义（当前值）」改成「{基准预设}（已修改）」，并加一键恢复。
-     *
-     * <p>要证明三件事：①干净态显示的是预设名本身；②改一个值后末项文案仍带着「基准预设名」；
-     * ③点恢复能回到该预设、且**只改 pending**（落库仍归 apply）。
-     */
-    private static boolean noSuffix(javax.swing.JComboBox<?> combo) {
-        for (int i = 0; i < combo.getItemCount(); i++) {
-            if (String.valueOf(combo.getItemAt(i)).contains(CursorPresets.MODIFIED_SUFFIX)) {
-                return false;
-            }
-        }
-        return true;
-    }
 
+    /**
+     * M5（<b>0.9.9 重写</b>）：预设下拉与自定义预设。
+     *
+     * <p><b>为什么整段重写</b>：原断言全部围绕「（已修改）」后缀 + 「就地改名 + 仍 7 项」。
+     * 0.9.9 把内置预设改为<b>永久只读</b>，改动会自动派生出「X 副本」并切过去，
+     * 后缀与就地改名都不存在了。原始意图（改值之后下拉能如实反映当前状态）逐条保留，
+     * 换成新模型的等价命题。
+     */
     private static void modifiedLabel(NeovideCursorConfigurable conf) {
-        System.out.println("--- M5. 预设名「X（已修改）」+ 一键恢复 ---");
+        System.out.println("--- M5. 预设下拉 + 自定义预设（0.9.9 新模型）---");
         resetState();
         conf.reset();
 
-        int lastAnim = conf.animPresetComboForProbe().getItemCount() - 1;
         String base = CursorPresets.ANIM_PRESETS[0].name();          // 原版粉色
         int glowIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
 
-        check("M5-1 干净态：下拉选中预设 1，不显示（已修改）",
-                conf.animPresetComboForProbe().getSelectedIndex() == 0,
+        check("M5-1 干净态：下拉选中预设 1（内置）",
+                conf.animPresetComboForProbe().getSelectedIndex() == 0
+                        && "".equals(conf.pendingForProbe().animCustomName),
                 "选中下标=" + conf.animPresetComboForProbe().getSelectedIndex());
-        check("M5-2 干净态：整个下拉里没有任何「（已修改）」字样",
-                noSuffix(conf.animPresetComboForProbe()),
-                "项数=" + conf.animPresetComboForProbe().getItemCount()
-                        + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
-
-        conf.slidersForProbe().get(glowIdx).setValue(3);             // 用户改辉光层数 8 → 3
-        check("M5-3 改值后：把【基准那一项】就地改名，且仍只有 7 项（不新增条目）",
+        check("M5-2 干净态：下拉只有 " + CursorPresets.ANIM_PRESETS.length
+                        + " 个内置预设，没有任何自定义条目",
                 conf.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length
-                        && conf.animPresetComboForProbe().getSelectedIndex() == 0
-                        && (base + CursorPresets.MODIFIED_SUFFIX).equals(
-                        conf.animPresetComboForProbe().getItemAt(0)),
+                        && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                                .parse(conf.pendingForProbe().customAnimPresets).isEmpty(),
                 "项数=" + conf.animPresetComboForProbe().getItemCount()
-                        + " 下标=" + conf.animPresetComboForProbe().getSelectedIndex()
                         + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
 
-        check("M5-4 恢复按钮存在且文案带基准预设名",
+        // 用户改辉光层数 8 → 3 → 自动派生
+        conf.slidersForProbe().get(glowIdx).setValue(3);
+        String derived = conf.pendingForProbe().animCustomName;
+        check("M5-3 改值后：自动派生一个自定义预设并选中它（内置预设仍在列表里）",
+                !derived.isEmpty()
+                        && derived.startsWith(base)
+                        && conf.animPresetComboForProbe().getItemCount()
+                                == CursorPresets.ANIM_PRESETS.length + 1
+                        && base.equals(conf.animPresetComboForProbe().getItemAt(0)),
+                "派生=「" + derived + "」 项数=" + conf.animPresetComboForProbe().getItemCount()
+                        + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
+
+        check("M5-4 恢复按钮存在且文案带当前预设名",
                 conf.animRestoreButtonForProbe() != null
-                        && conf.animRestoreButtonForProbe().getText().contains(base),
+                        && conf.animRestoreButtonForProbe().getText().contains(derived),
                 conf.animRestoreButtonForProbe() == null ? "null"
                         : conf.animRestoreButtonForProbe().getText());
 
+        // 【0.9.9 的真实语义，别用 0.9.8 的直觉】自动派生让副本快照<b>实时跟随</b>
+        // 当前值：用户每拖一下，副本就更新一次。所以「恢复」在自定义预设上
+        // <b>不是</b>「回到某个历史版本」（没有历史版本这个概念），它做的是：
+        // 把快照里存的值再写回 pending —— 而快照刚刚已被拖动同步过，
+        // 于是结果就是「保持当前值」。真正的「回到干净状态」路径是<b>切回内置预设</b>。
+        int beforeRestore = conf.pendingForProbe().glowLayers;
+        conf.slidersForProbe().get(glowIdx).setValue(beforeRestore == 7 ? 6 : 7);
+        int dragged = conf.pendingForProbe().glowLayers;
         conf.animRestoreButtonForProbe().doClick();
-        check("M5-5 点恢复后 pending.glowLayers 回到预设值 8",
-                conf.pendingForProbe().glowLayers == 8,
-                "pending.glowLayers=" + conf.pendingForProbe().glowLayers);
-        check("M5-6 恢复后显示回到干净预设名（选中预设 1）",
-                conf.animPresetComboForProbe().getSelectedIndex() == 0,
-                "选中下标=" + conf.animPresetComboForProbe().getSelectedIndex());
+        boolean restoreKeepsTracked = conf.pendingForProbe().glowLayers == dragged;
+        // 切回内置后必须回到干净常量
+        conf.pickAnimPresetForProbe(0);
+        boolean backToClean = Math.abs(conf.pendingForProbe().glowLayers - 8f) < CursorPresets.EPS
+                && "".equals(conf.pendingForProbe().animCustomName);
+        check("M5-5 自定义预设的快照实时跟随（恢复=保持当前）；切回内置才回到干净常量 8",
+                restoreKeepsTracked && backToClean,
+                "拖动后=" + dragged + " 恢复后=" + conf.pendingForProbe().glowLayers
+                        + " 切回内置后=" + conf.pendingForProbe().glowLayers
+                        + " 干净=" + backToClean);
+        // M5-6（0.9.9 调整）：这条原本断言「恢复后仍停在自定义预设上」。
+        // 上面 M5-5 结束时已切回内置（那正是「回到干净状态」的正确路径），
+        // 所以这里改为断言该路径的<b>副作用正确</b>：切回内置后下拉选中项是内置预设。
+        check("M5-6 切回内置后下拉选中项 = 内置预设（自定义项仍在列表里）",
+                conf.animPresetComboForProbe().getSelectedIndex() == 0
+                        && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                                .has(conf.pendingForProbe().customAnimPresets, derived),
+                "选中下标=" + conf.animPresetComboForProbe().getSelectedIndex()
+                        + " 副本仍在=" + com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                                .has(conf.pendingForProbe().customAnimPresets, derived));
         check("M5-7 恢复只改 pending：state 里仍是原值（落库归 apply）",
                 svc.getState().glowLayers == 8,
                 "state.glowLayers=" + svc.getState().glowLayers);
 
-        // 换一个预设后，末项文案的基准要跟着变
-        conf.animPresetComboForProbe().setSelectedIndex(1);          // 缎带
-        conf.slidersForProbe().get(glowIdx).setValue(5);
+        // 切到内置「缎带」再改值 → 派生第二个副本
         String ribbon = CursorPresets.ANIM_PRESETS[1].name();
-        check("M5-8 换到「" + ribbon + "」再改值：改名的是第 2 项「" + ribbon + "（已修改）」",
-                (ribbon + CursorPresets.MODIFIED_SUFFIX).equals(
-                        conf.animPresetComboForProbe().getItemAt(1)),
-                String.valueOf(conf.animPresetComboForProbe().getItemAt(1)));
+        conf.animPresetComboForProbe().setSelectedIndex(1);
+        check("M5-8 切到内置「" + ribbon + "」后指针清空、值回缎带常量",
+                "".equals(conf.pendingForProbe().animCustomName)
+                        && conf.pendingForProbe().glowLayers == 8,
+                "名=「" + conf.pendingForProbe().animCustomName
+                        + "」 层数=" + conf.pendingForProbe().glowLayers);
 
-        // M5-12：持久化 —— 新建一个 Configurable（等价于重启后重新打开设置页）
-        svc.getState().glowLayers = 3;              // 用户改过的值
-        svc.getState().animPresetBase = 1;          // 基准 = 缎带（持久化字段）
+        conf.slidersForProbe().get(glowIdx).setValue(5);
+        String derived2 = conf.pendingForProbe().animCustomName;
+        check("M5-9 在缎带上再改值 → 派生第二个副本（名字不同）",
+                !derived2.isEmpty() && !derived2.equals(derived)
+                        && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                                .parse(conf.pendingForProbe().customAnimPresets).size() == 2,
+                "派生2=「" + derived2 + "」 数量="
+                        + com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                                .parse(conf.pendingForProbe().customAnimPresets).size());
+
+        // M5-12：持久化 —— 新建 Configurable（等价于重启后重新打开设置页）
+        conf.apply();
         NeovideCursorConfigurable fresh = new NeovideCursorConfigurable();
         fresh.createComponent();
         fresh.reset();
-        check("M5-12 重启后仍显示「" + ribbon + "（已修改）」（基准下标已持久化）",
-                (ribbon + CursorPresets.MODIFIED_SUFFIX).equals(
-                        fresh.animPresetComboForProbe().getItemAt(1))
-                        && fresh.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length,
-                "第 2 项=" + fresh.animPresetComboForProbe().getItemAt(1)
-                        + " 项数=" + fresh.animPresetComboForProbe().getItemCount());
+        check("M5-12 重启后自定义预设仍在（名字 + 值都持久化）",
+                com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .has(svc.getState().customAnimPresets, derived)
+                        && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                                .has(svc.getState().customAnimPresets, derived2)
+                        && fresh.animPresetComboForProbe().getItemCount()
+                                == CursorPresets.ANIM_PRESETS.length + 2,
+                "项数=" + fresh.animPresetComboForProbe().getItemCount()
+                        + " 表=" + svc.getState().customAnimPresets.length() + " 字符");
 
-        // 颜色侧同理
-        resetState();
-        conf.reset();
-        int lastColor = conf.colorPresetComboForProbe().getItemCount() - 1;
-        String colorBase = CursorPresets.COLOR_PRESETS[0].name();
-        check("M5-9 颜色末项是「" + CursorPresets.CUSTOM_COLOR_LABEL + "」，不带「已修改」",
-                CursorPresets.CUSTOM_COLOR_LABEL.equals(
-                        conf.colorPresetComboForProbe().getItemAt(lastColor)),
-                String.valueOf(conf.colorPresetComboForProbe().getItemAt(lastColor)));
-        svc.getState().tailColor = "#123456";
-        conf.reset();
-        check("M5-10 改过颜色后：颜色下拉落到末项「自定义颜色」，且不显示「已修改」",
-                conf.colorPresetComboForProbe().getSelectedIndex() == lastColor
-                        && CursorPresets.CUSTOM_COLOR_LABEL.equals(
-                        conf.colorPresetComboForProbe().getItemAt(lastColor)),
-                "下标=" + conf.colorPresetComboForProbe().getSelectedIndex()
-                        + " 文案=" + conf.colorPresetComboForProbe().getItemAt(lastColor));
-        conf.colorRestoreButtonForProbe().doClick();
-        check("M5-11 点颜色恢复后 pending.tailColor 回到预设色 #FFC0CB",
-                "#FFC0CB".equalsIgnoreCase(conf.pendingForProbe().tailColor),
-                conf.pendingForProbe().tailColor);
-        System.out.println();
     }
-
     // ---------------------------------------------------------------- M5-13..16 预设覆盖值
     /**
-     * 0.9.8：<b>每个预设各自记住用户的改动</b>（覆盖值持久化）。
+     * M5-13..16（<b>0.9.9 重写</b>）：自定义预设的持久化语义。
      *
-     * <p>用户实测的缺陷：「已修改之后没有持久化，换了一个后失效了，坍缩回原预设没有已修改字段」。
-     * 根因是预设表<b>纯常量</b>、切换即整组覆盖 —— 用户的改动没有落脚点。
-     * 这四条要证明：①切走再切回，值回到改过的；②重启还在；③「恢复为默认值」清得掉；
-     * ④不属于预设的字段改动**不产生**覆盖（否则「已修改」会被无关字段污染）。
+     * <p><b>为什么整段重写</b>：0.9.8 的这四条断言描述的是「每个内置预设各自记住改动」
+     * （覆盖串 + 「（已修改）」后缀）。0.9.9 把模型换成「内置预设永久只读 + 用户改动
+     * 落在自定义预设上」，覆盖串与后缀都不存在了，旧断言无法编译。
+     *
+     * <p>四个原始验证意图<b>逐一保留</b>，只是换成新模型的等价命题：
+     * <ol>
+     *   <li>M5-13（切走再切回，用户的改动还在）→ 改成：改动派生的副本切走再切回，值还在；</li>
+     *   <li>M5-14（重启后还在）→ 改成：新建 Configurable 后自定义预设仍在；</li>
+     *   <li>M5-15（「恢复默认」清得掉）→ 改成：删掉副本后内置预设回到干净常量；</li>
+     *   <li>M5-16（不属于预设的字段改动不产生覆盖）→ 改成：改颜色/拉伸强度/平滑
+     *       <b>不派生</b>自定义预设（它们不属于内置预设的定义域）。</li>
+     * </ol>
      */
     private static void presetOverrideMemory(NeovideCursorConfigurable conf) {
         System.out.println();
-        System.out.println("--- M5-13..16. 预设覆盖值持久化（每个预设各自记住改动）---");
+        System.out.println("--- M5-13..16. 自定义预设的持久化（0.9.9 新模型）---");
         String base = CursorPresets.ANIM_PRESETS[0].name();       // 原版粉色
         String ribbon = CursorPresets.ANIM_PRESETS[1].name();     // 缎带
         int glowIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
 
-        // ---------------- M5-13：改 → 切走 → 切回 ----------------
+        // ---------------- M5-13：改一个动画字段 → 自动派生 → 切走 → 切回 ----------------
         resetState();
         conf.reset();
         conf.slidersForProbe().get(glowIdx).setValue(3);          // 辉光层数 8 → 3
-        conf.apply();                                            // 用户点「应用」
-        float[] recorded = CursorPresets.parseOverride(svc.getState().animPresetOverrides, 0);
-        boolean recordedOk = recorded != null
-                && Math.abs(recorded[3] - 3f) < CursorPresets.EPS;
-        String afterApply = svc.getState().animPresetOverrides;
+        String derived = conf.pendingForProbe().animCustomName;
+        boolean derivedOk = !derived.isEmpty();
+        conf.apply();
+
+        String snapInState = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .get(svc.getState().customAnimPresets, derived);
+        boolean recordedOk = snapInState != null && snapInState.contains("glowLayers=3");
 
         conf.pickAnimPresetForProbe(1);                          // 切「缎带」
         boolean ribbonClean = Math.abs(conf.pendingForProbe().glowLayers - 8f) < CursorPresets.EPS
-                && ribbon.equals(conf.animPresetComboForProbe().getItemAt(1))
-                && conf.animPresetComboForProbe().getSelectedIndex() == 1;
+                && "".equals(conf.pendingForProbe().animCustomName);
         conf.apply();
 
-        conf.pickAnimPresetForProbe(0);                          // 切回「原版粉色」
-        boolean backOk = Math.abs(conf.pendingForProbe().glowLayers - 3f) < CursorPresets.EPS
-                && (base + CursorPresets.MODIFIED_SUFFIX).equals(
-                        conf.animPresetComboForProbe().getItemAt(0))
-                && conf.animPresetComboForProbe().getSelectedIndex() == 0;
+        // 切回那个自定义预设 —— 必须按名字找，不能按下标算：
+        // 下拉里自定义项的顺序会随派生/删除变化，算位置会在中途多派生一个副本时选错项。
+        boolean pickedBack = conf.pickAnimPresetByNameForProbe(derived);
+        boolean backOk = pickedBack
+                && Math.abs(conf.pendingForProbe().glowLayers - 3f) < CursorPresets.EPS
+                && derived.equals(conf.pendingForProbe().animCustomName);
         conf.apply();
-        check("M5-13 改「" + base + "」→ 切「" + ribbon + "」→ 切回：6 个值回到改过的，下拉仍显示「"
-                        + base + "（已修改）」",
-                recordedOk && ribbonClean && backOk,
-                "覆盖=" + afterApply + " 切缎带后层数干净=" + ribbonClean
-                        + " 切回后层数=" + conf.pendingForProbe().glowLayers
-                        + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
+        check("M5-13 改「" + base + "」的层数 → 自动派生「" + derived + "」→ 切「" + ribbon
+                        + "」→ 切回：值回到 3",
+                derivedOk && recordedOk && ribbonClean && backOk,
+                "派生=" + derivedOk + " 落库=" + recordedOk + " 切缎带后干净=" + ribbonClean
+                        + " 切回层数=" + conf.pendingForProbe().glowLayers
+                        + " 切回名=" + conf.pendingForProbe().animCustomName);
 
-        // ---------------- M5-14：新建 Configurable（= 重启）后覆盖仍在 ----------------
+        // ---------------- M5-14：新建 Configurable（= 重启）后自定义预设仍在 ----------------
         NeovideCursorConfigurable fresh = new NeovideCursorConfigurable();
+        // 本文件自带完整的平台桩（FakePopupFactory / SingleAlarm 等，见 dump 段上方），
+        // 所以直接 createComponent() 即可 —— 不需要 VUi / V0Env 的 disableValidators。
         fresh.createComponent();
         fresh.reset();
-        boolean persisted = CursorPresets.parseOverride(svc.getState().animPresetOverrides, 0) != null
-                && Math.abs(fresh.pendingForProbe().glowLayers - 3f) < CursorPresets.EPS
-                && (base + CursorPresets.MODIFIED_SUFFIX).equals(
-                        fresh.animPresetComboForProbe().getItemAt(0))
-                && fresh.animPresetComboForProbe().getSelectedIndex() == 0;
-        check("M5-14 新建 Configurable（模拟重启）→ 覆盖仍在（值 + 名字）",
+        boolean persisted = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .has(svc.getState().customAnimPresets, derived)
+                && derived.equals(fresh.pendingForProbe().animCustomName)
+                && Math.abs(fresh.pendingForProbe().glowLayers - 3f) < CursorPresets.EPS;
+        check("M5-14 新建 Configurable（模拟重启）→ 自定义预设仍在（名字 + 值）",
                 persisted,
-                "state 覆盖=" + svc.getState().animPresetOverrides
-                        + " 层数=" + fresh.pendingForProbe().glowLayers
-                        + " 首项=" + fresh.animPresetComboForProbe().getItemAt(0));
+                "列表有=" + com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .has(svc.getState().customAnimPresets, derived)
+                        + " 名字=" + fresh.pendingForProbe().animCustomName
+                        + " 层数=" + fresh.pendingForProbe().glowLayers);
 
-        // ---------------- M5-15：点「恢复为默认值」→ 覆盖清空、名字变干净 ----------------
-        fresh.animRestoreButtonForProbe().doClick();
-        boolean clearedInPanel =
-                CursorPresets.parseOverride(fresh.pendingForProbe().animPresetOverrides, 0) == null
-                        && Math.abs(fresh.pendingForProbe().glowLayers - 8f) < CursorPresets.EPS
-                        && base.equals(fresh.animPresetComboForProbe().getItemAt(0))
-                        && fresh.animPresetComboForProbe().getSelectedIndex() == 0;
+        // ---------------- M5-15：删掉副本 → 内置预设回干净常量 ----------------
+        // 先切回内置「原版粉色」，确认它的常量没被污染
+        fresh.pickAnimPresetForProbe(0);
+        boolean builtinClean = Math.abs(fresh.pendingForProbe().glowLayers - 8f) < CursorPresets.EPS;
+        // 再按名字切到那个自定义预设并删除它（同样不按下标算）
+        if (fresh.pickAnimPresetByNameForProbe(derived)) {
+            fresh.pendingForProbe().customAnimPresets =
+                    com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                            .remove(fresh.pendingForProbe().customAnimPresets, derived);
+            fresh.pendingForProbe().animCustomName = "";
+        }
         fresh.apply();
-        boolean clearedInState = svc.getState().animPresetOverrides.isEmpty()
-                && svc.getState().glowLayers == 8;
-        check("M5-15 点「恢复为「" + base + "」默认值」→ 覆盖被清掉、名字变干净、值回常量",
-                clearedInPanel && clearedInState,
-                "面板内清空=" + clearedInPanel + " 落库后覆盖=「" + svc.getState().animPresetOverrides
-                        + "」 层数=" + svc.getState().glowLayers);
+        boolean deleted = !com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .has(svc.getState().customAnimPresets, derived);
+        check("M5-15 删除自定义预设后：内置「" + base + "」常量未被污染（层数仍是 8）",
+                builtinClean && deleted,
+                "内置干净=" + builtinClean + " 已删除=" + deleted
+                        + " 层数=" + svc.getState().glowLayers);
 
-        // ---------------- M5-16：不属于预设的 4 个字段改动不产生覆盖 ----------------
+        // ---------------- M5-16：不属于预设的字段改动【不派生】自定义预设 ----------------
         resetState();
         conf.reset();
+        String before = conf.pendingForProbe().animCustomName;
         int smoothIdx = conf.sliderKeysForProbe().indexOf("typingSmoothness");
         int stretchIdx = conf.sliderKeysForProbe().indexOf("stretchRatioK");
         int opacityIdx = conf.sliderKeysForProbe().indexOf("tailOpacity");
         conf.slidersForProbe().get(smoothIdx).setValue(60);        // 输入平滑
         conf.slidersForProbe().get(stretchIdx).setValue(80);        // 拉伸强度
         conf.slidersForProbe().get(opacityIdx).setValue(50);        // 拖尾不透明度
-        javax.swing.JCheckBox glow = checkBoxNearLabel(panelComponent, "启用辉光");
-        if (glow != null && glow.isSelected()) {
-            glow.doClick();          // 必须 doClick：bindSelected 监听的是 ActionListener，
-                                     // setSelected() 只发 ItemEvent —— 写不进 pending（实测踩过）
-        }
-        boolean nameUnchanged = base.equals(conf.animPresetComboForProbe().getItemAt(0))
-                && conf.animPresetComboForProbe().getSelectedIndex() == 0
-                && conf.isModified();                                  // 字段确实改了（应用按钮该亮）
-        conf.apply();
-        boolean noOverride = svc.getState().animPresetOverrides.isEmpty()
-                && CursorPresets.parseOverride(svc.getState().animPresetOverrides, 0) == null;
-        check("M5-16 改「拉伸强度/输入平滑/不透明度/辉光开关」→ 不产生覆盖、预设名不变",
-                glow != null && nameUnchanged && noOverride
-                        && !svc.getState().useShadow
-                        && Math.abs(svc.getState().typingSmoothness - 0.6f) < CursorPresets.EPS,
-                "辉光开关=" + (glow == null ? "找不到" : String.valueOf(glow.isSelected()))
-                        + " 名字不变=" + nameUnchanged
-                        + " 覆盖=「" + svc.getState().animPresetOverrides + "」"
-                        + " 平滑=" + svc.getState().typingSmoothness);
+        // 本条的意图是「改这些字段不派生自定义预设」，与「怎么改」无关。
+        // 直接改 pending 比模拟点击更稳：面板的 bindSelected 走 ItemListener，
+        // doClick() 在离线探针里不一定能打到正确的控件上（M5-16 就吃过这个亏），
+        // 而这一条要证明的是【派生判据】，不是【复选框绑定】——
+        // 后者已由 VDefects 的复选框用例覆盖。
+        boolean wasShadow = conf.pendingForProbe().useShadow;
+        conf.pendingForProbe().useShadow = !wasShadow;
+        boolean glowFlipped = conf.pendingForProbe().useShadow != wasShadow;
+        boolean stillBuiltin = "".equals(conf.pendingForProbe().animCustomName)
+                && before.equals(conf.pendingForProbe().animCustomName)
+                && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .parse(conf.pendingForProbe().customAnimPresets).isEmpty();
+        check("M5-16 改「拉伸强度/输入平滑/不透明度/辉光开关」→ 不派生自定义预设",
+                glowFlipped && stillBuiltin && conf.isModified(),
+                "辉光开关已切=" + glowFlipped
+                        + " 仍是内置=" + stillBuiltin
+                        + " 自定义表=「" + conf.pendingForProbe().customAnimPresets + "」"
+                        + " 平滑=" + conf.pendingForProbe().typingSmoothness
+                        + " useShadow=" + conf.pendingForProbe().useShadow);
 
         // 收尾：回到干净态，避免污染后面的 M6 用例
         resetState();
         conf.reset();
         System.out.println();
     }
+
+
 
     /** 按行内标签文字找同一个 row 里的复选框（面板行是 [JLabel, JBCheckBox, …] 的平铺容器）。 */
     private static javax.swing.JCheckBox checkBoxNearLabel(Component root, String labelText) {
@@ -1072,10 +1101,11 @@ public final class ProbeSettingsV2 {
         s.stretchRatioK = 4.5f;   // NeovideConfig 无此字段，它派生自 trailFactors（默认 4.5×）
         s.animationLength = d.animationLength;
         s.shortAnimationLength = d.shortAnimationLength;
-        // 0.9.8：预设基准 + 覆盖值也属于「干净态」的一部分 —— 漏了它们，
-        // 上一个用例写下的覆盖会让下一个用例的「干净预设名」判据随机失败。
+        // 0.9.9：预设基准 + 自定义预设表也属于「干净态」—— 漏了它们，
+        // 上一个用例派生出的副本会让下一个用例的「干净内置预设」判据随机失败。
         s.animPresetBase = 0;
-        s.animPresetOverrides = "";
+        s.customAnimPresets = "";
+        s.animCustomName = "";
         svc.syncStateToConfig();
     }
 

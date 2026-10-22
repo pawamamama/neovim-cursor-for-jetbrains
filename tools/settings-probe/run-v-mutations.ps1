@@ -45,6 +45,7 @@ $jvm = @(
 
 $confFile = 'com\github\yyyolo7a79\neovidecursor\ui\settings\NeovideCursorConfigurable.java'
 $mgrFile = 'com\github\yyyolo7a79\neovidecursor\ui\NeovideCaretManager.java'
+$fieldFile = 'com\github\yyyolo7a79\neovidecursor\settings\SettingsField.java'
 
 # ------------------------------------------------------------------ 变异定义
 # 每项：Name / File / 说明 / 变换（对副本文件文本做函数式改写）/ 期望变红的探针 / 期望红掉的断言前缀
@@ -119,17 +120,28 @@ $mutations = @(
     },
     @{
         Name = 'MUT-C'
-        File = $confFile
+        File = $fieldFile
         What = '回滚缺陷 3 的修法（字段级脏标记 → 无条件全量写 = 修复前形态）'
         Transform = {
             param($text)
-            $n = 0
-            # 逐字段 if 的三种写法统统改成恒真分支：等价于原来的「无条件下发」
-            $text = [regex]::Replace($text, 'if \(pending\.\w+ != baseline\.\w+\) \{', { param($m) $script:n++; 'if (true) {' })
-            $text = [regex]::Replace($text, 'if \(Float\.compare\(pending\.(\w+), baseline\.\1\) != 0\) \{', { param($m) $script:n++; 'if (true) {' })
-            $text = [regex]::Replace($text, 'if \(!eqHex\(pending\.(\w+), baseline\.\1\)\) \{', { param($m) $script:n++; 'if (true) {' })
-            if ($script:n -lt 15) { throw ("MUT-C：只匹配到 " + $script:n + " 处脏标记判断（期望 ≥ 15，源码已变请同步本脚本）") }
-            return $text
+            # 【0.9.9 重构同步】apply() 的 20 段手写 if 已收进 SettingsField.FIELDS 表。
+            # 所以「修复前形态」（无条件下发）现在等价于让表的判脏恒为真：
+            #   differs() 永远返回 true → apply() 遍历表时每个字段都会被写 → 覆盖 Tools 改动。
+            # 这与旧 MUT-C 把 15+ 处 if 改成 if(true) 是同一种语义，只是作用点随重构搬家。
+            #
+            # 注意：不能改成让 same 恒真（那是「永不判脏」，方向相反，探针不会按期望变红）。
+            $old = @'
+    public boolean differs(NeovideCursorSettings.State a, NeovideCursorSettings.State b) {
+        return !same.test(getState.apply(a), getState.apply(b));
+    }
+'@
+            $new = @'
+    public boolean differs(NeovideCursorSettings.State a, NeovideCursorSettings.State b) {
+        return true;   // 【变异】无条件判脏 = 修复前的「无条件下发」
+    }
+'@
+            if (-not $text.Contains($old)) { throw 'MUT-C：找不到 differs() 的判脏表达式（源码已变，请同步本脚本）' }
+            return $text.Replace($old, $new)
         }
         Probes = @('VDefects')
         Expect = @('D3-1', 'D3-2')

@@ -10,6 +10,7 @@ import com.intellij.openapi.observable.properties.PropertyGraph;
 import com.intellij.openapi.options.BoundConfigurable;
 import com.intellij.openapi.options.SearchableConfigurable;
 import com.intellij.openapi.ui.DialogPanel;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.ColorPanel;
 import com.intellij.ui.components.JBCheckBox;
 import com.intellij.ui.components.JBTextField;
@@ -189,8 +190,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     private static final HyperlinkEventAction NO_LINK = HyperlinkEventAction.HTML_HYPERLINK_INSTANCE;
 
     /** 下拉末项的动态后缀（0.9.6 / M5）：{基准预设名} + 本后缀。 */
-    private static final String MODIFIED_SUFFIX = CursorPresets.MODIFIED_SUFFIX;
-
     /** 「恢复为默认值」按钮的文案模板。 */
     private static final String RESTORE_TPL = "恢复为「%s」默认值";
 
@@ -409,6 +408,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
     /** 「恢复为「X」默认值」按钮（0.9.6 / M5）。点它把基准预设的常量重新写进 pending。 */
     private javax.swing.JButton animRestoreBtn;
+    /** 0.9.9：自定义预设的三个动作按钮（内置预设选中时全部置灰）。 */
+    private javax.swing.JButton animNewBtn;
+    private javax.swing.JButton animRenameBtn;
+    private javax.swing.JButton animDeleteBtn;
     private javax.swing.JButton colorRestoreBtn;
     private com.intellij.openapi.ui.ComboBox<String> colorPresetCombo;
 
@@ -488,7 +491,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             singleMoveHint = null;
             crossMoveHint = null;
             paintDiag = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.isPaintDisabled();
-            // M5-fix：基准预设从持久化状态里读（不是从值猜），否则重启后「缎带（已修改）」会退化成原版粉色
+            // 基准预设从持久化状态里读（不是从值猜）—— 否则重启后当前项会漂到别的内置预设
             animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
             colorBaseIdx = CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
 
@@ -924,6 +927,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
     /** 把 {@code pending} 灌进全部控件（reset / 预设应用共用）。 */
     private void syncAllControlsFromPending() {
+        // 【0.9.9 根本性修正】本方法末尾会调 refreshPresetDisplay() → afterPendingEdited()。
+        // 那是「程序化回灌」而不是「用户编辑」，绝不能在那里自动派生副本 ——
+        // 否则 reset() 装载一份与内置常量不同的 state 就会凭空多出副本，让
+        // isModified() 恒为真（V11-3c / U13 各抓到过一次）。
+        //
+        // 【为什么抑制放在这里，而不是在三个调用点各写一遍】
+        // 之前放在调用点，漏掉了 reset() 末尾这一次 → 同一个 bug 复发。
+        // 放进方法内部后，任何调用路径（reset / apply / 预设恢复）都自动受保护；
+        // 同时保存并恢复调用方原有状态，不破坏外层已有的抑制块。
+        boolean prevSuppress = suppressDerive;
+        suppressDerive = true;
         syncingControls = true;
         try {
             for (SliderBinding b : bindings) {
@@ -947,8 +961,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         } finally {
             syncingControls = false;
         }
-        refreshDerivedHints();
-        refreshPresetDisplay();
+        try {
+            refreshDerivedHints();
+            refreshPresetDisplay();
+        } finally {
+            suppressDerive = prevSuppress;
+        }
     }
 
     // ==================== 预设（契约 §5.7 / §8.6）====================
@@ -1176,23 +1194,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                                 .snapshot(pending));
     }
 
-    /**
-     * 重建动画预设下拉（0.9.6 / M5-fix）。
-     *
-     * <p>下拉里**只有真预设**；「已修改」是把基准那一项**就地改名**，不是新增条目。
-     * 每次整体重建模型（7 项，代价可忽略）—— 比“记住上次改名了哪一项”更不容易出错。
-     * 调用点必须在 {@code syncingControls} 保护内，否则 setModel 的事件会触发
-     * {@code onAnimPresetPicked()} 把用户刚改的值写回预设值。
-     */
-    private static void rebuildPresetItems(com.intellij.openapi.ui.ComboBox<String> combo,
-                                           List<String> items, List<String> names,
-                                           int baseIdx, boolean modified) {
-        List<String> next = new ArrayList<>(names);
-        if (modified && baseIdx >= 0 && baseIdx < next.size()) {
-            next.set(baseIdx, next.get(baseIdx) + MODIFIED_SUFFIX);
-        }
-        replaceModel(combo, items, next);
-    }
 
     /** 颜色下拉：5 个预设 + 末项「自定义颜色」（颜色不参与预设语义，没有「已修改」）。 */
     private static void rebuildColorItems(com.intellij.openapi.ui.ComboBox<String> combo,
@@ -1216,8 +1217,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     /** 刷新两个「恢复为「X」默认值」按钮的文案（基准预设可能刚变过）。 */
     private void refreshRestoreButtonText() {
         if (animRestoreBtn != null) {
-            animRestoreBtn.setText(String.format(RESTORE_TPL,
-                    CursorPresets.ANIM_PRESETS[animBaseIdx].name()));
+            // 0.9.9：文案必须跟着【当前选中项】走 —— 在自定义预设上时显示它的名字，
+            // 否则用户点「恢复为「原版粉色」默认值」会以为是回到内置常量，
+            // 实际却是回到那个自定义预设已存的值（M5-4 抓到过这个不一致）。
+            String current = pending.animCustomName.isEmpty()
+                    ? CursorPresets.ANIM_PRESETS[
+                            CursorPresets.clampAnimPresetIndex(animBaseIdx)].name()
+                    : pending.animCustomName;
+            animRestoreBtn.setText(String.format(RESTORE_TPL, current));
         }
         if (colorRestoreBtn != null) {
             colorRestoreBtn.setText(String.format(RESTORE_TPL,
@@ -1233,23 +1240,32 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
      * 对内置预设 = 回到那 6 个常量；对自定义预设 = 回到它存的快照。
      */
     private void restoreAnimPreset() {
-        if (!pending.animCustomName.isEmpty()) {
-            String snap = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
-                    .get(pending.customAnimPresets, pending.animCustomName);
-            if (snap != null) {
-                com.github.yyyolo7a79.neovidecursor.settings.SettingsField
-                        .restore(pending, snap);
-                syncAllControlsFromPending();
+        // 【必须在抑制档里做】syncAllControlsFromPending() 会走到
+        // refreshPresetDisplay() → afterPendingEdited()，而后者会把快照
+        // 【重写成当前值】。不抑制的话，刚恢复出来的值立刻被覆写回去 —— M5-5 抓到过。
+        boolean prev = suppressDerive;
+        suppressDerive = true;
+        try {
+            if (!pending.animCustomName.isEmpty()) {
+                String snap = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .get(pending.customAnimPresets, pending.animCustomName);
+                if (snap != null) {
+                    com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                            .restore(pending, snap);
+                    syncAllControlsFromPending();
+                    return;
+                }
+                pending.animCustomName = "";
+            }
+            if (animBaseIdx < 0 || animBaseIdx >= CursorPresets.ANIM_PRESETS.length) {
                 return;
             }
-            pending.animCustomName = "";
+            writeAnimValues(pending, animConstantsOf(animBaseIdx));
+            pending.animPresetBase = animBaseIdx;
+            syncAllControlsFromPending();
+        } finally {
+            suppressDerive = prev;
         }
-        if (animBaseIdx < 0 || animBaseIdx >= CursorPresets.ANIM_PRESETS.length) {
-            return;
-        }
-        writeAnimValues(pending, animConstantsOf(animBaseIdx));
-        pending.animPresetBase = animBaseIdx;
-        syncAllControlsFromPending();
     }
 
     /** M5：把基准颜色预设的 2 个 HEX 重新写进 pending。 */
@@ -1260,6 +1276,105 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[colorBaseIdx];
         pending.tailColor = p.tailColor();
         pending.shadowColor = p.shadowColor();
+        syncAllControlsFromPending();
+    }
+
+    // ==================== 自定义预设动作（0.9.9）====================
+
+    /**
+     * 把当前的全部参数存成一个新的自定义预设。
+     *
+     * <p>与「自动派生」互补：
+     * <ul>
+     *   <li>自动派生 — 用户<b>改动画字段</b>时自动发生，不需要点任何按钮；</li>
+     *   <li>本方法 — 用户显式要「把现在这套存下来」（可能只改了颜色/拉伸强度等
+     *       不在内置预设定义范围内的参数）。</li>
+     * </ul>
+     *
+     * <p>名字默认取「{当前预设名} 副本」并自动去重。
+     */
+    private void createCustomPreset() {
+        if (!com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .canAdd(pending.customAnimPresets)) {
+            Messages.showWarningDialog(
+                    "自定义预设最多 " + com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                            .MAX_PRESETS + " 个。请先删除不用的。", "无法新建");
+            return;
+        }
+        String base = pending.animCustomName.isEmpty()
+                ? CursorPresets.ANIM_PRESETS[
+                        CursorPresets.clampAnimPresetIndex(pending.animPresetBase)].name()
+                : pending.animCustomName;
+        String suggested = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .uniqueName(pending.customAnimPresets, base + " 副本");
+        java.awt.Component parent = suppressDerive ? null : createComponent();
+        String name = Messages.showInputDialog(parent, "给这套设置起个名字：", "新建预设",
+                null, suggested, null);
+        if (name == null) {
+            return;                                      // 用户取消
+        }
+        String trimmed = name.trim();
+        if (trimmed.isEmpty()) {
+            Messages.showWarningDialog("名字不能为空。", "无法新建");
+            return;
+        }
+        if (com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .has(pending.customAnimPresets, trimmed)) {
+            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法新建");
+            return;
+        }
+        pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .put(pending.customAnimPresets, trimmed,
+                        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.snapshot(pending));
+        pending.animCustomName = trimmed;
+        syncAllControlsFromPending();
+    }
+
+    /** 重命名当前选中的自定义预设。内置预设只读，没有「改名」这个概念。 */
+    private void renameCustomPreset() {
+        if (pending.animCustomName.isEmpty()) {
+            Messages.showInfoMessage("内置预设是只读的，不能改名。要改请先「新建预设」。", "重命名");
+            return;
+        }
+        String from = pending.animCustomName;
+        String name = Messages.showInputDialog(createComponent(), "新名字：", "重命名预设",
+                null, from, null);
+        if (name == null) {
+            return;
+        }
+        String trimmed = name.trim();
+        if (trimmed.isEmpty() || trimmed.equals(from)) {
+            return;
+        }
+        String next = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .rename(pending.customAnimPresets, from, trimmed);
+        if (next == null) {
+            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法重命名");
+            return;
+        }
+        pending.customAnimPresets = next;
+        pending.animCustomName = trimmed;
+        syncAllControlsFromPending();
+    }
+
+    /** 删除当前选中的自定义预设。内置预设不可删。 */
+    private void deleteCustomPreset() {
+        if (pending.animCustomName.isEmpty()) {
+            Messages.showInfoMessage("内置预设是只读的，不能删除。", "删除");
+            return;
+        }
+        String name = pending.animCustomName;
+        int ok = Messages.showYesNoDialog(createComponent(),
+                "删除自定义预设「" + name + "」？此操作不可撤销。",
+                "删除预设", Messages.getQuestionIcon());
+        if (ok != Messages.YES) {
+            return;
+        }
+        pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .remove(pending.customAnimPresets, name);
+        pending.animCustomName = "";
+        // 值保持在当前参数上（用户看到的样子不变），只是不再挂在任何自定义预设下；
+        // 若这些值与内置常量不同，下一次编辑会自动派生新副本 —— 预期行为。
         syncAllControlsFromPending();
     }
 
@@ -1644,6 +1759,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         tailColorPanel = null;
         shadowColorPanel = null;
         animPresetCombo = null;
+        animNewBtn = null;
+        animRenameBtn = null;
+        animDeleteBtn = null;
         colorPresetCombo = null;
         singleMoveHint = null;
         crossMoveHint = null;
@@ -1981,6 +2099,25 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     /** 探针/调试用：模拟用户在下拉里选了某个动画预设（下标 = 预设下标）。 */
     public void pickAnimPresetForProbe(int index) {
         animPresetCombo.setSelectedIndex(index);
+    }
+
+    /**
+     * 探针/调试用：按<b>名字</b>选中预设。
+     *
+     * <p>比按下标可靠：下拉 = 7 个内置 + N 个自定义，自定义项的<b>顺序会随派生/删除变化</b>。
+     * 探针按下标算位置时，一旦中途多派生了一个副本就会选错项
+     * （M5-13 曾因此读到 10 而不是 3）。
+     *
+     * @return true = 找到并已选中；false = 没有这个名字
+     */
+    public boolean pickAnimPresetByNameForProbe(String name) {
+        for (int i = 0; i < animPresetCombo.getItemCount(); i++) {
+            if (name.equals(animPresetCombo.getItemAt(i))) {
+                animPresetCombo.setSelectedIndex(i);
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 探针/调试用：模拟用户在下拉里选了某个颜色预设。 */

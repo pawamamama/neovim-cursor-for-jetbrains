@@ -173,14 +173,18 @@ public final class ProbeT7 {
         int glowIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
         conf.slidersForProbe().get(glowIdx).setValue(3);
 
-        // M5-fix：没有「自定义」末项了 —— 命中失败时停在【基准那一项】，并把它的文案加上「（已修改）」。
-        check("T-02b 拖 glowLayers 8→3 后，动画下拉停在基准项（下标 0，不再是末项）",
-                conf.animPresetComboForProbe().getSelectedIndex() == 0,
-                "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex());
-        // 0.9.6 / M5：末项文案由固定的「自定义（当前值）」改成动态的「{基准预设}（已修改）」。
-        // 基准 = 最近一次匹配成功/手选的预设；本用例里是预设 1（原版粉色）。
-        String expectFirst = CursorPresets.ANIM_PRESETS[0].name() + CursorPresets.MODIFIED_SUFFIX;
-        check("T-02c 基准项文案是「" + expectFirst + "」（就地改名，不新增条目）",
+        // 【0.9.9 重写】这条原本测「就地改名 + 显示（已修改）」。
+        // 新模型下：改动画字段会<b>自动派生</b>一个自定义预设并切过去，
+        // 内置预设那几项名字永远干净。所以判据变成两件事：
+        //   ① 下拉当前选中的是派生的自定义项（下标 >= 内置数量）；
+        //   ② 内置第一项的名字仍然是干净的「原版粉色」（没被就地改名）。
+        check("T-02b 拖 glowLayers 8→3 后，下拉切到派生的自定义预设",
+                conf.animPresetComboForProbe().getSelectedIndex()
+                        >= CursorPresets.ANIM_PRESETS.length,
+                "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex()
+                        + " 内置数=" + CursorPresets.ANIM_PRESETS.length);
+        String expectFirst = CursorPresets.ANIM_PRESETS[0].name();
+        check("T-02c 内置第一项名字保持干净「" + expectFirst + "」（不被就地改名）",
                 expectFirst.equals(conf.animPresetComboForProbe().getItemAt(0)),
                 String.valueOf(conf.animPresetComboForProbe().getItemAt(0)));
 
@@ -189,11 +193,26 @@ public final class ProbeT7 {
                 conf.colorPresetComboForProbe().getSelectedIndex() == 0,
                 "颜色下拉下标=" + conf.colorPresetComboForProbe().getSelectedIndex());
 
-        // 再拖回 8 —— 应重新匹配上预设 1（不能单向卡在「自定义」）
+        // 【0.9.9 语义变化】原断言是「拖回 8 就自动回到内置预设 1（不能单向卡死）」。
+        // 新模型下这条【不再成立，也不应该成立】：用户在拖动那一刻已经派生出了
+        // 一个自定义预设并切过去，再次拖动改动的是【那个副本】。
+        // 副本的值恰好等于内置常量，不会自动把用户「弹回」内置 —— 那会让用户
+        // 正在编辑的东西自己跳走（GIMP / IntelliJ 配色方案同样不会自动回退）。
+        // 正确出口是用户显式切回内置，所以判据改成：
+        //   ① 仍停在该副本上（没被强行弹回）；
+        //   ② 显式切回内置后，下标 = 0 且名字干净 —— 证明「不是单向卡死」仍成立。
         conf.slidersForProbe().get(glowIdx).setValue(8);
-        check("T-02e 把 glowLayers 拖回 8 后，动画下拉重新显示预设 1（不是单向卡死）",
-                conf.animPresetComboForProbe().getSelectedIndex() == 0,
-                "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex());
+        boolean staysOnCopy = conf.animPresetComboForProbe().getSelectedIndex()
+                >= CursorPresets.ANIM_PRESETS.length;
+        conf.pickAnimPresetForProbe(0);
+        boolean canGoBack = conf.animPresetComboForProbe().getSelectedIndex() == 0
+                && CursorPresets.ANIM_PRESETS[0].name()
+                        .equals(conf.animPresetComboForProbe().getItemAt(0));
+        check("T-02e 拖回 8 后仍停在副本上；显式切回内置可行（不是单向卡死）",
+                staysOnCopy && canGoBack,
+                "拖回后仍副本=" + staysOnCopy + " 切回后下标="
+                        + conf.animPresetComboForProbe().getSelectedIndex()
+                        + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
 
         // 键入路径（onTextEdited）也必须刷新
         resetState();
@@ -596,12 +615,13 @@ public final class ProbeT7 {
         s.stretchRatioK = 4.5f;   // NeovideConfig 无此字段，派生自 trailFactors 默认 4.5×
         s.animationLength = d.animationLength;
         s.shortAnimationLength = d.shortAnimationLength;
-        // 0.9.8：预设基准 + 每个预设的覆盖值也属于「干净态」。
-        // 【为什么必须清】T-01e 的 apply 会按设计把 glowLayers=5 记进覆盖表；
-        // 带着它进 T-02，「选中原版粉色」就会立刻恢复成改过的值（名字也带「（已修改）」），
+        // 0.9.9：预设基准 + 自定义预设表也属于「干净态」。
+        // 【为什么必须清】T-01e 的 apply 会按设计把 glowLayers=5 落进一个自动派生的
+        // 自定义预设；带着它进 T-02，「切回内置」就会立刻显示改过的值，
         // 于是 T-02c 在【变异版】里也照样绿 —— MUT-R02 失去鉴别力（实测踩过）。
         s.animPresetBase = 0;
-        s.animPresetOverrides = "";
+        s.customAnimPresets = "";
+        s.animCustomName = "";
         svc.syncStateToConfig();
     }
 
