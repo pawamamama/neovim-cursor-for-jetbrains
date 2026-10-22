@@ -382,6 +382,12 @@ public final class VCustom {
         p1.animCustomName = "";
         p1.customAnimPresets = "";
         writeAnim(p1, constants);
+        // 【0.9.10 预设字段域扩到 8 项】装置也必须把 useShadow/overlayFadeOut
+        // 设成该预设声明的值，否则「一切等于预设」这个前提不成立 → 会派生副本。
+        p1.useShadow = com.github.yyyolo7a79.neovidecursor.settings.CursorPresets
+                .ANIM_PRESETS[base].useShadow();
+        p1.overlayFadeOut = com.github.yyyolo7a79.neovidecursor.settings.CursorPresets
+                .ANIM_PRESETS[base].overlayFadeOut();
         conf.refreshPresetDisplayForProbe();
         check("C-19 未改动时不派生任何自定义预设",
                 "".equals(conf.pendingForProbe().animCustomName)

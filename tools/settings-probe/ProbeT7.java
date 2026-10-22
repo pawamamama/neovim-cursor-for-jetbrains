@@ -158,7 +158,9 @@ public final class ProbeT7 {
         NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
         conf.createComponent();
 
-        int customIdxAnim = conf.animPresetComboForProbe().getItemCount() - 1;   // M5-fix 后 = 6（最后一个真预设）
+        // 【0.9.10】不能在这里取快照：createComponent 之后下拉还会被 reset()/refreshPresetDisplay()
+        // 重建（内置 + 自定义 + 末尾占位项），项数会变。改成每次用时现算。
+        // 占位项「自定义（未保存）」永远是末项。
         int customIdxColor = conf.colorPresetComboForProbe().getItemCount() - 1;
 
         // 起点：先应用「原版粉色」动画预设，让下拉显示预设 1
@@ -220,8 +222,9 @@ public final class ProbeT7 {
         conf.pickAnimPresetForProbe(0);
         int layersIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
         conf.textFieldsForProbe().get(layersIdx).setText("3");
+        int customIdxAnimNow = conf.animPresetComboForProbe().getItemCount() - 1;   // 末项 = 占位项
         check("T-02f 在输入框键入 3（onTextEdited 路径）同样让下拉变「自定义」",
-                conf.animPresetComboForProbe().getSelectedIndex() == customIdxAnim,
+                conf.animPresetComboForProbe().getSelectedIndex() == customIdxAnimNow,
                 "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex());
 
         // ColorPanel 路径（R-02 第 4 处入口）

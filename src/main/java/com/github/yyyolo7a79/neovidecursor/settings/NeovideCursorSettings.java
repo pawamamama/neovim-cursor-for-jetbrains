@@ -145,7 +145,17 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
 
         // 19（0.9.6 / M4）：输入平滑。老 XML 没有这一项 → 平台填字段初值 0f = 行为不变。
         target.typingSmoothness = clamp(from.typingSmoothness, 0f, 1f);
-        target.animPresetBase = clamp(from.animPresetBase, 0, 6);   // 动画预设只有 7 个（0–6）
+        // 【第二轮审查 F1，blocker】老用户的 animPresetBase 可能是 0..6（旧版有 7 个预设）。
+        // 0.9.10 精简到 3 个后，如果只把上界改成 2，老下标 3..6 会被 clamp 成 2 = 「纯平滑输入」
+        // —— 那是**关辉光**的预设。用户会莫名其妙失去辉光，下拉还自称他选的就是这个。
+        //
+        // 正确做法是**显式重映射**：只有 0/1（基础/缎带）能一对一保留，
+        // 其余（3..6 的「社区·快/平滑/柔和/高对比」）一律回落到默认预设 0（基础，辉光开）。
+        // 宁可让用户回到默认，也不能把他静默丢进一个关了辉光的预设。
+        int oldBase = from.animPresetBase;
+        target.animPresetBase = (oldBase >= 0 && oldBase <= 1)
+                ? oldBase
+                : CursorPresets.ANIM_PRESET_DEFAULT_INDEX;
 
         // 21/22（0.9.9）：自定义预设表 + 当前选中名。老 XML 没有这两项 → 平台给 null
         // → 必须落成 ""。【为什么不能留 null】面板/探针里的 String.equals 会 NPE；

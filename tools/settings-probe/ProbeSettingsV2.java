@@ -570,9 +570,11 @@ public final class ProbeSettingsV2 {
                 conf.animPresetComboForProbe().getSelectedIndex() == 0
                         && "".equals(conf.pendingForProbe().animCustomName),
                 "选中下标=" + conf.animPresetComboForProbe().getSelectedIndex());
+        // 【0.9.10】下拉 = N 个内置 + M 个自定义 + 1 个末尾占位项「自定义（未保存）」。
+        // 占位项是 ComboBox 不接受 -1 的变通（见 NeovideCursorConfigurable 的常量注释）。
         check("M5-2 干净态：下拉只有 " + CursorPresets.ANIM_PRESETS.length
-                        + " 个内置预设，没有任何自定义条目",
-                conf.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length
+                        + " 个内置预设 + 1 个占位项，没有任何自定义条目",
+                conf.animPresetComboForProbe().getItemCount() == CursorPresets.ANIM_PRESETS.length + 1
                         && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
                                 .parse(conf.pendingForProbe().customAnimPresets).isEmpty(),
                 "项数=" + conf.animPresetComboForProbe().getItemCount()
@@ -585,7 +587,7 @@ public final class ProbeSettingsV2 {
                 !derived.isEmpty()
                         && derived.startsWith(base)
                         && conf.animPresetComboForProbe().getItemCount()
-                                == CursorPresets.ANIM_PRESETS.length + 1
+                                == CursorPresets.ANIM_PRESETS.length + 1 + 1   // 内置 + 1 自定义 + 占位
                         && base.equals(conf.animPresetComboForProbe().getItemAt(0)),
                 "派生=「" + derived + "」 项数=" + conf.animPresetComboForProbe().getItemCount()
                         + " 首项=" + conf.animPresetComboForProbe().getItemAt(0));
@@ -659,7 +661,7 @@ public final class ProbeSettingsV2 {
                         && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
                                 .has(svc.getState().customAnimPresets, derived2)
                         && fresh.animPresetComboForProbe().getItemCount()
-                                == CursorPresets.ANIM_PRESETS.length + 2,
+                                == CursorPresets.ANIM_PRESETS.length + 2 + 1,   // 内置 + 2 自定义 + 占位
                 "项数=" + fresh.animPresetComboForProbe().getItemCount()
                         + " 表=" + svc.getState().customAnimPresets.length() + " 字符");
 
@@ -740,13 +742,20 @@ public final class ProbeSettingsV2 {
         // 先切回内置「原版粉色」，确认它的常量没被污染
         fresh.pickAnimPresetForProbe(0);
         boolean builtinClean = Math.abs(fresh.pendingForProbe().glowLayers - 8f) < CursorPresets.EPS;
-        // 再按名字切到那个自定义预设并删除它（同样不按下标算）
+        // 再按名字切到那个自定义预设并删除它（同样不按下标算）。
+        //
+        // 【0.9.10 语义修正】删掉之后必须【切回内置预设】，否则 apply 末尾的
+        // afterPendingEdited() 会看到「animCustomName 为空 且 当前值 != 内置常量」
+        // → 立刻派生一个同名副本，用户看到的是「删了又出现」。
+        // 真实路径 deleteCustomPreset() 里有 skipDeriveOnce 挡住这一次；
+        // 探针手写删除，所以显式做"删完切回内置"这一步（这才是符合直觉的最终状态）。
         if (fresh.pickAnimPresetByNameForProbe(derived)) {
             fresh.pendingForProbe().customAnimPresets =
                     com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
                             .remove(fresh.pendingForProbe().customAnimPresets, derived);
             fresh.pendingForProbe().animCustomName = "";
         }
+        fresh.pickAnimPresetForProbe(0);      // 删完回到内置「基础」
         fresh.apply();
         boolean deleted = !com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
                 .has(svc.getState().customAnimPresets, derived);

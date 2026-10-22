@@ -196,6 +196,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 「恢复为默认值」按钮的文案模板。 */
     private static final String RESTORE_TPL = "恢复为「%s」默认值";
 
+    /**
+     * 动画预设下拉的末尾占位项：当前值不属于任何预设时显示。
+     *
+     * <p>它不是可选项 —— {@code onAnimPresetPicked()} 的越界分支会直接 return，
+     * 不写任何字段。
+     *
+     * <p><b>为什么必须有</b>：ComboBox 不接受 {@code -1}（会保留上一次选中项），
+     * 于是「用户在基础预设上关掉辉光」时下拉仍写着「基础」，而基础声明的辉光=开 ——
+     * 显示层在撒谎（第二轮审查 O-8 实测）。
+     */
+    private static final String CUSTOM_ANIM_PLACEHOLDER = "自定义（未保存）";
+
     // ==================== 10 个滑块的刻度表（契约 §6.2，逐值冻结）====================
 
     /**
@@ -406,6 +418,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private boolean suppressDerive;
 
+    /**
+     * 只跳过下一次派生（团队审查 T3-1 的连带）。
+     *
+     * <p>用于「删除自定义预设」：删除后当前值通常不等于内置常量，
+     * 而 apply() 末尾的 afterPendingEdited() 会立刻把它派生回来 ——
+     * 用户看到的却是「删了又出现」。
+     */
+    private boolean skipDeriveOnce;
+
     // 非 DSL 绑定控件：DialogPanel 不追踪它们，必须在 reset/apply/isModified 里手工同步
     private ColorPanel tailColorPanel;
     private ColorPanel shadowColorPanel;
@@ -444,6 +465,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 只在 {@code apply()} 时下发给 {@link NeovideCaretManager}。
      */
     private boolean paintDiag;
+
+    /** 「性能诊断」复选框组件本身。T3-2：它才是勾选状态的真相源（字段会陈旧）。 */
+    private JBCheckBox paintDiagCheck;
 
     // 联动置灰用的三个实时属性（由控件自身的监听器驱动）
     private final PropertyGraph graph = new PropertyGraph();
@@ -573,7 +597,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 panel.group("总开关", true, g -> {
                     g.row("启用拖尾光标（总开关）", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        bindCheckTracked(row, () -> pending.enabled, v -> pending.enabled = v);
+                        bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
                         return kotlin.Unit.INSTANCE;
                     });
 
@@ -592,13 +616,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
 
                     g.row("隐藏原生光标（覆盖层充当光标）", row -> {
-                        bindCheckTracked(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
+                        bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
                                 .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
 
                     g.row("常驻刷新（永远按 8ms 调度）", row -> {
-                        bindCheckTracked(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
+                        bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
                                 .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
@@ -615,7 +639,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 panel.group("淡出", true, g -> {
                     g.row("辉光淡出（停止后柔和熄灭）", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        bindCheckTracked(row, () -> pending.overlayFadeOut, v -> {
+                        bindCheck(row, () -> pending.overlayFadeOut, v -> {
                             pending.overlayFadeOut = v;
                             fadeOn.set(v);
                         });
@@ -654,7 +678,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
 
                     g.row("启用辉光", row -> {
-                        bindCheckTracked(row, () -> pending.useShadow, v -> {
+                        bindCheck(row, () -> pending.useShadow, v -> {
                             pending.useShadow = v;
                             shadowOn.set(v);
                         });
@@ -753,8 +777,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 panel.collapsibleGroup("高级（诊断）", false, g -> {
                     g.row("性能诊断（跳过重绘，只跑计算）", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> paintDiag, v -> paintDiag = v)
-                                .comment(W_PAINT_DIAG, COMMENT, NO_LINK);
+                        // 【T3-2：本轮新引入的回归，medium】
+                        // 原来 getter 读字段 paintDiag，而该字段只在 apply() 里由
+                        // super.apply() 更新。本轮给 syncAllControlsFromPending() 补了
+                        // super.reset() → 它用【陈旧的字段值】覆盖控件，于是
+                        // 「勾选性能诊断 → 换预设」会静默把勾选取消（父提交 c03ea7f^ 不会）。
+                        //
+                        // 修法：让控件自己成为真相 —— getter 之后直接读组件状态，
+                        // 字段只在 apply() 那一瞬同步给 NeovideCaretManager。
+                        Cell<JBCheckBox> diagCell = bindCheck(row, () -> paintDiag, v -> paintDiag = v);
+                        paintDiagCheck = diagCell.getComponent();
+                        paintDiagCheck.addItemListener(e ->
+                                paintDiag = paintDiagCheck.isSelected());
+                        diagCell.comment(W_PAINT_DIAG, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
                     return kotlin.Unit.INSTANCE;
@@ -1188,15 +1223,37 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 selectedCustom = i;
             }
         }
+        // 末尾占位项：当前值不属于任何预设时显示它。
+        // 【为什么需要】ComboBox 不接受 -1；不加占位项就会出现「关掉辉光后下拉仍写着基础」
+        // 这种显示层撒谎（第二轮审查 O-8 实测）。点它不写任何字段（见 onAnimPresetPicked 的越界分支）。
+        names.add(CUSTOM_ANIM_PLACEHOLDER);
 
         syncingControls = true;
         try {
             replaceModel(animPresetCombo, animPresetItems, names);
             rebuildColorItems(colorPresetCombo, colorPresetItems);
-            // 当前项：自定义优先（animCustomName 非空就是它），否则内置基准
-            int sel = selectedCustom >= 0
-                    ? CursorPresets.ANIM_PRESETS.length + selectedCustom
-                    : animBaseIdx;
+            // 当前项：自定义优先（animCustomName 非空就是它），否则内置基准。
+            //
+            // 【第二轮审查 O-8/O-14/O-15：下拉不能"自称"它是某个预设】
+            // 原来无条件用 animBaseIdx。于是用户在「基础」上手动关掉辉光后，
+            // 下拉仍显示「基础」—— 而这个预设声明辉光=开。
+            // 用户看到的是「已选中基础」，实际观感已经不是它了（显示层撒谎）。
+            //
+            // 正确判据：**当前值必须真的等于该预设的全部 8 个字段**，否则视为"自定义"。
+            // 与 matchAnimPreset 同源（它也刚补上 useShadow/overlayFadeOut）。
+            int sel;
+            if (selectedCustom >= 0) {
+                sel = CursorPresets.ANIM_PRESETS.length + selectedCustom;
+            } else {
+                CursorPresets.AnimPreset matched = CursorPresetApplier.matchAnimPreset(pending);
+                // 无匹配 = 「自定义」状态。ComboBox 不接受 -1（会保留上一次选中项，
+                // 于是下拉继续"自称"某个预设 —— O-8 实测过）。
+                // 这里显式加一个末尾占位项「自定义（未保存）」，与自定义预设区分：
+                // 它不是可选项（用户点到它不会写任何字段），只是一个显示态。
+                sel = matched != null
+                        ? indexOfAnim(matched)
+                        : names.size() - 1;      // 占位项（下面会 append）
+            }
             if (sel >= 0 && sel < animPresetItems.size()) {
                 animPresetCombo.setSelectedIndex(sel);
             }
@@ -1254,6 +1311,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         if (syncingControls || suppressDerive) {
             return;
         }
+        if (skipDeriveOnce) {
+            skipDeriveOnce = false;      // 一次性：只跳过本次（删除动作触发的那一次）
+            return;
+        }
         // A. 已在自定义预设上 → 持续同步快照
         if (!pending.animCustomName.isEmpty()) {
             if (CustomPresets
@@ -1269,7 +1330,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         // B. 在内置预设上 → 只在真的偏离时才派生
         int base = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
-        if (sameAnimValues(animValuesOf(pending), animConstantsOf(base))) {
+        // 【第二轮审查 F4，medium：偏离判据必须与预设字段域一致】
+        // 原来只比 6 个动画值 → 用户在内置预设上【关掉辉光】时判为「没偏离」，
+        // 于是不派生落脚点：滑块改动会派生副本，复选框改动不会 —— 同一类操作两种行为。
+        // 现在把 useShadow / overlayFadeOut 也纳入判据（与 matchAnimPreset 同源）。
+        if (sameAnimValues(animValuesOf(pending), animConstantsOf(base))
+                && pending.useShadow == CursorPresets.ANIM_PRESETS[base].useShadow()
+                && pending.overlayFadeOut == CursorPresets.ANIM_PRESETS[base].overlayFadeOut()) {
             return;                              // 没偏离，不派生
         }
         if (!CustomPresets
@@ -1408,8 +1475,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return;                                      // 用户取消
         }
         String trimmed = name.trim();
-        if (trimmed.isEmpty()) {
-            Messages.showWarningDialog("名字不能为空。", "无法新建");
+        // 【第二轮审查 F3：非法名必须给用户可显示的提示】
+        // 之前 put 拒绝非法名时静默返回原串，面板无条件写 animCustomName，
+        // 随后被 afterPendingEdited 清空 —— 用户点了「新建」什么都不发生、
+        // 没有提示、应用按钮也不亮。nameError() 当时是死 API（零调用点）。
+        String err = CustomPresets.nameError(trimmed);
+        if (err != null) {
+            Messages.showWarningDialog(err + "。", "无法新建");
             return;
         }
         if (CustomPresets
@@ -1437,13 +1509,25 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return;
         }
         String trimmed = name.trim();
-        if (trimmed.isEmpty() || trimmed.equals(from)) {
+        if (trimmed.equals(from)) {
+            return;
+        }
+        // 【F4：非法名与重名是两种不同的失败，提示不能混用】
+        // rename 对两者都返回 null，之前一律弹「已有同名预设」——
+        // 但非法名场景其实并不重名，那个提示是在骗用户。
+        String err = CustomPresets.nameError(trimmed);
+        if (err != null) {
+            Messages.showWarningDialog(err + "。", "无法重命名");
+            return;
+        }
+        if (CustomPresets.has(pending.customAnimPresets, trimmed)) {
+            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法重命名");
             return;
         }
         String next = CustomPresets
                 .rename(pending.customAnimPresets, from, trimmed);
         if (next == null) {
-            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法重命名");
+            Messages.showWarningDialog("重命名失败，请重试。", "无法重命名");
             return;
         }
         pending.customAnimPresets = next;
@@ -1467,8 +1551,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         pending.customAnimPresets = CustomPresets
                 .remove(pending.customAnimPresets, name);
         pending.animCustomName = "";
-        // 值保持在当前参数上（用户看到的样子不变），只是不再挂在任何自定义预设下；
-        // 若这些值与内置常量不同，下一次编辑会自动派生新副本 —— 预期行为。
+
+        // 【团队审查 T3-1 的连带：删除后不能立刻复活】
+        // apply() 现在会在 super.apply() 之后调 afterPendingEdited()（那是修 T3-1 必需的）。
+        // 而 afterPendingEdited() 看到「当前值 != 内置常量 且 animCustomName 为空」就会
+        // 派生一个新副本 —— 于是用户刚删掉的预设在 apply 时又冒了出来。
+        //
+        // 修法：删除这个动作本身要让「派生」暂停一次。用一次性标志，
+        // 而不是长期 suppressDerive（否则用户接着改参数也不会派生了）。
+        skipDeriveOnce = true;
+
+        // 值保持在当前参数上（用户看到的样子不变），只是不再挂在任何自定义预设下。
+        // 下次用户【主动改参数】时会重新派生 —— 那才是预期行为。
         syncAllControlsFromPending();
     }
 
@@ -1699,6 +1793,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             syncingControls = false;
             suppressDerive = false;
         }
+
+        // A2.5：复选框 / 下拉的改动也要有落脚点（团队审查 T3-1 / T3-3）。
+        //
+        // 【为什么必须放在这里，而不是写进 bindCheck 的 setter】
+        // 复选框的 setter 只由 DialogPanel 的 applyCallbacks 调用，
+        // 而那条路径一定在 syncingControls=true 之内（就是上面这个 try 块）。
+        // 所以写在 setter 里的 "if (!syncingControls) afterPendingEdited()" 是**死代码** ——
+        // T3-1 用探针在每条 apply 回调瞬间采样，syncingControls 100% 为 true、0 次 false。
+        //
+        // 放在 super.apply() 之后：pending 已经是"控件的最新值"，
+        // 此时派生/更新快照才是对的。滑块路径不受影响（它的 ChangeListener 自己已经调过）。
+        afterPendingEdited();
 
         NeovideCursorSettings svc = serviceOrNull();
         if (svc == null) {
@@ -1936,30 +2042,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             @Override public Boolean get() { return getter.invoke(); }
             @Override public void set(Boolean v) {
                 setter.accept(v);
-            }
-        });
-    }
-
-    /**
-     * 带「改动即同步快照」的复选框绑定。
-     *
-     * <p><b>为什么不能直接用 {@link #bindCheck}</b>（团队审查的 F-06）：
-     * 7 个复选框的 setter 只写 {@code pending}，<b>不走 {@link #afterPendingEdited()}</b>。
-     * 而 {@code afterPendingEdited()} 才是「自定义预设的快照跟着当前值更新」的唯一入口。
-     *
-     * <p>实测症状：在自定义预设「A」上关掉辉光 → 应用 → 重新打开面板 → 选回「A」，
-     * 辉光<b>又开了</b>（快照里的 {@code useShadow} 还是 1，因为关辉光那次没写进快照）。
-     *
-     * <p>滑块路径没这个问题，因为它的 ChangeListener 里显式调了 {@code refreshPresetDisplay()}
-     * （内部会走 {@code afterPendingEdited}）。复选框漏了这一步。
-     */
-    private Cell<JBCheckBox> bindCheckTracked(Row row,
-                                              Function0<Boolean> getter,
-                                              final java.util.function.Consumer<Boolean> setter) {
-        return bindCheck(row, getter, v -> {
-            setter.accept(v);
-            if (!syncingControls) {
-                afterPendingEdited();
             }
         });
     }

@@ -270,8 +270,11 @@ function BuildCopy([string]$mutRoot, [string]$tag) {
     if ($LASTEXITCODE -ne 0) { throw "[$tag] 变异源码树编译失败（变异不合法，结论作废）" }
 
     $vprobes = @(Get-ChildItem -LiteralPath $toolDir -Filter 'V*.java' | ForEach-Object { $_.FullName })
-    & javac --release 21 -nowarn -encoding UTF-8 -classpath "$cls;$cp" -d $pb $vprobes 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "[$tag] 探针编译失败" }
+    $probeOut = & javac --release 21 -nowarn -encoding UTF-8 -classpath "$cls;$cp" -d $pb $vprobes 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ('  [编译输出] ' + ($probeOut -join [Environment]::NewLine))
+        throw "[$tag] 探针编译失败"
+    }
     return @{ Classes = $cls; Probe = $pb }
 }
 

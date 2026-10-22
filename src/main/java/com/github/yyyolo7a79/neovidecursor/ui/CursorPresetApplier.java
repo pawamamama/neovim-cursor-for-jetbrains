@@ -16,7 +16,7 @@ import com.intellij.openapi.diagnostic.Logger;
  * 面板 apply 是<b>用户可能只改了 1 个字段</b>。两者语义不同，不能合并成一个方法。
  *
  * <p><b>正交性是硬判据</b>（方案 §4 与契约 §5.3）：
- * {@link #applyAnimPreset} 只碰 6 个动画字段，<b>绝不</b>碰 {@code tailColor} / {@code shadowColor}；
+ * {@link #applyAnimPreset} 只碰 8 个预设字段，<b>绝不</b>碰 {@code tailColor} / {@code shadowColor}；
  * {@link #applyColorPreset} 只碰 2 个 HEX，<b>绝不</b>碰任何动画字段。
  */
 public final class CursorPresetApplier {
@@ -53,7 +53,7 @@ public final class CursorPresetApplier {
 
         // 写【全部】预设字段（含辉光/淡出开关）。
         //
-        // 【为什么不能只写 6 个动画字段（团队审查 F-05 / 用户报的 B3）】
+        // 【为什么不能只写 8 个预设字段（团队审查 F-05 / 用户报的 B3）】
         // 用户在某预设下关掉辉光 → useShadow=false 被持久化；之后从 Tools 切到
         // 任何别的预设，辉光【都不会回来】（用户原话：「切换预设不能让辉光回来」
         // 「缎带没有扩散了，就是持久化了」）。
@@ -125,12 +125,23 @@ public final class CursorPresetApplier {
             return null;
         }
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
+            // 【第二轮审查 F3，high：判据必须与写入字段域一致】
+            // applyAnimPreset 现在写 8 个字段（6 动画 + useShadow + overlayFadeOut），
+            // 但 match 只比 6 个 → 三个已实测的撒谎：
+            //   ① Tools 勾选态：用户关了辉光，preset 仍被 match 上 → 菜单显示「已选中」，
+            //      但实际观感已经不是它了；
+            //   ② 点已勾选项的「取消」语义被吃掉（isSelected 为 true 时平台回调 false，
+            //      我们忽略它，用户以为取消成功）；
+            //   ③ 点「缎带」时如果当时辉光是关的，会静默把辉光打开而下拉没变化。
+            // （③ 现在是期望行为 —— 预设就该带辉光，但判据必须能反映它。）
             if (Math.abs(s.animationLength - p.animationLength()) < CursorPresets.EPS
                     && Math.abs(s.shortAnimationLength - p.shortAnimationLength()) < CursorPresets.EPS
                     && Math.abs(s.trailSize - p.trailSize()) < CursorPresets.EPS
                     && s.glowLayers == p.glowLayers()
                     && Math.abs(s.shadowBlurFactor - p.shadowBlurFactor()) < CursorPresets.EPS
-                    && Math.abs(s.glowOpacity - p.glowOpacity()) < CursorPresets.EPS) {
+                    && Math.abs(s.glowOpacity - p.glowOpacity()) < CursorPresets.EPS
+                    && s.useShadow == p.useShadow()
+                    && s.overlayFadeOut == p.overlayFadeOut()) {
                 return p;
             }
         }

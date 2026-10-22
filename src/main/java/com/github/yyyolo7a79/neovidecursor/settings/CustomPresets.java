@@ -106,17 +106,33 @@ public final class CustomPresets {
         }
         // 兼容新旧两套分隔符：旧值里可能是 U+0002 / U+0001（XML 非法，见类注释）。
         // 换分隔符不能让已经落盘的用户数据报废。
-        char entrySep = all.indexOf(ENTRY_SEP) >= 0 ? ENTRY_SEP
-                : (all.indexOf(LEGACY_ENTRY_SEP) >= 0 ? LEGACY_ENTRY_SEP : ENTRY_SEP);
-        char nameSep = all.indexOf(NAME_SEP) >= 0 ? NAME_SEP
-                : (all.indexOf(LEGACY_NAME_SEP) >= 0 ? LEGACY_NAME_SEP : NAME_SEP);
-
+        //
+        // 【不能用「整串全局判断用哪套」】—— 第二轮审查 S-3/S-4 实测：
+        // 一条数据里可能同时含新旧分隔符（用户 A 用旧版存过、又用新版存过），
+        // 全局判定会让另一半被吞掉（实测 2 条只读出 1 条）。
+        // 正确做法：【逐条】切分，两种条目分隔符都认。
         List<Entry> out = new ArrayList<>();
-        for (String raw : all.split(java.util.regex.Pattern.quote(String.valueOf(entrySep)))) {
+        for (String raw : splitOnAny(all, ENTRY_SEP, LEGACY_ENTRY_SEP)) {
             if (raw == null || raw.isEmpty()) {
                 continue;
             }
-            int sep = raw.indexOf(nameSep);
+            // 逐条找名称分隔符。
+            //
+            // 【第二轮审查 F2：迁移边界，medium】
+            // 0.9.9 首版（没有 sanitizeName 的那版）落的数据，名字里可能天然含 U+241F
+            // （用户从网页粘贴的符号）。如果无脑「先找新分隔符」，会把
+            //   A<U+241F>B<U+0001>a=1     （名字"A␟B"，旧分隔符）
+            // 在中间的 U+241F 处切开 → 名字变 "A"、快照变 "B<U+0001>a=1" → 一个字段都还原不出。
+            //
+            // 正解：**旧分隔符存在时优先按旧的切**（旧格式里 U+0001 才是权威名分隔符，
+            // U+241F 只是一段普通文本）；只有不含旧分隔符时才用新的。
+            int sep;
+            int legacyAt = raw.indexOf(LEGACY_NAME_SEP);
+            if (legacyAt > 0) {
+                sep = legacyAt;
+            } else {
+                sep = raw.indexOf(NAME_SEP);
+            }
             if (sep <= 0) {
                 continue;                       // 缺分隔符 / 名称为空 → 坏条目，忽略
             }
@@ -144,9 +160,23 @@ public final class CustomPresets {
             if (sb.length() > 0) {
                 sb.append(ENTRY_SEP);
             }
-            // 名称里若混进了任一分隔符（粘贴 / 手改 XML 都可能），必须剔掉 ——
-            // 否则一条坏名字会把整张表切碎（和 F2 是同一类破坏）。
-            sb.append(sanitizeName(e.name)).append(NAME_SEP).append(e.snapshot);
+            // 【不要在这里净化名称】第二轮审查 S-5/S-11b 实测：
+            // format 静默改写名字会导致「内存名 ≠ 落盘名」——
+            // put("X") 之后 has("X") 变 false，用户点了新建却发现下拉里叫「X 」，
+            // 按原名字再也取不回来（前导空格被 trim 掉）。
+            //
+            // 正确做法：**入口处拒绝**非法名（见 put/rename），format 只做序列化。
+            // 这里的防御只处理「理论上不该出现」的残留分隔符：直接跳过该条目，
+            // 而不是悄悄改名 —— 静默改数据比丢一条更糟。
+            // 入口已经用 isValidName 拦过，正常路径不会走到这里。
+            // 但万一某个调用方漏了校验，宁可【跳过这一条】也不能让它切碎整张表；
+            // 同时不静默 —— 留一行日志，便于日后定位（第二轮审查 F5）。
+            if (!isValidName(e.name)) {
+                java.util.logging.Logger.getLogger("neovide-cursor")
+                        .warning("跳过非法预设名（含 XML 非法码点或分隔符），长度=" + e.name.length());
+                continue;
+            }
+            sb.append(e.name).append(NAME_SEP).append(e.snapshot);
         }
         return sb.toString();
     }
@@ -170,12 +200,95 @@ public final class CustomPresets {
     }
 
     /**
+     * 名字是否可用作预设名。
+     *
+     * <p><b>为什么要「入口拒绝」而不是「出口净化」（第二轮审查 S-5/S-11b 的教训）</b>：
+     * 最初我在 {@link #format} 里把非法字符替换成空格并 trim()。
+     * 实测后果是<b>内存名 ≠ 落盘名</b>：
+     * <pre>
+     *   put("X")  之后 has("X") == false     （落盘成了「X 」）
+     *   put(" A") 之后 get(" A") == null     （前导空格被 trim 掉）
+     * </pre>
+     * 用户点了「新建」，下拉里却出现一个改过名的预设，按原名字再也取不回来。
+     * <b>静默改数据比明确报错更糟</b>，所以改为入口校验。
+     *
+     * <p>不接受的只有两类：空名（含全空白）、含分隔符（会切碎存储格式）。
+     * 其余一切照收 —— 中文、空格、分号、等号、emoji 都可以。
+     */
+    public static boolean isValidName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return false;
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            // ① 四个分隔符（会切碎存储格式）
+            if (c == NAME_SEP || c == ENTRY_SEP
+                    || c == LEGACY_NAME_SEP || c == LEGACY_ENTRY_SEP) {
+                return false;
+            }
+            // ② XML 1.0 非法码点（会在落盘时被平台静默丢弃，见 isXmlLegal）
+            if (!isXmlLegal(c)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 这个码点能否安全地写进 XML 属性值。
+     *
+     * <p><b>为什么必须逐字符查，而不是只管那 4 个分隔符</b>
+     * （第二轮审查 F1，high）：F2 的根因是「用了 XML 非法字符做分隔符」，
+     * 但那只修了分隔符本身。用户还可能把任意控制字符<b>粘进名字里</b>：
+     * <pre>
+     *   名字 = "A\u000BB"      (垂直制表符)
+     *   落盘 → "AB"            (平台静默吞掉 U+000B)
+     *   回读 → animCustomName 悬空 → 预设在下拉里再也选不中
+     * </pre>
+     * VSepDiag 实测丢在 {@code XmlSerializer.serialize()} 这一层，
+     * 与当年 U+0001 完全同源。
+     *
+     * <p>合法范围按 XML 1.0 规范：
+     * {@code 0x09 | 0x0A | 0x0D | 0x20-0xD7FF | 0xE000-0xFFFD | 0x10000-0x10FFFF}
+     * （Java 的 char 是 UTF-16 单元，代理对由两个 char 组成，
+     * 但 {@code Character.isSurrogate} 的**孤立**代理是非法的，必须单独挡。）
+     */
+    static boolean isXmlLegal(char c) {
+        if (c == 0x09 || c == 0x0A || c == 0x0D) {
+            return true;                       // 制表 / 换行 / 回车：XML 允许
+        }
+        if (c < 0x20) {
+            return false;                      // 其余 C0 控制符：非法
+        }
+        if (c >= 0x20 && c <= 0xD7FF) {
+            return true;
+        }
+        if (c >= 0xE000 && c <= 0xFFFD) {
+            return true;                       // 含 U+FFFE/U+FFFF 之外的全部
+        }
+        // 0xD800-0xDFFF 是代理区：孤立代理非法；成对代理由 String 层面处理
+        return false;
+    }
+
+    /** 名字不可用的原因（给 UI 提示用）；合法时返回 {@code null}。 */
+    public static String nameError(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            return "名字不能为空";
+        }
+        if (!isValidName(name)) {
+            return "名字里不能包含分隔控制符";
+        }
+        return null;
+    }
+
+    /**
      * 新增<b>或替换</b>一个预设（按名字）。
      *
      * <p>重名时原位替换、不改变顺序 —— 这样「改了参数再保存」不会让下拉里的项跳位置。
      */
     public static String put(String all, String name, String snapshot) {
-        if (name == null || name.isEmpty() || snapshot == null || snapshot.isEmpty()) {
+        // 入口校验：非法名直接拒绝（不静默改名，见 isValidName 的注释）
+        if (!isValidName(name) || snapshot == null || snapshot.isEmpty()) {
             return all == null ? "" : all;
         }
         List<Entry> list = new ArrayList<>(parse(all));
@@ -197,6 +310,10 @@ public final class CustomPresets {
     public static String rename(String all, String from, String to) {
         if (from == null || to == null || from.isEmpty() || to.isEmpty() || from.equals(to)) {
             return all == null ? "" : all;
+        }
+        // 入口校验：非法目标名直接失败（返回 null = 调用方提示用户）
+        if (!isValidName(to)) {
+            return null;
         }
         if (has(all, to)) {
             return null;                        // 目标名已被占用 → 失败
@@ -253,30 +370,24 @@ public final class CustomPresets {
         return parse(all).size() < MAX_PRESETS;
     }
 
-    /**
-     * 把名称里混进来的分隔符剔掉。
-     *
-     * <p>为什么需要：用户可能从网页/聊天粘贴一个名字，或者手改 XML。
-     * 只要名字里出现 U+241F / U+241E / 旧的 U+0001 / U+0002，
-     * 解析时就会把它当成条目边界，<b>整张表被切碎</b>。
-     *
-     * <p>换成空格而不是直接删除：让名字仍然可读（「A[B」→「A B」而不是「AB」）。
-     */
-    static String sanitizeName(String name) {
-        if (name == null) {
-            return "";
-        }
-        StringBuilder sb = new StringBuilder(name.length());
-        for (int i = 0; i < name.length(); i++) {
-            char c = name.charAt(i);
-            if (c == NAME_SEP || c == ENTRY_SEP
-                    || c == LEGACY_NAME_SEP || c == LEGACY_ENTRY_SEP) {
-                sb.append(' ');
-            } else {
-                sb.append(c);
+    /** 按任意一个分隔符切分（两种都认）。 */
+    private static List<String> splitOnAny(String all, char... seps) {
+        List<String> out = new ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        outer:
+        for (int i = 0; i < all.length(); i++) {
+            char c = all.charAt(i);
+            for (char s : seps) {
+                if (c == s) {
+                    out.add(cur.toString());
+                    cur.setLength(0);
+                    continue outer;
+                }
             }
+            cur.append(c);
         }
-        return sb.toString().trim();
+        out.add(cur.toString());
+        return out;
     }
 
     private static Entry find(List<Entry> list, String name) {
