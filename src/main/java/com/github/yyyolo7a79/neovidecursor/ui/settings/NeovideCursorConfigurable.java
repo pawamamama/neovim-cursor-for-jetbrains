@@ -288,14 +288,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private static final int SHORT_MAX = 25;
     private static final int SHORT_STEP = 1;
 
-    /**
-     * 前缘时长滑块的上限（刻度，×100 = 秒）。
-     *
-     * <p>比 {@code SHORT_MAX}（25 = 0.25s）宽一档：前缘可以单独拉长，
-     * 而拖尾保持短促 —— 这正是 C 方案的收益所在。
-     */
-    private static final int LEADING_MAX_TICKS = 30;
-
     /** 10 个滑块的规格表。<b>顺序 = 面板从上到下的顺序</b>（探针按此下标取滑块）。 */
     private static final SliderSpec[] SPECS = {
             // 1. 淡出前保持时长：刻度 = 毫秒
@@ -378,19 +370,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     (s, v) -> s.typingSmoothness = v / 100f,
                     (c, v) -> v + " %",
                     v -> v + "%"),
-
-            // 12. 前缘时长下限（C 方案）：0 = 不启用。
-            //
-            // 【它解决什么】短跳分支里前缘帧数与后缘时长原本共用一个
-            // shortAnimationLength，要平滑就得拉长拖尾。本项只抬前缘（rank 2/3），
-            // 后缘（rank 0/1）完全不动 —— 于是「短促拖尾 + 平滑前缘」可以同时成立。
-            //
-            // 0 的语义是"关闭"，此时四角时长与历史版本逐位相同（parity 保证）。
-            new SliderSpec("leadingAnimationLength", 0, LEADING_MAX_TICKS, 1, " s",
-                    s -> Math.round(s.leadingAnimationLength * 100f),
-                    (s, v) -> s.leadingAnimationLength = v / 100f,
-                    (c, v) -> v == 0 ? "关" : fmt2(v / 100f) + " s",
-                    v -> v == 0 ? "关" : fmt2(v / 100f)),
     };
 
     // ==================== 预览副本 + 基线 + 抑制标志 ====================
