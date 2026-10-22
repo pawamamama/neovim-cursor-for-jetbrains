@@ -9,7 +9,6 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
 import java.awt.RenderingHints;
 import java.awt.geom.Path2D;
 import java.util.ArrayList;
@@ -40,9 +39,24 @@ public class CaretTrailPanel extends JComponent {
 
     // ===== 弹簧模式数据 =====
 
-    /** 四个角点的当前坐标（contentComponent 坐标系） */
-    private final int[] polyX = new int[4];
-    private final int[] polyY = new int[4];
+    /**
+     * 四个角点的当前坐标（contentComponent 坐标系，<b>保留小数</b>）。
+     *
+     * <p><b>为什么必须是 double（0.9.9 抖动修复）</b>：
+     * 原先是 {@code int[]} + {@code Math.round}，把弹簧算出的亚像素坐标四舍五入。
+     * 光标原点对齐字符格（整数），而弹簧四角偏移是小数 —— 两者相加后小数部分每帧都变，
+     * 于是 {@code Math.round} 让每个角点<b>每帧在 N 与 N+1 之间反复横跳</b>，
+     * 四个角各自独立跳，视觉上就是「形状在抖」。
+     *
+     * <p>这与辉光无关：用户实测关掉辉光顶点照样跳。
+     * VSCode 上游的 {@code currentPosition} 全程 float 直接喂 canvas，
+     * canvas 支持 sub-pixel 因此平滑；我们改成 double + Path2D 才能对齐。
+     */
+    private final double[] polyX = new double[4];
+    private final double[] polyY = new double[4];
+
+    /** 四边形路径（复用，避免每帧分配）。用 Path2D 而非 Polygon 以保留亚像素精度。 */
+    private final Path2D.Double quadPath = new Path2D.Double();
 
     /** 是否已有可绘制的四边形 */
     private boolean hasQuad = false;
@@ -152,14 +166,15 @@ public class CaretTrailPanel extends JComponent {
                               double x1, double y1,
                               double x2, double y2,
                               double x3, double y3) {
-        polyX[0] = (int) Math.round(x0);
-        polyY[0] = (int) Math.round(y0);
-        polyX[1] = (int) Math.round(x1);
-        polyY[1] = (int) Math.round(y1);
-        polyX[2] = (int) Math.round(x2);
-        polyY[2] = (int) Math.round(y2);
-        polyX[3] = (int) Math.round(x3);
-        polyY[3] = (int) Math.round(y3);
+        // 直接存 double，不做任何取整 —— 取整就是抖动的来源（见字段注释）
+        polyX[0] = x0;
+        polyY[0] = y0;
+        polyX[1] = x1;
+        polyY[1] = y1;
+        polyX[2] = x2;
+        polyY[2] = y2;
+        polyX[3] = x3;
+        polyY[3] = y3;
         hasQuad = true;
         hasGhosts = false;
     }
@@ -180,6 +195,37 @@ public class CaretTrailPanel extends JComponent {
      */
     public void setGlowStrength(float strength) {
         this.glowStrength = strength < 0f ? 0f : (strength > 1f ? 1f : strength);
+    }
+
+    /**
+     * 探针：四个角点的当前坐标（double）。
+     *
+     * <p>返回的正是绘制时使用的 {@code polyX/polyY}，不是副本计算 ——
+     * 探针要断言的就是「生产路径有没有保留小数」。
+     *
+     * @return 长度 8 的数组：x0,y0,x1,y1,x2,y2,x3,y3
+     */
+    public double[] cornersForProbe() {
+        return new double[]{
+                polyX[0], polyY[0], polyX[1], polyY[1],
+                polyX[2], polyY[2], polyX[3], polyY[3]
+        };
+    }
+
+    /**
+     * 探针：按当前四角算一遍外扩方向向量。
+     *
+     * <p>调用的是生产用的 {@link #computeOffsetDirections}，
+     * 用于确认「容器从 Polygon 改成 double[] 之后几何算式没有退化」。
+     *
+     * @return 长度 8：dirX0..3, dirY0..3
+     */
+    public double[] offsetDirectionsForProbe() {
+        computeOffsetDirections(polyX, polyY, dirX, dirY);
+        return new double[]{
+                dirX[0], dirX[1], dirX[2], dirX[3],
+                dirY[0], dirY[1], dirY[2], dirY[3]
+        };
     }
 
     /** 清除全部绘制数据（光标不可见 / 模式切换时调用） */
@@ -225,13 +271,30 @@ public class CaretTrailPanel extends JComponent {
     // ==================== 弹簧模式绘制 ====================
 
     private void paintQuad(Graphics2D g2) {
-        Polygon polygon = new Polygon(polyX, polyY, 4);
+        Path2D.Double path = buildQuadPath();
 
-        drawQuadGlow(g2, polygon);
+        drawQuadGlow(g2, path);
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
         g2.setColor(fillColor);
-        g2.fillPolygon(polygon);
+        g2.fill(path);
+    }
+
+    /**
+     * 用四角的 double 坐标构造路径。
+     *
+     * <p>用 {@link Path2D.Double} 而不是 {@code Polygon}：
+     * Polygon 的构造函数只吃 {@code int[]}，会把亚像素坐标截断，导致顶点每帧跳 1px（抖动）。
+     * Path2D 保留 double，配合抗锯齿即可在亚像素级平滑移动 —— 与 canvas 行为一致。
+     */
+    private Path2D.Double buildQuadPath() {
+        quadPath.reset();
+        quadPath.moveTo(polyX[0], polyY[0]);
+        quadPath.lineTo(polyX[1], polyY[1]);
+        quadPath.lineTo(polyX[2], polyY[2]);
+        quadPath.lineTo(polyX[3], polyY[3]);
+        quadPath.closePath();
+        return quadPath;
     }
 
     /**
@@ -261,7 +324,7 @@ public class CaretTrailPanel extends JComponent {
      * IntelliJ 光标极窄（2×32），于是最亮的那层只向外扩不到 1px 且随即被
      * 不透明主体盖住；而真正扩得够远的层，alpha 已衰减到 2% 以下。
      */
-    private void drawQuadGlow(Graphics2D g2, Polygon polygon) {
+    private void drawQuadGlow(Graphics2D g2, Path2D.Double ignoredPath) {
         if (!config.useShadow || config.glowLayers <= 0 || glowWidth <= 0.5f) {
             return;
         }
@@ -290,7 +353,7 @@ public class CaretTrailPanel extends JComponent {
                 glowColor.getBlue(), argb));
 
         // 角点的外扩方向：沿该方向平移 radius，即"四边形向外偏移 radius"
-        computeOffsetDirections(polygon, dirX, dirY);
+        computeOffsetDirections(polyX, polyY, dirX, dirY);
 
         // 从最外层向内绘制，半径线性分布
         for (int i = layers; i >= 1; i--) {
@@ -298,8 +361,8 @@ public class CaretTrailPanel extends JComponent {
 
             glowPath.reset();
             for (int j = 0; j < 4; j++) {
-                double x = polygon.xpoints[j] + dirX[j] * radius;
-                double y = polygon.ypoints[j] + dirY[j] * radius;
+                double x = polyX[j] + dirX[j] * radius;
+                double y = polyY[j] + dirY[j] * radius;
                 if (j == 0) {
                     glowPath.moveTo(x, y);
                 } else {
@@ -323,7 +386,7 @@ public class CaretTrailPanel extends JComponent {
      * 方向沿 {@code n1 + n2}，而 {@code 1 + n1·n2 = 2cos²(θ/2)}，代入即得。
      * 两边正交时（矩形）分母为 1，退化成 {@code n1 + n2} —— 正是对角线方向。
      */
-    private static void computeOffsetDirections(Polygon polygon,
+    private static void computeOffsetDirections(double[] px, double[] py,
                                                 double[] outDirX, double[] outDirY) {
         double[] nx = new double[4];
         double[] ny = new double[4];
@@ -331,8 +394,8 @@ public class CaretTrailPanel extends JComponent {
         double cx = 0;
         double cy = 0;
         for (int j = 0; j < 4; j++) {
-            cx += polygon.xpoints[j];
-            cy += polygon.ypoints[j];
+            cx += px[j];
+            cy += py[j];
         }
         cx /= 4.0;
         cy /= 4.0;
@@ -340,8 +403,8 @@ public class CaretTrailPanel extends JComponent {
         // 逐边求单位外法线
         for (int j = 0; j < 4; j++) {
             int next = (j + 1) % 4;
-            double ex = polygon.xpoints[next] - polygon.xpoints[j];
-            double ey = polygon.ypoints[next] - polygon.ypoints[j];
+            double ex = px[next] - px[j];
+            double ey = py[next] - py[j];
             double len = Math.hypot(ex, ey);
             if (len < 1e-6) {
                 // 退化边：留零向量，该角点不参与外扩
@@ -352,8 +415,8 @@ public class CaretTrailPanel extends JComponent {
             double vy = ex / len;
 
             // 两个候选方向里取远离中心的那一个
-            double mx = (polygon.xpoints[j] + polygon.xpoints[next]) / 2.0 - cx;
-            double my = (polygon.ypoints[j] + polygon.ypoints[next]) / 2.0 - cy;
+            double mx = (px[j] + px[next]) / 2.0 - cx;
+            double my = (py[j] + py[next]) / 2.0 - cy;
             if (vx * mx + vy * my < 0) {
                 vx = -vx;
                 vy = -vy;

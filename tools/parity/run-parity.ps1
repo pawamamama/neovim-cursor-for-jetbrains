@@ -78,19 +78,59 @@ Run-Tree $newSrc 'new'
 
 # ---------- 3. 逐字节比对 ----------
 Step 'parity 比对（git diff --no-index --exit-code）'
+
+# Declarative exemption: only the SIGNATURE LINE may differ.
+#
+# 0.9.9 subpixel fix changed the vertex container Polygon(int[]) -> double[]:
+#   computeOffsetDirections(Polygon, dx, dy) -> (double[] px, double[] py, dx, dy)
+# So the harness emits a different first line (### signature=Polygon -> double[]).
+#
+# This is NOT a geometry change: every dx/dy raw bit must stay identical.
+# We allow exactly one changed +/- pair, and it must match the regex below.
+# Any other difference is still FAIL.
+# (ASCII only in comments: non-ASCII parentheses broke the PowerShell parser.)
+$allowedSignatureDiff = @{
+    'GeometryParity' = '^### signature=(Polygon|double\[\])$'
+}
 $fail = 0
 foreach ($main in 'PhysicsParity', 'GeometryParity', 'TrailParityTest') {
     $a = Join-Path $Work "base-$main.txt"
     $b = Join-Path $Work "new-$main.txt"
-    & git diff --no-index --exit-code --no-color $a $b
-    if ($LASTEXITCODE -eq 0) {
-        "{0,-16} PARITY OK   （diff 为空）" -f $main
+    $diffLines = @(& git diff --no-index --unified=0 --no-color $a $b)
+    $code = $LASTEXITCODE
+
+    if ($code -eq 0) {
+        "{0,-16} PARITY OK   (diff empty)" -f $main
+        continue
+    }
+
+    # Collect real content lines (skip diff headers / hunk markers)
+    $changed = @($diffLines | Where-Object {
+        ($_ -match '^[+-]') -and ($_ -notmatch '^(\+\+\+|---)')
+    })
+    $pattern = $allowedSignatureDiff[$main]
+    $allAllowed = $false
+    if ($pattern -and $changed.Count -eq 2) {
+        $oldLine = $changed[0] -replace '^-', ''
+        $newLine = $changed[1] -replace '^\+', ''
+        $allAllowed = ($oldLine -match $pattern) -and ($newLine -match $pattern)
+    }
+
+    if ($allAllowed) {
+        "{0,-16} PARITY OK   (signature line only; geometry bits identical)" -f $main
+        "{0,-16}   base: {1}" -f '', $changed[0]
+        "{0,-16}   new : {1}" -f '', $changed[1]
     } else {
-        "{0,-16} PARITY FAIL （diff 非空）" -f $main
+        "{0,-16} PARITY FAIL (diff not empty)" -f $main
+        $diffLines | ForEach-Object { "    $_" }
         $fail++
     }
 }
-
+Write-Host ''
+Step '输出去向'
+Get-ChildItem $Work -Filter '*.txt' | Select-Object -ExpandProperty FullName
+if ($fail -gt 0) { throw "parity 失败 $fail 项" }
+Step 'ALL PARITY OK'
 Write-Host ''
 Step '输出去向'
 Get-ChildItem $Work -Filter '*.txt' | Select-Object -ExpandProperty FullName

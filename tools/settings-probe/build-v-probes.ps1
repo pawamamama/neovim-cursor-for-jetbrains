@@ -69,7 +69,7 @@ Step "javac V 探针（$($vprobes.Count) 个）"
 if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
-$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VOrder')
+$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VOrder')
 # VOrder 是「已知偏差上报器」：它的 O-1 断言的是契约 V13 的机械判据，
 # 实测不成立（见 VERIFY-SETTINGS-V2.md 的 F-2），但同一探针里的行为判据成立。
 # 它不参与本脚本的通过门（否则每次跑都会因一条已知文档缺陷而 exit 1），

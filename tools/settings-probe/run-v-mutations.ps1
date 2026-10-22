@@ -46,6 +46,7 @@ $jvm = @(
 $confFile = 'com\github\yyyolo7a79\neovidecursor\ui\settings\NeovideCursorConfigurable.java'
 $mgrFile = 'com\github\yyyolo7a79\neovidecursor\ui\NeovideCaretManager.java'
 $fieldFile = 'com\github\yyyolo7a79\neovidecursor\settings\SettingsField.java'
+$panelFile = 'com\github\yyyolo7a79\neovidecursor\ui\CaretTrailPanel.java'
 
 # ------------------------------------------------------------------ 变异定义
 # 每项：Name / File / 说明 / 变换（对副本文件文本做函数式改写）/ 期望变红的探针 / 期望红掉的断言前缀
@@ -217,6 +218,41 @@ $mutations = @(
         }
         Probes = @('VDefects')
         Expect = @('V11-3c')
+    },
+    @{
+        Name = 'MUT-I1'
+        File = $panelFile
+        What = '回滚亚像素修法（顶点坐标改回 Math.round = 抖动形态）'
+        Transform = {
+            param($text)
+            # 【0.9.9 抖动修复的可证伪性】
+            # 修复前形态 = updateCorners 里把 double 四舍五入回整数。
+            # 这正是用户实测「关掉辉光仍抖」的根因：顶点每帧在 N / N+1 之间横跳。
+            $old = @'
+        polyX[0] = x0;
+        polyY[0] = y0;
+        polyX[1] = x1;
+        polyY[1] = y1;
+        polyX[2] = x2;
+        polyY[2] = y2;
+        polyX[3] = x3;
+        polyY[3] = y3;
+'@
+            $new = @'
+        polyX[0] = Math.round(x0);
+        polyY[0] = Math.round(y0);
+        polyX[1] = Math.round(x1);
+        polyY[1] = Math.round(y1);
+        polyX[2] = Math.round(x2);
+        polyY[2] = Math.round(y2);
+        polyX[3] = Math.round(x3);
+        polyY[3] = Math.round(y3);
+'@
+            if (-not $text.Contains($old)) { throw 'MUT-I1：找不到 updateCorners 的直存赋值（源码已变，请同步本脚本）' }
+            return $text.Replace($old, $new)
+        }
+        Probes = @('VSubpixel')
+        Expect = @('P-1a', 'P-2')
     }
 )
 
