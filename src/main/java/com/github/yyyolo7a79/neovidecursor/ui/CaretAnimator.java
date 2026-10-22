@@ -742,13 +742,35 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 现在：不可见 → 清掉残留绘制、登记低频、直接返回。
         // 不做坐标换算、不做物理、不提交重绘。
         if (!isShowingCached()) {
-            if (hadVisibleContent) {
-                // 从可见变为不可见：清一次残留，避免切回来时看到陈旧拖尾
-                panel.clearCorners();
-                hadVisibleContent = false;
-            }
+            // 【冻结非活动编辑器，而不是清空】
+            //
+            // 两种做法的区别：
+            //   · clearCorners() → 切回时那一瞬间没有光标（"闪一下"）
+            //   · 冻结          → 保留最后画出的形状，切回来立刻就有画面
+            //
+            // 用户明确要求："冻结其他，切换回来仍能用，但另一个不该绘制"
+            // 所以这里【什么都不做】：不推进物理、不提交重绘，
+            // 面板上的最后一帧原样留着。EDS 一帧都不再投递（currentDelayMs=120ms）。
+            //
+            // 注意：不能在这里调用 panel.repaint() —— 那是"主动画一帧"，
+            // 违背冻结语义。之前 clearCorners() 也是同理，已移除。
             currentDelayMs = HIDDEN_DELAY_MS;
             return;
+        }
+        if (!hadVisibleContent) {
+            // 【从冻结恢复：必须强制重算一次坐标】
+            //
+            // 冻结期间光标可能在别处移动过（比如用户在另一个编辑器里编辑、
+            // 或代码补全改动了文本），而我们的 lastVisualLine/Column 还停在上次。
+            // 不置 forceResync 的话，若视觉位置"恰好"相同（例如都停在第 0 列），
+            // 快速路径会误判"没动"，把拖尾画在旧位置 —— 正是"悬浮光标"缺陷。
+            //
+            // 同时把 lastNanos 归位：冻结期间已过去很久，不归位的话
+            // tick() 开头的 rawDt 会是整个冻结时长，触发 recovery 分支。
+            forceResync = true;
+            lastNanos = now;
+            smoothedIntervalMs = ACTIVE_DELAY_MS;
+            skipNextIntervalMeasurement = true;
         }
         hadVisibleContent = true;
 
