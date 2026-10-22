@@ -358,10 +358,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
     // ==================== 预览副本 + 基线 + 抑制标志 ====================
 
+    /** 编辑会话：唯一能改变 {@code pending} / {@code baseline} 指向的地方（Phase 1）。 */
+    private final EditSession session = new EditSession();
+
     /**
-     * 面板正在编辑的副本。<b>绝不在 apply() 之前写进 service</b>——那是「OK 生效」的语义边界。
+     * 面板正在编辑的副本（{@link EditSession} 的只读镜像）。
+     *
+     * <p><b>绝不在 {@code apply()} 之前写进 service</b>——那是「OK 生效」的语义边界。
+     * <b>不允许在本类里给它赋值</b>：唯一赋值点是 {@link #syncSessionViews()}，
+     * 而它只由 {@link EditSession} 的操作触发（RF-4 判据）。
      */
-    private NeovideCursorSettings.State pending = new NeovideCursorSettings.State();
+    private NeovideCursorSettings.State pending;
 
     /**
      * 面板打开那一刻的 state 快照（契约 §3.3 / §3.4）。<b>只作比较基准，不是真相源。</b>
@@ -374,7 +381,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
      * <p><b>时效</b>：{@code createPanel()} / {@code reset()} 时与 pending 同时拍快照，
      * {@code apply()} 成功后前移为 {@code deepCopy(target)}，{@code disposeUIResources()} 置 null。
      */
-    private NeovideCursorSettings.State baseline = new NeovideCursorSettings.State();
+    private NeovideCursorSettings.State baseline;
 
     /**
      * 「正在由代码改控件」抑制标志（契约 §6.4）。
@@ -484,8 +491,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         // 会在打开设置页时凭空多出一个副本，并让 isModified() 恒为真。
         suppressDerive = true;
         try {
-            pending = deepCopy(currentState());
-            baseline = deepCopy(currentState());     // 契约 §3.4：平台可能只调 createPanel 不调 reset
+            // 契约 §3.4：平台可能只调 createPanel 不调 reset —— 所以这里也要开一次会话。
+            // 【为什么不能写成两行 deepCopy】两者必须同源；写成一行由 EditSession 保证。
+            session.openAt(currentState());
+            syncSessionViews();
             graphReset(pending);
             bindings.clear();
             animPresetItems.clear();
@@ -1540,9 +1549,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
      */
     @Override
     public void reset() {
-        NeovideCursorSettings.State cur = deepCopy(currentState());
-        pending = cur;
-        baseline = deepCopy(cur);
+        // 打开/重开会话：pending 与 baseline 同源取当前 state（EditSession 保证同源）
+        session.openAt(currentState());
+        syncSessionViews();
         graphReset(pending);
 
         // 程序化回灌期间抑制监听器：否则吸附会把「精确值」改写成「刻度值」（B-2 变体）
@@ -1651,8 +1660,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             NeovideCaretManager.setPaintDisabled(paintDiag);
         }
 
-        // A6：baseline 前移 —— 否则连续两次 apply 时第二次会把第一次的值误判为非脏
-        baseline = deepCopy(target);
+        // A6+A7：pending 与 baseline 【同源前移】到 target。
+        //
+        // 【为什么合成一次调用】原来这里是两条独立语句：
+        //     baseline = deepCopy(target);
+        //     pending  = deepCopy(target);
+        // R-01 那个 bug（第二次点「应用」把 Tools 的改动冲掉）就是漏了第二条。
+        // 合成 EditSession.reloadFrom 之后，两者在方法体内一起做，结构上漏不掉。
+        session.reloadFrom(target);
+        syncSessionViews();
         // A7：pending 必须与 baseline 【同源】前移（0.9.5 t7 / R-01）。
         //
         // 【不这么做的实际后果 · 第二次点「应用」会冲掉 Tools 的改动】：
@@ -1662,7 +1678,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         //   3) 第 2 次 apply：baseline 已被前移成 Tools 的新值，
         //      于是 pending.X != baseline.X 成立 → 把【旧值】写回去 → Tools 被冲掉。
         // 两者同源前移后，第 2 次 apply 的判据全部为「没变」，不会再写任何字段。
-        pending = deepCopy(target);
         // A8：控件也必须跟着回灌到 target（t7 补强 —— 只前移 pending 是不够的）。
         //
         // 【为什么 A7 单独不够】：pending 前移之后，控件里<b>仍显示面板打开时的旧值</b>。
@@ -1778,7 +1793,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         bindings.clear();
         animPresetItems.clear();
         colorPresetItems.clear();
-        baseline = null;
+        session.close();
+        syncSessionViews();
     }
 
     // ==================== 搜索定位 ====================
@@ -1935,6 +1951,25 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             return svc.getState();
         }
         return new NeovideCursorSettings.State();
+    }
+
+
+    /**
+     * 把 {@link EditSession} 的两个 State 同步到本类的只读镜像字段。
+     *
+     * <p><b>这是本类里唯一给 {@code pending} / {@code baseline} 赋值的地方</b>
+     * （RF-4 的判据就是 grep 这两个字段的赋值点 = 0）。
+     *
+     * <p>为什么不直接把 190 处 {@code pending} 改成 {@code session.pending()}：
+     * 那样每处都变长，却不减少任何风险 —— 风险在于「谁能改变指向」，
+     * 而这一点已经由「只有本方法能赋值 + 本方法只被 session 操作调用」保证。
+     *
+     * <p>为什么不做成「每次读都从 session 取」：{@code pending} 被当成值传给
+     * {@code dirtyAnyField(pending, cur)} 之类的方法 101 次，每次都调方法没有收益。
+     */
+    private void syncSessionViews() {
+        pending = session.pending();
+        baseline = session.baseline();
     }
 
     private static NeovideCursorSettings.State deepCopy(NeovideCursorSettings.State from) {

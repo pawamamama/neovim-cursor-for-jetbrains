@@ -155,11 +155,23 @@ function RunMutation([string]$Name, [string]$File, [string]$Old, [string]$New) {
 
 $confFile = 'com\github\yyyolo7a79\neovidecursor\ui\settings\NeovideCursorConfigurable.java'
 $mgrFile = 'com\github\yyyolo7a79\neovidecursor\ui\NeovideCaretManager.java'
+$sessionFile = 'com\github\yyyolo7a79\neovidecursor\ui\settings\EditSession.java'
 
 # ---- MUT-R01：回滚「pending 与 baseline 同源前移」 ----
-$red1 = RunMutation 'MUT-R01-rollback-pending-advance' $confFile @'
-        pending = deepCopy(target);
-'@ '' 
+# 【0.9.9 Phase 1 同步】原来回滚的是 apply() 里那一行 `pending = deepCopy(target);`。
+# 该时序已收进 EditSession.reloadFrom()（两个字段一起前移，结构上漏不掉），
+# 所以「修复前形态」现在等价于：只前移 baseline、不动 pending —— 正是 R-01 那个 bug。
+$red1 = RunMutation 'MUT-R01-rollback-pending-advance' $sessionFile @'
+    void reloadFrom(NeovideCursorSettings.State target) {
+        NeovideCursorSettings.State copy = deepCopy(target);
+        this.baseline = copy;
+        this.pending = deepCopy(copy);
+    }
+'@ @'
+    void reloadFrom(NeovideCursorSettings.State target) {
+        this.baseline = deepCopy(target);
+    }
+'@
 
 # ---- MUT-R02：回滚滑块 ChangeListener 里的 refreshPresetDisplay() ----
 $red2 = RunMutation 'MUT-R02-rollback-slider-preset-refresh' $confFile @'
