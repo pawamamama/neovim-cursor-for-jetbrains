@@ -1845,14 +1845,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         });
     }
 
+    // 0.9.9 / Phase 2 第 2 步：纯函数已抽到 {@link SettingsUiUtil}
     private static String modeText(NeovideConfig.TrailMode mode) {
-        return mode == NeovideConfig.TrailMode.AFTERIMAGE ? MODE_AFTERIMAGE_TEXT : MODE_SPRING_TEXT;
+        return SettingsUiUtil.modeText(mode, MODE_SPRING_TEXT, MODE_AFTERIMAGE_TEXT);
     }
 
     private static NeovideConfig.TrailMode textToMode(String text) {
-        return MODE_AFTERIMAGE_TEXT.equals(text)
-                ? NeovideConfig.TrailMode.AFTERIMAGE
-                : NeovideConfig.TrailMode.SPRING;
+        return SettingsUiUtil.textToMode(text, MODE_AFTERIMAGE_TEXT);
     }
 
     /**
@@ -1866,22 +1865,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 往返误差由 {@link #sharpnessOf(float)} 的四舍五入吸收（同一 blur 读回同一锐度）。
      */
     public static float blurOfSharpness(int sharp) {
-        int v = Math.max(0, Math.min(100, sharp));
-        return 0.05f + (100 - v) * 0.0055f;
+        return SettingsUiUtil.blurOfSharpness(sharp);
     }
 
     /** 外扩幅度 → 锐度（0–100）。M6 的显示层换算，见 {@link #blurOfSharpness(int)}。 */
     public static int sharpnessOf(float blur) {
-        float b = Math.max(0.05f, Math.min(0.60f, blur));
-        return Math.round((0.60f - b) / 0.0055f);
+        return SettingsUiUtil.sharpnessOf(blur);
     }
 
     private static boolean isSpringText(Object selected) {
-        return !MODE_AFTERIMAGE_TEXT.equals(selected);
+        return SettingsUiUtil.isSpringText(selected, MODE_AFTERIMAGE_TEXT);
     }
 
     private static String fmt2(float v) {
-        return String.format(Locale.ROOT, "%.2f", v);
+        return SettingsUiUtil.fmt2(v);
     }
 
     private void graphReset(NeovideCursorSettings.State s) {
@@ -1927,11 +1924,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     private static NeovideCursorSettings.State deepCopy(NeovideCursorSettings.State from) {
-        NeovideCursorSettings.State s = new NeovideCursorSettings.State();
-        if (from != null) {
-            s.copyFrom(from);
-        }
-        return s;
+        return SettingsUiUtil.deepCopy(from);
     }
 
     /** 供探针复用：{@code "#RRGGBB"} → Color。 */
