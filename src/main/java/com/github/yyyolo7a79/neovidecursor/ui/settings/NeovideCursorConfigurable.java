@@ -1623,6 +1623,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 p.glowLayers(), p.shadowBlurFactor(), p.glowOpacity()});
         s.useShadow = p.useShadow();
         s.overlayFadeOut = p.overlayFadeOut();
+        // 【第 9 个字段：输入平滑】见 CursorPresets.AnimPreset#smoothTicks 的注释。
+        // 它乘进四角系数，是拉伸强度的头号旋钮；不写它 → 用户把 smooth 拖到 100 后
+        // 切任何预设都是规整矩形（"横向拉伸变小了，全部预设都这样"）。
+        s.typingSmoothness = p.typingSmoothness();
     }
 
     /** 把 6 个值写回 State（glowLayers 是整数：四舍五入，不截断）。 */

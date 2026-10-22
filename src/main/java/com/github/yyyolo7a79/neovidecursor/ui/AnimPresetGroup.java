@@ -2,6 +2,7 @@ package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.intellij.openapi.actionSystem.AnAction;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
 import com.intellij.openapi.actionSystem.ToggleAction;
@@ -27,8 +28,88 @@ public final class AnimPresetGroup extends DefaultActionGroup {
 
     public AnimPresetGroup() {
         super(CursorPresets.MENU_ANIM, true);          // 第二个参数 true = popup
+
+        // 内置预设（只读）
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
             add(new ApplyAnimPresetAction(p));
+        }
+
+        // 自定义预设（用户自己存的）—— 动态展开。
+        //
+        // 【为什么必须在这里加（用户多次反馈："保存了自定义设置但是 tools 依旧没有"）】
+        // 用户既然能在面板里存自定义预设，Tools 里就必须能一键切到它，
+        // 否则"快捷切换"这个入口对自建预设是残废的。
+        //
+        // 注意：自定义预设是【运行期数据】（存在 State 里），不是编译期常量，
+        // 所以只能在构造 / update 时从 settings 读。
+        rebuildCustom();
+    }
+
+    /** 从 settings 重建自定义预设部分（内置部分不动）。 */
+    private void rebuildCustom() {
+        for (AnAction a : getChildActionsOrStubs()) {
+            if (a instanceof ApplyCustomAnimPresetAction) {
+                remove(a);
+            }
+        }
+        NeovideCursorSettings svc = settingsOrNull();
+        if (svc == null) {
+            return;
+        }
+        java.util.List<com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry> list =
+                com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .parse(svc.getState().customAnimPresets);
+        if (list.isEmpty()) {
+            return;
+        }
+        addSeparator();
+        for (com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry e : list) {
+            add(new ApplyCustomAnimPresetAction(e.name));
+        }
+    }
+
+    @Override
+    public void update(@NotNull AnActionEvent e) {
+        // 每次弹出前重建：用户可能在面板里刚新建 / 改名 / 删除了自定义预设。
+        rebuildCustom();
+        super.update(e);
+    }
+
+    private static NeovideCursorSettings settingsOrNull() {
+        try {
+            return NeovideCursorSettings.getInstance();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 自定义预设的一项。点它就整份应用那个快照。 */
+    static final class ApplyCustomAnimPresetAction extends ToggleAction {
+        private final String presetName;
+
+        ApplyCustomAnimPresetAction(String name) {
+            super(name);
+            this.presetName = name;
+        }
+
+        @Override
+        public boolean isSelected(@NotNull AnActionEvent e) {
+            NeovideCursorSettings svc = settingsOrNull();
+            // 只有当"当前正在用的自定义预设"就是它时才勾选。
+            // 判据与面板同源（animCustomName），不靠猜数值。
+            return svc != null && presetName.equals(svc.getState().animCustomName);
+        }
+
+        @Override
+        public void setSelected(@NotNull AnActionEvent e, boolean state) {
+            if (!state) {
+                return;                    // 取消勾选无定义，忽略（与内置项一致）
+            }
+            CursorPresetApplier.applyCustomAnimPreset(presetName);
+        }
+
+        String presetNameForProbe() {
+            return presetName;
         }
     }
 

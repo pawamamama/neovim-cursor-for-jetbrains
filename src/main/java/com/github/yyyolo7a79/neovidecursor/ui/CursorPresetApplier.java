@@ -76,6 +76,41 @@ public final class CursorPresetApplier {
         return p;
     }
 
+    /**
+     * Tools 菜单专用：应用一个<b>自定义预设</b>（全参数快照）。
+     *
+     * <p><b>与 {@link #applyAnimPreset} 的区别</b>：内置预设只定义固定几个字段；
+     * 自定义预设是<b>全部 19 个参数的快照</b>，所以整份还原。
+     *
+     * <p><b>为什么 Tools 必须有这个入口</b>：用户既然能在面板里存自定义预设，
+     * 就应该能在 Tools 里一键切换 —— 否则「快捷切换」对自建预设是残废的
+     * （用户多次反馈："保存了自定义设置但是 tools 依旧没有"）。
+     *
+     * @param name 预设名；不存在时什么都不做并返回 {@code false}
+     * @return true = 真的应用了
+     */
+    public static boolean applyCustomAnimPreset(String name) {
+        if (name == null || name.isEmpty()) {
+            return false;
+        }
+        NeovideCursorSettings svc = NeovideCursorSettings.getInstance();
+        if (svc == null) {
+            return false;
+        }
+        NeovideCursorSettings.State s = svc.getState();
+        String snap = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                .get(s.customAnimPresets, name);
+        if (snap == null) {
+            return false;                       // 名字不存在（可能在别处被删了）
+        }
+        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.restore(s, snap);
+        s.animCustomName = name;
+        svc.persistQuietly();
+        NeovideCaretManager.applyConfig();
+        LOG.info("neovide-cursor: 已应用自定义预设 " + name);
+        return true;
+    }
+
     /** 预设对象在 {@link CursorPresets#ANIM_PRESETS} 里的下标；找不到返回 -1。 */
     static int indexOf(CursorPresets.AnimPreset p) {
         for (int i = 0; i < CursorPresets.ANIM_PRESETS.length; i++) {
@@ -141,7 +176,9 @@ public final class CursorPresetApplier {
                     && Math.abs(s.shadowBlurFactor - p.shadowBlurFactor()) < CursorPresets.EPS
                     && Math.abs(s.glowOpacity - p.glowOpacity()) < CursorPresets.EPS
                     && s.useShadow == p.useShadow()
-                    && s.overlayFadeOut == p.overlayFadeOut()) {
+                    && s.overlayFadeOut == p.overlayFadeOut()
+                    && Math.abs(s.typingSmoothness - p.typingSmoothness())
+                            < CursorPresets.EPS) {
                 return p;
             }
         }

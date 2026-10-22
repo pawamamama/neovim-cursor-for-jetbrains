@@ -41,6 +41,7 @@ public final class VCustom {
         buttonsExist();
         presetWritesAllFields();
         survivesXmlRoundTrip();
+        toolsShowsCustom();
         autoDerive();
 
         System.out.println();
@@ -360,6 +361,71 @@ public final class VCustom {
                             : (back.customAnimPresets.length() + " 字符"));
         } catch (Throwable t) {
             check("C-37 【F2】XML 往返", false, "抛异常：" + t);
+        }
+    }
+
+    // ---------------------------------------------------------------- 3.8 Tools 必须能看到自定义预设
+
+    /**
+     * 【用户反复反馈的核心诉求】保存了自定义预设，Tools 菜单里必须能看到并切换。
+     *
+     * <p>原状：{@code AnimPresetGroup} 构造器只遍历 {@code ANIM_PRESETS}（内置常量），
+     * 自定义预设是运行期数据（存 State 里），所以永远不出现。
+     * 用户原话：「保存了自定义设置但是 tools 依旧没有」。
+     */
+    private static void toolsShowsCustom() {
+        System.out.println();
+        System.out.println("--- 3.8 Tools 菜单必须列出并应用自定义预设 ---");
+        try {
+            NeovideCursorSettings svc2 = V0Env.svc;
+            NeovideCursorSettings.State st = svc2.getState();
+            st.customAnimPresets = "";
+            st.animCustomName = "";
+
+            // 存两个自定义预设
+            String snap = com.github.yyyolo7a79.neovidecursor.settings.SettingsField.snapshot(st);
+            st.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                    .put("", "我的甲", snap);
+            String snap2 = snap.replace("glowLayers=8", "glowLayers=12");
+            st.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                    .put(st.customAnimPresets, "我的乙", snap2);
+
+            NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
+            VUi.build(conf);
+            conf.reset();
+
+            com.intellij.openapi.actionSystem.AnAction[] kids =
+                    new com.github.yyyolo7a79.neovidecursor.ui.AnimPresetGroup()
+                            .getChildActionsOrStubs();
+            int custom = 0;
+            for (com.intellij.openapi.actionSystem.AnAction a : kids) {
+                if (a instanceof com.intellij.openapi.actionSystem.ToggleAction
+                        && a.getTemplateText() != null
+                        && a.getTemplateText().startsWith("我的")) {
+                    custom++;
+                }
+            }
+            check("C-39 Tools 动画预设菜单里出现全部自定义预设（2 个）", custom == 2,
+                    "找到=" + custom + " 总项数=" + kids.length);
+
+            // 点其中一个 → 整份应用到 state
+            boolean applied = com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier
+                    .applyCustomAnimPreset("我的乙");
+            check("C-40 从 Tools 点自定义预设后 state 真的变成它的快照",
+                    applied && svc2.getState().glowLayers == 12
+                            && "我的乙".equals(svc2.getState().animCustomName),
+                    "applied=" + applied + " layers=" + svc2.getState().glowLayers
+                            + " name=" + svc2.getState().animCustomName);
+
+            // 不存在的名字 → 安全失败，不改任何东西
+            int before = svc2.getState().glowLayers;
+            boolean ghost = com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier
+                    .applyCustomAnimPreset("不存在的名字");
+            check("C-41 应用不存在的自定义预设安全失败（不改任何字段）",
+                    !ghost && svc2.getState().glowLayers == before,
+                    "ghost=" + ghost + " layers=" + svc2.getState().glowLayers);
+        } catch (Throwable t) {
+            check("C-39 Tools 显示自定义预设", false, "抛异常：" + t);
         }
     }
 

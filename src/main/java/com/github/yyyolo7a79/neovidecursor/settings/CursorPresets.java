@@ -86,10 +86,25 @@ public final class CursorPresets {
         /** 是否启用淡出。理由同 {@link #useShadow}。 */
         private final boolean overlayFadeOut;
 
+        /**
+         * 输入平滑（{@code typingSmoothness} ×100，0–100）。
+         *
+         * <p><b>为什么它必须在预设里（用户实测反馈 2026-10-23）</b>：
+         * 这个字段直接乘进四角系数（{@code f'[i] = f[i] + (1-f[i]) × smooth × 0.8}），
+         * 是<b>拉伸强度的头号旋钮</b>。它不在预设域时会出现：
+         * <pre>
+         *   用户把 smooth 拖到 100 → 四角系数 [1, 0.94, 0.87, 0.83]，梯度只剩 1.20×
+         *   → 切任何预设都是规整矩形（"横向拉伸变小了，全部预设都这样"）
+         *   → 且四角几乎同步，整个矩形滞后 22.81px（"连续删除光标跟不上"）
+         * </pre>
+         * 也就是说：<b>预设如果管不了它，预设就等于失效一半</b>。
+         */
+        private final int smoothTicks;
+
         private AnimPreset(String name, int animLengthTicks, int shortLengthTicks,
                            int trailSizeTicks, int glowLayers,
                            int blurFactorTicks, int glowOpacityTicks,
-                           boolean useShadow, boolean overlayFadeOut) {
+                           boolean useShadow, boolean overlayFadeOut, int smoothTicks) {
             this.name = name;
             this.animLengthTicks = animLengthTicks;
             this.shortLengthTicks = shortLengthTicks;
@@ -99,6 +114,17 @@ public final class CursorPresets {
             this.glowOpacityTicks = glowOpacityTicks;
             this.useShadow = useShadow;
             this.overlayFadeOut = overlayFadeOut;
+            this.smoothTicks = smoothTicks;
+        }
+
+        /** 输入平滑（0–100）。见 {@link #smoothTicks} 的注释。 */
+        public int typingSmoothnessTicks() {
+            return smoothTicks;
+        }
+
+        /** 输入平滑（0–1）。 */
+        public float typingSmoothness() {
+            return smoothTicks / 100f;
         }
 
         public String name() {
@@ -190,11 +216,11 @@ public final class CursorPresets {
      * 所以「快/平滑/柔和/高比对观感」这一层语义没有被抹平。
      */
     public static final AnimPreset[] ANIM_PRESETS = {
-            //                        名称          anim short trail layers blur opacity 辉光   淡出
+            //                        名称          anim short trail layers blur opacity 辉光   淡出   平滑
             // ① 基础：= NeovideConfig 默认值。日常用这个。
-            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true),
+            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,    0),
             // ② 缎带：跨行动画拉长，斜缎带最明显。
-            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true),
+            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,    0),
             // ③ 纯平滑输入：对齐 VS Code 原版的拖尾观感 —— 无辉光扩散、无淡出。
             //
             // 【blur 必须填 60 而不是 0（第二轮审查 F2，high）】
@@ -205,7 +231,7 @@ public final class CursorPresets {
             // → 下拉显示「基准项」但实际已经不是那个预设（显示层撒谎）。
             //
             // 60 = 0.60 = 最柔端。这是「万一用户手动开回辉光时得到柔和光雾」的正确取值。
-            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false),
+            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   0),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */
