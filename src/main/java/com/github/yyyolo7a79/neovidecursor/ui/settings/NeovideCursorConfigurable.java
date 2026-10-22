@@ -3,6 +3,8 @@ package com.github.yyyolo7a79.neovidecursor.ui.settings;
 import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.github.yyyolo7a79.neovidecursor.settings.SettingsField;
+import com.github.yyyolo7a79.neovidecursor.settings.CustomPresets;
 import com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier;
 import com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager;
 import com.intellij.openapi.observable.properties.GraphProperty;
@@ -430,7 +432,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
     /**
      * 性能诊断（高级区）。**唯一不持久化**的开关：不进 State、不进 CONFIG、不进 isModified，
-     * 只在 {@code apply()} 时下发给 {@link com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager}。
+     * 只在 {@code apply()} 时下发给 {@link NeovideCaretManager}。
      */
     private boolean paintDiag;
 
@@ -490,7 +492,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             colorPresetItems.clear();
             singleMoveHint = null;
             crossMoveHint = null;
-            paintDiag = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.isPaintDisabled();
+            paintDiag = NeovideCaretManager.isPaintDisabled();
             // 基准预设从持久化状态里读（不是从值猜）—— 否则重启后当前项会漂到别的内置预设
             animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
             colorBaseIdx = CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
@@ -926,16 +928,27 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
     }
 
     /** 把 {@code pending} 灌进全部控件（reset / 预设应用共用）。 */
+    /**
+     * 把 {@code pending} 灌进全部控件（reset / 预设应用 / 预设恢复共用）。
+     *
+     * <p><b>两个抑制标志必须同生同死</b>：
+     * <ul>
+     *   <li>{@code syncingControls} —— 控件监听器不回写；</li>
+     *   <li>{@code suppressDerive} —— 本方法末尾的 {@code refreshPresetDisplay()}
+     *       会走到 {@code afterPendingEdited()}，那是「程序化回灌」而不是「用户编辑」，
+     *       绝不能在那里自动派生副本（否则 reset() 装载历史配置就会凭空多出副本，
+     *       isModified() 恒为真 —— V11-3c / U13 各抓到过一次）。</li>
+     * </ul>
+     *
+     * <p><b>为什么放在这里而不是三个调用点各写一遍</b>：之前放在调用点，
+     * 漏掉了 {@code reset()} 末尾这一次，同一个 bug 复发。放进方法内部后，
+     * 任何调用路径都自动受保护。
+     *
+     * <p><b>为什么用一个 try/finally 而不是两个</b>：两个 finally 时，
+     * 第一段抛异常会让第二段也被跳过，{@code suppressDerive} 就永久卡在 true ——
+     * 此后所有编辑都不再派生副本，而且没有任何报错。一个 finally 里同时恢复才安全。
+     */
     private void syncAllControlsFromPending() {
-        // 【0.9.9 根本性修正】本方法末尾会调 refreshPresetDisplay() → afterPendingEdited()。
-        // 那是「程序化回灌」而不是「用户编辑」，绝不能在那里自动派生副本 ——
-        // 否则 reset() 装载一份与内置常量不同的 state 就会凭空多出副本，让
-        // isModified() 恒为真（V11-3c / U13 各抓到过一次）。
-        //
-        // 【为什么抑制放在这里，而不是在三个调用点各写一遍】
-        // 之前放在调用点，漏掉了 reset() 末尾这一次 → 同一个 bug 复发。
-        // 放进方法内部后，任何调用路径（reset / apply / 预设恢复）都自动受保护；
-        // 同时保存并恢复调用方原有状态，不破坏外层已有的抑制块。
         boolean prevSuppress = suppressDerive;
         suppressDerive = true;
         syncingControls = true;
@@ -958,14 +971,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             if (shadowColorPanel != null) {
                 shadowColorPanel.setSelectedColor(parseHex(pending.shadowColor));
             }
-        } finally {
-            syncingControls = false;
-        }
-        try {
             refreshDerivedHints();
             refreshPresetDisplay();
         } finally {
-            suppressDerive = prevSuppress;
+            syncingControls = false;
+            suppressDerive = prevSuppress;      // ← 同一个 finally 里恢复，异常时也不会漏
         }
     }
 
@@ -999,17 +1009,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             pending.animPresetBase = idx;
             pending.animCustomName = "";
         } else {
-            java.util.List<com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry> entries =
-                    com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+            java.util.List<CustomPresets.Entry> entries =
+                    CustomPresets
                             .parse(pending.customAnimPresets);
             int ci = idx - CursorPresets.ANIM_PRESETS.length;
             if (ci < 0 || ci >= entries.size()) {
                 refreshPresetDisplay();
                 return;
             }
-            com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry e = entries.get(ci);
+            CustomPresets.Entry e = entries.get(ci);
             // 自定义预设是【全参数快照】：恢复它 = 把 19 个参数一次性写回
-            com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+            SettingsField
                     .restore(pending, e.snapshot);
             pending.animCustomName = e.name;
         }
@@ -1110,8 +1120,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
 
         // 3) 下拉项 = 内置 + 自定义
         java.util.List<String> names = new ArrayList<>(animPresetNames());
-        java.util.List<com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry> entries =
-                com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        java.util.List<CustomPresets.Entry> entries =
+                CustomPresets
                         .parse(pending.customAnimPresets);
         int selectedCustom = -1;
         for (int i = 0; i < entries.size(); i++) {
@@ -1164,11 +1174,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         }
         // A. 已在自定义预设上 → 持续同步快照
         if (!pending.animCustomName.isEmpty()) {
-            if (com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+            if (CustomPresets
                     .has(pending.customAnimPresets, pending.animCustomName)) {
-                pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                pending.customAnimPresets = CustomPresets
                         .put(pending.customAnimPresets, pending.animCustomName,
-                                com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                                SettingsField
                                         .snapshot(pending));
             } else {
                 pending.animCustomName = "";     // 名字没了（被删/被手改坏）→ 退回内置
@@ -1180,17 +1190,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         if (sameAnimValues(animValuesOf(pending), animConstantsOf(base))) {
             return;                              // 没偏离，不派生
         }
-        if (!com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        if (!CustomPresets
                 .canAdd(pending.customAnimPresets)) {
             return;                              // 到上限了，不再派生（保护下拉可用性）
         }
-        String name = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        String name = CustomPresets
                 .uniqueName(pending.customAnimPresets,
                         CursorPresets.ANIM_PRESETS[base].name() + " 副本");
         pending.animCustomName = name;
-        pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        pending.customAnimPresets = CustomPresets
                 .put(pending.customAnimPresets, name,
-                        com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                        SettingsField
                                 .snapshot(pending));
     }
 
@@ -1247,10 +1257,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         suppressDerive = true;
         try {
             if (!pending.animCustomName.isEmpty()) {
-                String snap = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                String snap = CustomPresets
                         .get(pending.customAnimPresets, pending.animCustomName);
                 if (snap != null) {
-                    com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                    SettingsField
                             .restore(pending, snap);
                     syncAllControlsFromPending();
                     return;
@@ -1294,10 +1304,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
      * <p>名字默认取「{当前预设名} 副本」并自动去重。
      */
     private void createCustomPreset() {
-        if (!com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        if (!CustomPresets
                 .canAdd(pending.customAnimPresets)) {
             Messages.showWarningDialog(
-                    "自定义预设最多 " + com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                    "自定义预设最多 " + CustomPresets
                             .MAX_PRESETS + " 个。请先删除不用的。", "无法新建");
             return;
         }
@@ -1305,7 +1315,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
                 ? CursorPresets.ANIM_PRESETS[
                         CursorPresets.clampAnimPresetIndex(pending.animPresetBase)].name()
                 : pending.animCustomName;
-        String suggested = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        String suggested = CustomPresets
                 .uniqueName(pending.customAnimPresets, base + " 副本");
         java.awt.Component parent = suppressDerive ? null : createComponent();
         String name = Messages.showInputDialog(parent, "给这套设置起个名字：", "新建预设",
@@ -1318,14 +1328,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
             Messages.showWarningDialog("名字不能为空。", "无法新建");
             return;
         }
-        if (com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        if (CustomPresets
                 .has(pending.customAnimPresets, trimmed)) {
             Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法新建");
             return;
         }
-        pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        pending.customAnimPresets = CustomPresets
                 .put(pending.customAnimPresets, trimmed,
-                        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.snapshot(pending));
+                        SettingsField.snapshot(pending));
         pending.animCustomName = trimmed;
         syncAllControlsFromPending();
     }
@@ -1346,7 +1356,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         if (trimmed.isEmpty() || trimmed.equals(from)) {
             return;
         }
-        String next = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        String next = CustomPresets
                 .rename(pending.customAnimPresets, from, trimmed);
         if (next == null) {
             Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法重命名");
@@ -1370,7 +1380,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         if (ok != Messages.YES) {
             return;
         }
-        pending.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+        pending.customAnimPresets = CustomPresets
                 .remove(pending.customAnimPresets, name);
         pending.animCustomName = "";
         // 值保持在当前参数上（用户看到的样子不变），只是不再挂在任何自定义预设下；
@@ -1602,8 +1612,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         //   float → Float.compare（NaN / -0.0f 两个边界都对）
         //   HEX   → equalsIgnoreCase（sanitizeColor 统一大写，手改 XML 可能留小写）
         //   其余  → 值比较
-        for (com.github.yyyolo7a79.neovidecursor.settings.SettingsField sf
-                : com.github.yyyolo7a79.neovidecursor.settings.SettingsField.FIELDS) {
+        for (SettingsField sf
+                : SettingsField.FIELDS) {
             if (sf.differs(pending, baseline)) {
                 sf.copy(pending, target);
             }
@@ -1619,11 +1629,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
         //          内置那个一位数都不动。于是「已修改」概念消失。
         //
         // 这里只做「把 pending 里的自定义预设表/当前名同步到 target」这一件事。
-        if (!com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+        if (!SettingsField
                 .textSame(pending.customAnimPresets, baseline.customAnimPresets)) {
             target.customAnimPresets = pending.customAnimPresets;
         }
-        if (!com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+        if (!SettingsField
                 .textSame(pending.animCustomName, baseline.animCustomName)) {
             target.animCustomName = pending.animCustomName;
         }
@@ -1722,7 +1732,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable implement
      * 结构上不可能再出现「补了一边忘了另一边」，也不可能出现「探针测影子实现」。
      */
     static boolean dirtyAnyField(NeovideCursorSettings.State p, NeovideCursorSettings.State s) {
-        return com.github.yyyolo7a79.neovidecursor.settings.SettingsField.dirtyAnyField(p, s);
+        return SettingsField.dirtyAnyField(p, s);
     }
 
     /** HEX 必须忽略大小写：{@code sanitizeColor} 统一成大写，用户手改 XML 可能留小写。 */
