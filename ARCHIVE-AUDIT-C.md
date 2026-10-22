@@ -257,7 +257,8 @@ POC 最小验证：
 |---|---|---|---|---|
 | **B. 绘制层子帧插值** | 只降单刷新位移，不动时长/梯度 | `CaretTrailPanel` | 低（不碰 core/） | **phys-auditor 推荐，未实现** |
 | **F. 几何偏移解耦** | 统一 tau + 后缘位置注入常量 D | `TrailCorner.update()` | 中（动 core/） | **gate-auditor 数值验证可行，未实现** |
-| A. 绕开 repaint | VolatileImage 直写 | 渲染架构 | 高 | 未验证 |
+| **A. AbstractPainter 按需重绘** | IDEA 自带的增量绘制接口（已验证存在） | 渲染层 | 中 | 未验证 |
+| A2. JWindow 透明窗口 | 真脱离 EDT | 渲染架构 | **高** | 未验证，可能界面撕裂 |
 
 **B 与 F 不冲突，可以叠加。**
 
