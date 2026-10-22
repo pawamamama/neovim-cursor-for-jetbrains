@@ -1,0 +1,27 @@
+# NeovideConfig 默认值金表（raw bits，与平台/Locale 无关）
+# 格式：<声明类型> <字段名> = <稳定编码>
+float        afterimageLifetime           = f:0x3E6147AE
+boolean      alwaysHighFps                = b:true
+float        animationLength              = f:0x3DCCCCCD
+float        animationResetThreshold      = f:0x3DB851EC
+int          cursorDisappearDelay         = i:50
+float        cursorFadeOutDuration        = f:0x3D99999A
+float        cursorWidth                  = f:0x40000000
+boolean      enabled                      = b:true
+int          glowLayers                   = i:8
+float        glowOpacity                  = f:0x3F0CCCCD
+boolean      hideNativeCaret              = b:true
+float        maxTrailDistanceFactor       = f:0x42700000
+boolean      overlayFadeOut               = b:true
+float        shadowBlurFactor             = f:0x3E4CCCCD
+String       shadowColor                  = s:#FFC0CB
+float        shortAnimationLength         = f:0x3DE147AE
+float        shortMoveThreshold           = f:0x41000000
+String       tailColor                    = s:#FFC0CB
+float        tailOpacity                  = f:0x3F800000
+float[]      trailFactors                 = fa:[0x3F800000,0x3F3851EC,0x3ED70A3D,0x3E6147AE]
+TrailMode    trailMode                    = e:SPRING
+float        trailSize                    = f:0x3F800000
+float        typingMaxChars               = f:0x40400000
+boolean      useShadow                    = b:true
+# 字段总数 = 24

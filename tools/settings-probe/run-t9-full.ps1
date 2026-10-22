@@ -47,6 +47,25 @@ Write-Host '--- D0 / core ---'
 & git -C $repoRoot diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java | Out-Null
 $d0 = $LASTEXITCODE
 Write-Host "  D0 exit=$d0 (期望 0)"
+
+# ---------- D0b：默认值金表（覆盖 D0 漏掉的 12 个观感字段）----------
+# D0 只守 core/NeovideConfig.java 的【文件级】改动，且旧正则已被证明可绕过。
+# D0b 用「反射读运行期值 + 冻结金表比对」，覆盖全部 24 个 public 字段：
+#   TailParityTest 管 11 个、run-audit A 段管 14 个，
+#   剩下 12 个（tailColor/shadowColor/tailOpacity/shadowBlurFactor/useShadow/
+#   overlayFadeOut/cursorDisappearDelay/cursorFadeOutDuration/trailMode/
+#   afterimageLifetime/alwaysHighFps/hideNativeCaret）此前【无任何门禁覆盖】。
+Write-Host ''
+Write-Host '--- D0b / 默认值金表 ---'
+$gateScript = Join-Path $repoRoot 'tools\parity\run-defaults-gate.ps1'
+if (Test-Path $gateScript) {
+    & pwsh -NoProfile -ExecutionPolicy Bypass -File $gateScript -Repo $repoRoot 2>&1 | Out-Null
+    $d0b = $LASTEXITCODE
+    Write-Host "  D0b exit=$d0b (期望 0)"
+} else {
+    Write-Host '  D0b 跳过（run-defaults-gate.ps1 不存在）'
+    $d0b = 0
+}
 $cu = @(& git -C $repoRoot status --porcelain=v1 -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/)
 if ($cu.Count -eq 0) { Write-Host '  core/ 无任何改动或新增（OK）' } else { $cu | ForEach-Object { Write-Host "  $_" } }
 
@@ -59,12 +78,12 @@ for ($i = 0; $i -lt $names.Count; $i++) {
 Write-Host ('  {0,-14} exit={1}' -f 'D0', $d0)
 
 $bad = @($codes | Where-Object { $_ -ne 0 })
-if ($bad.Count -eq 0 -and $d0 -eq 0) {
+if ($bad.Count -eq 0 -and $d0 -eq 0 -and $d0b -eq 0) {
     Write-Host ''
     Write-Host 'ALL T9 VERIFICATION PASSED'
     exit 0
 } else {
     Write-Host ''
-    Write-Host "FAILED SECTIONS = $($bad.Count) (D0=$d0)"
+    Write-Host "FAILED SECTIONS = $($bad.Count) (D0=$d0, D0b=$d0b)"
     exit 1
 }
