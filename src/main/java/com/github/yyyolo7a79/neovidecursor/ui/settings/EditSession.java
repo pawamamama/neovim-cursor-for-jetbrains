@@ -21,9 +21,9 @@ import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
  *       → 之后所有控件回灌都被当成用户操作。</li>
  * </ul>
  *
- * <p>本类把那三组时序收成<b>有名字的操作</b>，调用方不再关心「要先做什么、别忘了什么」：
+ * <p>本类把这几组时序收成<b>有名字的操作</b>，调用方不再关心「要先做什么、别忘了什么」：
  * <table border="1">
- *   <caption>四个操作与它们替代的手写序列</caption>
+ *   <caption>三个操作与它们替代的手写序列</caption>
  *   <tr><th>操作</th><th>替代的手写序列</th></tr>
  *   <tr><td>{@link #openAt}</td>
  *       <td>{@code pending = deepCopy(state); baseline = deepCopy(state);}
@@ -31,8 +31,6 @@ import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
  *   <tr><td>{@link #reloadFrom}</td>
  *       <td>{@code baseline = deepCopy(target); pending = deepCopy(target);}
  *           —— 同上，而且顺序不能反</td></tr>
- *   <tr><td>{@link #commitBaselineTo}</td>
- *       <td>只前移 baseline（本轮 apply 的中间状态）</td></tr>
  *   <tr><td>{@link #close}</td>
  *       <td>{@code baseline = null}</td></tr>
  * </table>
@@ -56,13 +54,9 @@ final class EditSession {
     /** 打开面板那一刻的快照，只作比较基准，不是真相源。 */
     private NeovideCursorSettings.State baseline;
 
-    /** 会话是否已打开。 */
-    private boolean open;
-
     EditSession() {
         this.pending = new NeovideCursorSettings.State();
         this.baseline = new NeovideCursorSettings.State();
-        this.open = false;
     }
 
     // ==================== 读 ====================
@@ -80,10 +74,6 @@ final class EditSession {
         return baseline;
     }
 
-    boolean isOpen() {
-        return open;
-    }
-
     // ==================== 写（唯一入口）====================
 
     /**
@@ -98,7 +88,6 @@ final class EditSession {
         NeovideCursorSettings.State copy = deepCopy(source);
         this.pending = copy;
         this.baseline = deepCopy(copy);
-        this.open = true;
     }
 
     /**
@@ -114,22 +103,10 @@ final class EditSession {
         this.pending = deepCopy(copy);
     }
 
-    /**
-     * 只前移 baseline（{@code apply()} 里 A6 的中间步骤）。
-     *
-     * <p>存在理由：{@code apply()} 在写完 target 之后、回灌控件之前，
-     * 需要先把 baseline 挪到 target 上，让后续的 {@code isModified()} 判据基于新基准。
-     * <b>调用它之后必须跟一次 {@link #reloadFrom}</b>（or 用 reloadFrom 一次做完）。
-     */
-    void commitBaselineTo(NeovideCursorSettings.State target) {
-        this.baseline = deepCopy(target);
-    }
-
     /** 关闭会话（{@code disposeUIResources()}）：释放 baseline，pending 归零。 */
     void close() {
         this.baseline = null;
         this.pending = new NeovideCursorSettings.State();
-        this.open = false;
     }
 
     // ==================== 工具 ====================

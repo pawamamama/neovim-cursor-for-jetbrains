@@ -38,6 +38,7 @@ public final class VCustom {
         snapshotRoundTrip();
         crud();
         builtinReadOnly();
+        buttonsExist();
         autoDerive();
 
         System.out.println();
@@ -193,6 +194,66 @@ public final class VCustom {
         check("C-18 应用内置预设不删除任何自定义预设（用户数据不丢）",
                 CustomPresets.has(after.customAnimPresets, "某个自定义"),
                 "数量=" + CustomPresets.parse(after.customAnimPresets).size());
+    }
+
+    // ---------------------------------------------------------------- 3.5 按钮真的在界面上
+
+    /**
+     * 三个动作按钮必须真的挂在面板上。
+     *
+     * <p><b>为什么补这一条</b>：0.9.9 第一次交付时，新建/重命名/删除三个按钮的
+     * <b>方法都写了、字段也声明了，但 createPanel 里从没创建它们</b> ——
+     * 用户打开设置页什么都看不到。而当时门禁全绿，因为<b>没有任何断言检查按钮存在</b>。
+     *
+     * <p>教训：凡是要用户点的东西，必须有一条断言证明它真的在组件树上，
+     * 不能只证明「背后的方法能跑」。
+     */
+    private static void buttonsExist() {
+        System.out.println();
+        System.out.println("--- 3.5 三个动作按钮必须真的在面板上 ---");
+        NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
+        VUi ui = VUi.build(conf);
+
+        javax.swing.JButton add = conf.animNewButtonForProbe();
+        javax.swing.JButton ren = conf.animRenameButtonForProbe();
+        javax.swing.JButton del = conf.animDeleteButtonForProbe();
+
+        check("C-26 「新建预设…」按钮已创建", add != null,
+                add == null ? "null（createPanel 里忘了 new）" : add.getText());
+        check("C-27 「重命名…」按钮已创建", ren != null,
+                ren == null ? "null" : ren.getText());
+        check("C-28 「删除」按钮已创建", del != null,
+                del == null ? "null" : del.getText());
+
+        // 不仅要有对象，还必须真的在组件树上（漏了 row.cell(...) 时对象存在但看不见）
+        java.awt.Component root = (java.awt.Component) ui.panel.component;
+        check("C-29 三个按钮都在面板组件树里（不是只 new 了对象）",
+                inTree(root, add) && inTree(root, ren) && inTree(root, del),
+                "add=" + inTree(root, add) + " ren=" + inTree(root, ren)
+                        + " del=" + inTree(root, del));
+
+        // 内置预设选中时：新建可用，改名/删除置灰
+        check("C-30 内置预设选中时：新建可用、重命名与删除置灰",
+                add.isEnabled() && !ren.isEnabled() && !del.isEnabled(),
+                "new=" + add.isEnabled() + " ren=" + ren.isEnabled() + " del=" + del.isEnabled());
+    }
+
+    /** 组件是否真的在某棵容器树里（递归）。 */
+    private static boolean inTree(java.awt.Component root, java.awt.Component target) {
+        if (root == null || target == null) {
+            return false;
+        }
+        if (root == target) {
+            return true;
+        }
+        if (root instanceof java.awt.Container) {
+            for (java.awt.Component c : ((java.awt.Container) root).getComponents()) {
+                if (inTree(c, target)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------- 4. 自动派生

@@ -534,7 +534,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     return kotlin.Unit.INSTANCE;
                 });
 
-                // 0b. 一键恢复（0.9.6 / M5）：把「基准预设」的常量重新写进 pending。
+                // 0b. 一键恢复：把当前预设已保存的值重新写进 pending。
                 // 只改 pending（和选预设完全同一条路径），落库仍由「应用 / OK」完成。
                 panel.row("", row -> {
                     row.bottomGap(BottomGap.SMALL);
@@ -544,6 +544,28 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
                     colorRestoreBtn.addActionListener(e -> restoreColorPreset());
                     row.cell(colorRestoreBtn);
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // 0c. 自定义预设的三个动作（0.9.9）。
+                //
+                // 【为什么「新建」不是多余的】自动派生只在「改动画字段」时发生；
+                // 用户想「把当前整套观感（含颜色/拉伸强度等）存下来」时需要一个显式出口。
+                // 「重命名」「删除」只对自定义预设可用 —— 内置预设永久只读，按钮置灰。
+                panel.row("", row -> {
+                    row.bottomGap(BottomGap.SMALL);
+                    animNewBtn = new javax.swing.JButton("新建预设…");
+                    animNewBtn.addActionListener(e -> createCustomPreset());
+                    row.cell(animNewBtn);
+                    animRenameBtn = new javax.swing.JButton("重命名…");
+                    animRenameBtn.addActionListener(e -> renameCustomPreset());
+                    row.cell(animRenameBtn);
+                    animDeleteBtn = new javax.swing.JButton("删除");
+                    animDeleteBtn.addActionListener(e -> deleteCustomPreset());
+                    row.cell(animDeleteBtn);
+                    // 初值：内置预设选中时改名/删除置灰。之后每次 refreshPresetDisplay 会再刷。
+                    animRenameBtn.setEnabled(false);
+                    animDeleteBtn.setEnabled(false);
                     return kotlin.Unit.INSTANCE;
                 });
 
@@ -626,12 +648,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         return kotlin.Unit.INSTANCE;
                     });
 
-                    g.row("拖尾不透明度（不随预设变化）", row -> {
+                    g.row("拖尾不透明度", row -> {
                         addSlider(row, SPECS[2], null);
                         return kotlin.Unit.INSTANCE;
                     });
 
-                    g.row("启用辉光（不随预设变化）", row -> {
+                    g.row("启用辉光", row -> {
                         bindCheck(row, () -> pending.useShadow, v -> {
                             pending.useShadow = v;
                             shadowOn.set(v);
@@ -674,7 +696,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         return kotlin.Unit.INSTANCE;
                     });
 
-                    g.row("拖尾拉伸强度（不随预设变化）", row -> {
+                    g.row("拖尾拉伸强度", row -> {
                         addSlider(row, SPECS[7], springMode);
                         row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
                         return kotlin.Unit.INSTANCE;
@@ -698,7 +720,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
 
                     // M4：输入平滑。放在短动画时长正下方 —— 它是那个值的「形状」而不是「长度」。
-                    g.row("输入平滑（只影响单行打字/退格，不随预设变化）", row -> {
+                    g.row("输入平滑（只影响单行打字/退格）", row -> {
                         addSlider(row, SPECS[10], null);
                         row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
@@ -1156,8 +1178,32 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             colorPresetCombo.setSelectedIndex(
                     c == null ? colorPresetItems.size() - 1 : indexOfColor(c));
             refreshRestoreButtonText();
+            refreshCustomButtons();
         } finally {
             syncingControls = false;
+        }
+    }
+
+    /**
+     * 三个自定义预设动作按钮的可用性。
+     *
+     * <p><b>为什么需要它</b>：内置预设<b>永久只读</b>，所以「重命名」「删除」必须置灰 ——
+     * 否则用户点了会弹「内置预设不能改名」，那是在用报错代替禁用。
+     * 「新建」在任何状态下都可用（把当前这套存下来是合法操作）。
+     *
+     * <p><b>这一条曾被漏掉</b>：VCustom 的 C-30 抓到「三个按钮全亮」，
+     * 根因是 refreshCustomButtons() 只写了调用点、没写方法体。
+     */
+    private void refreshCustomButtons() {
+        boolean onCustom = !pending.animCustomName.isEmpty();
+        if (animNewBtn != null) {
+            animNewBtn.setEnabled(CustomPresets.canAdd(pending.customAnimPresets));
+        }
+        if (animRenameBtn != null) {
+            animRenameBtn.setEnabled(onCustom);
+        }
+        if (animDeleteBtn != null) {
+            animDeleteBtn.setEnabled(onCustom);
         }
     }
 
@@ -2058,6 +2104,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     public com.intellij.openapi.ui.ComboBox<String> colorPresetComboForProbe() {
         return colorPresetCombo;
+    }
+
+    /** 探针/调试用：自定义预设的三个动作按钮（0.9.9）。缺任何一个都说明没挂到界面上。 */
+    public javax.swing.JButton animNewButtonForProbe() {
+        return animNewBtn;
+    }
+
+    public javax.swing.JButton animRenameButtonForProbe() {
+        return animRenameBtn;
+    }
+
+    public javax.swing.JButton animDeleteButtonForProbe() {
+        return animDeleteBtn;
     }
 
     /** 探针/调试用：两条动态耦合提示。 */
