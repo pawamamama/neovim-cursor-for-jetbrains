@@ -209,7 +209,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 百分比类必须是 5（默认 0.55 / 预设 0.45、0.40、0.30 都落在 5 的网格上）。
      * 定错一档，<b>设置页一打开默认值就漂移</b>，直接违反硬纪律 1。
      */
-    private static final class SliderSpec {
+    /** 滑块规格。包私有以便 {@link SettingsSearchIndex} 按字段 key 定位标签。 */
+    static final class SliderSpec {
         final String key;
         final int min;
         final int max;
@@ -1803,15 +1804,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /**
      * 设置页搜索：按关键字把焦点与滚动定位到对应字段。
      *
-     * <p>第一期只做「滚动到 + 请求焦点」，不做像素级高亮——平台自己的
-     * {@code TraverseUIStarter} 才是搜索高亮的权威实现，手工再写一套只会与它打架。
+     * <p>0.9.9 / Phase 2 第 1 步：关键字映射已抽到 {@link SettingsSearchIndex}
+     * （纯静态、零状态耦合）。这里只保留「拿到标签之后怎么滚动」这一段 ——
+     * 它需要 Swing 组件树，属于面板自己的职责。
      */
     @Override
     public Runnable enableSearch(String option) {
         if (option == null || option.trim().isEmpty()) {
             return null;
         }
-        final JLabel target = targetFor(option.trim().toLowerCase(Locale.ROOT));
+        final JLabel target = SettingsSearchIndex.targetFor(bindings,
+                option.trim().toLowerCase(Locale.ROOT));
         if (target == null) {
             return null;
         }
@@ -1823,56 +1826,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 parent.scrollRectToVisible(r);
             }
         };
-    }
-
-    /** 关键字 → 面板上最能代表它的那个数值标签。 */
-    private JLabel targetFor(String key) {
-        if (has(key, "常驻", "高帧", "highfps", "fps", "刷新")) {
-            return labelOf("glowLayers");
-        }
-        if (has(key, "淡出", "fade")) {
-            return labelOf("cursorDisappearDelay");
-        }
-        if (has(key, "层", "layer", "辉光", "glow")) {
-            return labelOf("glowLayers");
-        }
-        if (has(key, "外扩", "模糊", "blur", "光晕")) {
-            return labelOf("shadowBlurFactor");
-        }
-        if (has(key, "不透明", "透明", "opacity")) {
-            return labelOf("glowOpacity");
-        }
-        if (has(key, "拉伸", "stretch", "拖尾", "trail")) {
-            return labelOf("stretchRatioK");
-        }
-        if (has(key, "密度", "size")) {
-            return labelOf("trailSize");
-        }
-        if (has(key, "跨行", "animationLength", "动画时长")) {
-            return labelOf("animationLength");
-        }
-        if (has(key, "短动画", "shortanimation", "打字")) {
-            return labelOf("shortAnimationLength");
-        }
-        return null;
-    }
-
-    private JLabel labelOf(String key) {
-        for (SliderBinding b : bindings) {
-            if (key.equals(b.spec.key)) {
-                return b.valueLabel;
-            }
-        }
-        return null;
-    }
-
-    private static boolean has(String haystack, String... needles) {
-        for (String n : needles) {
-            if (haystack.contains(n)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     // ==================== 小工具 ====================
@@ -2018,7 +1971,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     // ==================== 滑块绑定（滑块 + 输入框 + 标签）====================
 
     /** 一个滑块的三个组件 + 它的规格。 */
-    private static final class SliderBinding {
+    /** 滑块 + 输入框 + 数值标签三者一组。包私有以便 {@link SettingsSearchIndex} 读字段 key。 */
+    static final class SliderBinding {
         final SliderSpec spec;
         JSlider slider;
         JBTextField textField;
