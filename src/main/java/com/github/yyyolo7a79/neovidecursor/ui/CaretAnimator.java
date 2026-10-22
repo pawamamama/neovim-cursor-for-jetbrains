@@ -90,13 +90,26 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 审查员实测 8→4ms：前缘帧数 12→25（翻倍），滞后 10.20→10.69px（+4.9%）。
      * 所以这是<b>纯收益</b>，代价只是 EDT 投递频率翻倍。
      *
-     * <p><b>为什么不继续降到 4ms</b>：250fps 的 {@code invokeLater} 在老旧机器上会挤占 EDT，
-     * 而 5ms 已经到「可接受」档。若某台机器仍觉得跳，可以再往下调这一行。
+     * <p><b>【2026-10-23 实测纠正：改回 8ms，5ms 是错的】</b>
+     *
+     * <p>上一版把它改成 5ms，理由是"帧数翻倍更平滑"。但那是<b>纸上推演</b>，漏了两件事实：
+     * <ol>
+     *   <li>{@link RenderScheduler} 用的是 {@code Thread.sleep(ms)}，<b>Windows 上 sleep
+     *       的分辨率就是 15.6ms</b>（本文件 50 行与 README 都记着这件事）。
+     *       设 5ms 和设 8ms，<b>实际都睡到 15.6ms</b> —— 帧数一个没多。</li>
+     *   <li>设成 5ms 反而有害：调度线程每 5ms 醒一次却干不了活（还没到真实节拍），
+     *       空转次数翻倍，还会让 {@code smoothedIntervalMs} 的自适应测量变得更不准。</li>
+     * </ol>
+     *
+     * <p>用户实测反馈"帧率下降了"正是这个：名义 200fps，实际仍是 ~64fps，但多了无效唤醒。
+     *
+     * <p>结论：<b>回到 8ms</b>。真正的平滑要靠"前缘时长 ÷ 实际帧间隔"这个比值，
+     * 而不是把目标帧间隔设成一个 sleep 精度达不到的数字。
      *
      * <p><b>历史</b>：曾试过 12ms(83fps) 以减少 EDT 投递，用户反馈「不够跟手」而回退。
-     * 那次是往<b>上</b>调（帧数更少），与本次方向相反，不矛盾。
+     * 那次是往<b>上</b>调，与 5ms 那次同为"改目标帧间隔"的思路，两次都没解决根本问题。
      */
-    static final int ACTIVE_DELAY_MS = 5;
+    static final int ACTIVE_DELAY_MS = 8;
 
     /** 静止时的轮询间隔（低频看门狗） */
     private static final int IDLE_DELAY_MS = 120;
