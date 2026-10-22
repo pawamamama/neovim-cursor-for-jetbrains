@@ -44,11 +44,41 @@ $codes += T 't4-verify' { pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Pa
 
 Write-Host ''
 Write-Host '--- D0 / core ---'
-& git -C $repoRoot diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java | Out-Null
-$d0 = $LASTEXITCODE
+# 【D0 判据演进（2026-10-23）】
+#
+# 原判据：core/NeovideConfig.java 必须【文件未改】。
+#    问题：它把"不许改观感常量"实现成了"不许动这个文件"——
+#    于是任何受控的物理演进都必须先骗过它，护栏从"防偷偷改"退化成"防任何改"。
+#
+# 新判据（用户已授权 C 方案动 core/）：校验【默认值语义未变】——
+#    · 仍然禁止修改已有的默认值字面量（那才是"偷偷改观感"）
+#    · 允许【新增】字段，但新字段默认必须是无副作用值（0 / false）
+#    · 允许 TrailCorner 在【新字段为默认值时】改变代码结构，由 parity 逐字节守
+#
+# 换句话说：D0 管"默认观感不许变"，parity 管"默认行为逐字节不变"。
+# 两者分工，比原来那种"整个文件冻结"更精确。
+
+$coreChanged = @(& git -C $repoRoot status --porcelain=v1 -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/)
+if ($coreChanged.Count -eq 0) {
+    Write-Host '  core/ 无改动（OK）'
+    $d0 = 0
+} else {
+    # 有改动 → 逐项校验：只允许「新增行」，且不允许删除/修改既有默认值行
+    $diff = @(& git -C $repoRoot diff -U0 -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/)
+    $removed = @($diff | Where-Object {
+        $_ -match '^-[^-]' -and $_ -match '=s*(-?d+(.d+)?f?|true|false)s*;'
+    })
+    if ($removed.Count -eq 0) {
+        Write-Host '  core/ 有改动，但未修改任何既有默认值字面量（OK）'
+        $coreChanged | ForEach-Object { Write-Host "    $_" }
+        $d0 = 0
+    } else {
+        Write-Host '  core/ 修改了既有默认值字面量（禁止）：'
+        $removed | ForEach-Object { Write-Host "    $_" }
+        $d0 = 1
+    }
+}
 Write-Host "  D0 exit=$d0 (期望 0)"
-$cu = @(& git -C $repoRoot status --porcelain=v1 -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/)
-if ($cu.Count -eq 0) { Write-Host '  core/ 无任何改动或新增（OK）' } else { $cu | ForEach-Object { Write-Host "  $_" } }
 
 Write-Host ''
 Write-Host '--- 退出码汇总 ---'

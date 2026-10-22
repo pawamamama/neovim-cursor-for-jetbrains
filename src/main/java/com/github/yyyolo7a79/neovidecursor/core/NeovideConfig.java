@@ -119,6 +119,44 @@ public class NeovideConfig {
     public float shortAnimationLength = 0.11f;
 
     /**
+     * 短跳分支的<b>前缘</b>时长下限（秒）。0 = 不启用（沿用旧行为）。
+     *
+     * <h2>为什么需要这个字段（C 方案：前缘与后缘解耦）</h2>
+     *
+     * <p>短跳时四角时长原本都是 {@code shortAnimationLength × trailFactors[rank]}。
+     * 这导致一个<b>结构性矛盾</b>（第三轮审查实测证明）：
+     * <pre>
+     *   要「平滑」（前缘跨够帧）  →  shortAnimationLength 必须大
+     *   要「拖尾短」（后缘别太长）→  shortAnimationLength 必须小
+     *   ↑ 两者共用同一个乘数，数学上不可能同时满足
+     * </pre>
+     *
+     * <p>实测（k=8, smooth=0）：前缘 ≥10 帧需 short ≥ 0.229s，
+     * 而后缘滞后 ≤8px 需 short ≤ 0.036s —— 相差 0.193s，区间不相交。
+     *
+     * <h2>本字段怎么解耦</h2>
+     *
+     * <p>在短跳分支里，若本值 &gt; 0，则<b>前缘两角（rank 2/3）</b>的时长取
+     * {@code max(原时长, 本值)}；后缘两角（rank 0/1）仍用
+     * {@code shortAnimationLength × trailFactors[rank]} 不变。
+     *
+     * <p>于是：
+     * <ul>
+     *   <li>调大本值 → 前缘跨更多帧 → <b>更平滑</b>，且<b>完全不动后缘</b>；</li>
+     *   <li>调小 {@code shortAnimationLength} → 后缘更短 → <b>拖尾更短促</b>，且前缘被本值托住不跳。</li>
+     * </ul>
+     *
+     * <h2>为什么默认 0</h2>
+     *
+     * <p><b>0 表示完全不启用</b>，四角时长与历史版本逐位相同 ——
+     * 这样 parity 的逐字节基线在默认值下仍然成立，不会因为"新增了一个字段"就让
+     * 所有物理快照全变。只有在预设里显式设了非 0 值才生效。
+     *
+     * <p>范围与 {@link #shortAnimationLength} 同量级。
+     */
+    public float leadingAnimationLength = 0f;
+
+    /**
      * 拖尾密度（0~1）。原版 {@code ANIMATION_SETTINGS.trailSize}，默认 1。
      *
      * <p>它决定「前缘」与「后缘」的动画时长差异：

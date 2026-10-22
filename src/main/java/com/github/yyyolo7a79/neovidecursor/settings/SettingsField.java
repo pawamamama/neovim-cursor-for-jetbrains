@@ -273,6 +273,26 @@ public final class SettingsField {
                 gc != null, true);
     }
 
+    /**
+     * 与 {@link #floats} 相同，但<b>不进自定义预设快照</b>（{@code inPreset = false}）。
+     *
+     * <p>用于「观感常量」级别的字段：它要同步到 {@code NeovideConfig} 才生效，
+     * 但不该被每个自定义预设各记一份 —— 否则老预设里没这个键，
+     * 每次恢复都会把它归零，反而制造困惑。
+     */
+    private static SettingsField floatsPresetless(String key,
+                                                  Function<NeovideCursorSettings.State, Float> gs,
+                                                  BiConsumer<NeovideCursorSettings.State, Float> ss,
+                                                  Function<NeovideConfig, Float> gc,
+                                                  BiConsumer<NeovideConfig, Float> sc) {
+        return new SettingsField(key, Kind.FLOAT,
+                s -> gs.apply(s), (s, v) -> ss.accept(s, (Float) v),
+                gc == null ? null : c -> gc.apply(c),
+                sc == null ? null : (c, v) -> sc.accept(c, (Float) v),
+                (a, b) -> Float.compare((Float) a, (Float) b) == 0,
+                gc != null, false);
+    }
+
     private static SettingsField hexColors(String key,
                                            Function<NeovideCursorSettings.State, String> gs,
                                            BiConsumer<NeovideCursorSettings.State, String> ss,
@@ -356,6 +376,14 @@ public final class SettingsField {
                 c -> c.animationLength, (c, v) -> c.animationLength = v));
         out.add(floats("shortAnimationLength", s -> s.shortAnimationLength, (s, v) -> s.shortAnimationLength = v,
                 c -> c.shortAnimationLength, (c, v) -> c.shortAnimationLength = v));
+        // 【C 方案】短跳分支的「前缘时长下限」。
+        // 它【参与同步到 CONFIG】（否则设了不生效），但【不进自定义预设快照】——
+        // 理由：它是"观感常量"级别的旋钮（跟 stretchRatioK 同类），
+        // 不是用户逐个预设想记住的参数。进快照会让 19 字段变 20 字段，
+        // 且老自定义预设里没有它 → 每次恢复都归零，反而制造困惑。
+        out.add(floatsPresetless("leadingAnimationLength",
+                s -> s.leadingAnimationLength, (s, v) -> s.leadingAnimationLength = v,
+                c -> c.leadingAnimationLength, (c, v) -> c.leadingAnimationLength = v));
         out.add(presetPointer());
 
         return Collections.unmodifiableList(out);

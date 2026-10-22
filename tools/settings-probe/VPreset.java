@@ -340,8 +340,9 @@ public final class VPreset {
         // 等字段表重构落地后这里会变成「从表导出」，届时本断言自动跟随）。
         // 23 = stateVersion(1) + 19 参数 + 3 预设元数据（animPresetBase / customAnimPresets / animCustomName）。
         // 0.9.9 把 0.9.8 的单个覆盖串拆成「自建预设表 + 当前选中名」两项。
-        check("V14-1 State 的 public 实例字段数 == 23（stateVersion + 19 参数 + 3 预设元数据）",
-                fields == 23, "fields=" + fields);
+        // 【C 方案】新增 leadingAnimationLength（前缘时长下限）→ 23 变 24
+        check("V14-1 State 的 public 实例字段数 == 24（stateVersion + 20 参数 + 3 预设元数据）",
+                fields == 24, "fields=" + fields);
 
         // 契约 §5.2 的 P-1 语义是「预设是纯动作，不持久化『当前选中了哪个预设的哪个值副本』」，
         // 但它允许两个**元数据**字段：

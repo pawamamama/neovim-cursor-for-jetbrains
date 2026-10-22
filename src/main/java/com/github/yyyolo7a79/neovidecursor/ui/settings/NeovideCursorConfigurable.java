@@ -1624,6 +1624,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 它乘进四角系数，是拉伸强度的头号旋钮；不写它 → 用户把 smooth 拖到 100 后
         // 切任何预设都是规整矩形（"横向拉伸变小了，全部预设都这样"）。
         s.typingSmoothness = p.typingSmoothness();
+        // C 方案：前缘时长下限（只影响短跳分支的前缘两角，后缘完全不动）
+        s.leadingAnimationLength = p.leadingAnimationLength();
     }
 
     /** 把 6 个值写回 State（glowLayers 是整数：四舍五入，不截断）。 */

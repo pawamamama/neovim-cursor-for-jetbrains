@@ -49,7 +49,9 @@ public final class VSmooth {
             double limit = (i == 0) ? 2.0 : 1.5;   // 基础：受默认值契约约束，放宽到 2.0
             for (float k : new float[]{4.5f, 8.0f}) {
                 float[] f = NeovideCursorSettings.deriveTrailFactors(k, p.typingSmoothness());
-                double leadMs = p.shortAnimationLength() * 1000.0 * f[2];   // rank2 = 横向真实档
+                // 【C 方案】前缘时长取 max(short × f[2], leadingAnimationLength)
+                double normalMs = p.shortAnimationLength() * 1000.0 * f[2];
+                double leadMs = Math.max(normalMs, p.leadingAnimationLength() * 1000.0);
                 double frames = leadMs / FRAME_MS;
                 double stepPx = MOVE_PX / frames;
                 check("S-1「" + p.name() + "」k=" + k + " 单帧位移 <= " + limit + "px",
