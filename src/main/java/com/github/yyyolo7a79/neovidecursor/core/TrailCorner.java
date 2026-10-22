@@ -219,25 +219,6 @@ public class TrailCorner {
             //   shortAnimationLength=0.08 时四角为 80/72/40/24ms，梯度完整保留。
             double factor = (rank < config.trailFactors.length ? config.trailFactors[rank] : 1.0f);
             animationLength = config.shortAnimationLength * clamp(factor, 0, 1);
-
-            // ---- 【C 方案：前缘与后缘解耦】----
-            //
-            // 前缘两角（rank 2/3）取 max(原时长, leadingAnimationLength)；
-            // 后缘两角（rank 0/1）完全不动。
-            //
-            // 【为什么必须解耦】结构性矛盾（第三轮审查实测）：
-            //   要平滑  → shortAnimationLength 大 → 前缘帧数够
-            //   要短促  → shortAnimationLength 小 → 后缘拖尾短
-            // 两者共用同一个乘数，数学上不可兼得（k=8 时需 0.229s vs 0.036s）。
-            //
-            // 【为什么默认 0 时行为完全不变】leadingAnimationLength == 0 时
-            // max(x, 0) == x，四角时长与历史版本逐位相同 → parity 默认快照不动。
-            if (config.leadingAnimationLength > 0f && rank >= 2) {
-                double lead = config.leadingAnimationLength;
-                if (lead > animationLength) {
-                    animationLength = lead;
-                }
-            }
         } else {
             // ---- 原版三档分配（跨行 / 大跨度）----
             //

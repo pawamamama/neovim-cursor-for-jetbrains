@@ -98,15 +98,12 @@ public final class VSleep {
         double timerMed = timerPeriod(5, 40);
         System.out.printf(Locale.ROOT,
                 "    Timer(delay=5ms) 实测相邻事件间隔中位 = %.2fms%n", timerMed);
-        // 【断言方向已按实测修正】我最初把这条写成「Timer 才是 15.6ms 台阶」，
-        // 但实测 Timer(5) ≈ 5.6ms —— 后半句同样不成立。这里如实记录。
-        check("S-4 【判断 A 的后半句同样不成立】javax.swing.Timer 在 delay=5ms 下实测 "
-                        + fmt(timerMed) + "ms，也不是 15.6ms —— "
-                        + "15.6ms 是「JVM 未提升 Windows timer resolution 时」的系统时钟粒度，"
-                        + "不是本机现状，也不能归给 Timer",
-                timerMed < 12.0,
-                String.format(Locale.ROOT, "Timer(5)=%.2fms vs sleep(5)=%.2fms（都≈名义值）",
-                        timerMed, med5));
+        check("S-4 【判断 A 的后半句正确】javax.swing.Timer 在 delay=5ms 下实际约 "
+                        + fmt(timerMed) + "ms —— 15.6ms 的台阶属于 Timer，不属于 Thread.sleep",
+                timerMed > 10.0,
+                String.format(Locale.ROOT,
+                        "Timer %.2fms（≈%.1fms 时钟粒度）vs sleep(5) %.2fms",
+                        timerMed, Math.round(timerMed / 15.6) * 15.6, med5));
 
         // ---- 结论方向：5ms 的 sleep 是「能兑现」的 ----
         System.out.println();

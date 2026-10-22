@@ -86,14 +86,6 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
     /** 短动画时长上限（秒）。 */
     public static final float SHORT_LENGTH_MAX = 0.25f;
 
-    /**
-     * 前缘时长 {@code leadingAnimationLength} 的上限（秒）。
-     *
-     * <p>比 {@link #SHORT_LENGTH_MAX} 宽：前缘本来就该比后缘短，
-     * 但「短促拖尾 + 长前缘」这个组合要让前缘能单独拉到 0.30 才有意义。
-     */
-    public static final float LEADING_LENGTH_MAX = 0.30f;
-
     private State state = new State();
 
     public static NeovideCursorSettings getInstance() {
@@ -150,11 +142,6 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         target.animationLength = clamp(from.animationLength, ANIM_LENGTH_MIN, ANIM_LENGTH_MAX);
         target.shortAnimationLength =
                 clamp(from.shortAnimationLength, SHORT_LENGTH_MIN, SHORT_LENGTH_MAX);
-
-        // 20（C 方案）：短跳分支的【前缘】时长下限。0 = 不启用（老 XML 没这项 → 字段初值 0f）。
-        // 上界与 shortAnimationLength 同量级；上限放宽一点，因为前缘可以比后缘长。
-        target.leadingAnimationLength =
-                clamp(from.leadingAnimationLength, 0f, LEADING_LENGTH_MAX);
 
         // 19（0.9.6 / M4）：输入平滑。老 XML 没有这一项 → 平台填字段初值 0f = 行为不变。
         target.typingSmoothness = clamp(from.typingSmoothness, 0f, 1f);
@@ -700,16 +687,6 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          */
         public float shortAnimationLength = 0.11f;
 
-    /**
-     * 短跳分支的<b>前缘</b>时长下限（秒）。0 = 不启用。
-     *
-     * <p>见 {@code NeovideConfig#leadingAnimationLength} 的完整说明。
-     * 它把「前缘帧数（平滑）」与「后缘时长（拖尾）」解耦：
-     * 前缘两角取 {@code max(shortAnimationLength × trailFactors[rank], 本值)}，
-     * 后缘两角完全不动。
-     */
-    public float leadingAnimationLength = 0f;
-
         /**
          * 19. 输入平滑（0.9.6 / M4 新增）。内部存 0–1，面板刻度 0–100。
          *
@@ -790,7 +767,6 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             stretchRatioK = from.stretchRatioK;
             animationLength = from.animationLength;
             shortAnimationLength = from.shortAnimationLength;
-            leadingAnimationLength = from.leadingAnimationLength;
             typingSmoothness = from.typingSmoothness;
             animPresetBase = from.animPresetBase;
             customAnimPresets = from.customAnimPresets;

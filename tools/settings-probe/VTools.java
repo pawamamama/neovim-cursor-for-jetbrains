@@ -132,8 +132,6 @@ public final class VTools {
                 "animationLength", "shortAnimationLength", "trailSize", "glowLayers",
                 "shadowBlurFactor", "glowOpacity",
                 "useShadow", "overlayFadeOut",
-                // 【C 方案】前缘时长下限也由预设决定（它不是用户手调项）
-                "leadingAnimationLength",
                 "animPresetBase"));
         java.util.Set<String> others = new java.util.HashSet<>(before.keySet());
         others.removeAll(animFields);

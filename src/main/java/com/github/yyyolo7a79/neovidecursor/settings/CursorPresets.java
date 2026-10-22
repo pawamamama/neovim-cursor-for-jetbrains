@@ -101,27 +101,10 @@ public final class CursorPresets {
          */
         private final int smoothTicks;
 
-        /**
-         * 短跳分支的【前缘】时长下限（×100，0 = 不启用）。
-         *
-         * <p><b>它解决的是结构性矛盾</b>（第三轮审查实测证明）：
-         * 前缘帧数（平滑度）与后缘时长（拖尾长度）原本共用一个
-         * {@code shortAnimationLength}，要平滑就必须拉长拖尾，不可兼得。
-         *
-         * <p>本字段只对前缘两角（rank 2/3）生效，后缘完全不动。
-         * 于是「短促拖尾 + 平滑前缘」可以同时成立：
-         * <pre>
-         *   short=0.11（后缘 110ms） + leading=0.20（前缘 24.7 帧）
-         *   vs 旧方案：要 10 帧前缘需 short=0.231 → 后缘 231ms
-         * </pre>
-         */
-        private final int leadingTicks;
-
         private AnimPreset(String name, int animLengthTicks, int shortLengthTicks,
                            int trailSizeTicks, int glowLayers,
                            int blurFactorTicks, int glowOpacityTicks,
-                           boolean useShadow, boolean overlayFadeOut, int smoothTicks,
-                           int leadingTicks) {
+                           boolean useShadow, boolean overlayFadeOut, int smoothTicks) {
             this.name = name;
             this.animLengthTicks = animLengthTicks;
             this.shortLengthTicks = shortLengthTicks;
@@ -132,7 +115,6 @@ public final class CursorPresets {
             this.useShadow = useShadow;
             this.overlayFadeOut = overlayFadeOut;
             this.smoothTicks = smoothTicks;
-            this.leadingTicks = leadingTicks;
         }
 
         /** 输入平滑（0–100）。见 {@link #smoothTicks} 的注释。 */
@@ -143,11 +125,6 @@ public final class CursorPresets {
         /** 输入平滑（0–1）。 */
         public float typingSmoothness() {
             return smoothTicks / 100f;
-        }
-
-        /** 短跳分支前缘时长下限（秒）；0 = 不启用。见 {@link #leadingTicks}。 */
-        public float leadingAnimationLength() {
-            return leadingTicks / 100f;
         }
 
         public String name() {
@@ -239,11 +216,11 @@ public final class CursorPresets {
      * 所以「快/平滑/柔和/高比对观感」这一层语义没有被抹平。
      */
     public static final AnimPreset[] ANIM_PRESETS = {
-            //                        名称          anim short trail layers blur opacity 辉光   淡出   平滑  前缘
+            //                        名称          anim short trail layers blur opacity 辉光   淡出   平滑
             // ① 基础：= NeovideConfig 默认值。日常用这个。
-            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,    0,    0),
+            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,    0),
             // ② 缎带：跨行动画拉长，斜缎带最明显。
-            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,    0,   18),
+            new AnimPreset("缎带",              28,  24,  100,  8,   20,  55,  true,  true,    0),
             // ③ 纯平滑输入：对齐 VS Code 原版的拖尾观感 —— 无辉光扩散、无淡出。
             //
             // 【blur 必须填 60 而不是 0（第二轮审查 F2，high）】
@@ -254,7 +231,7 @@ public final class CursorPresets {
             // → 下拉显示「基准项」但实际已经不是那个预设（显示层撒谎）。
             //
             // 60 = 0.60 = 最柔端。这是「万一用户手动开回辉光时得到柔和光雾」的正确取值。
-            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   0,   24),
+            new AnimPreset("纯平滑输入",        10,  24,  100,  8,   60,  30,  false, false,   0),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */
