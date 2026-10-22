@@ -175,7 +175,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             "只压平「同一行打字/退格」时四个角的时长梯度，<b>不改变拖尾总时长</b>："
             + "后缘（最长的一角）时长完全不变，抬起来的只是前缘。" + BR
             + "0% = 保持原样；100% = 前缘延时抬到约 80%，单行打字不再「一帧跳到新位置」。" + BR
-            + "跨行移动完全不受它影响 —— 那一路由「跨行动画时长」和「拖尾密度」决定。";
+            + "跨行移动完全不受它影响 —— 那一路由「跨行动画时长」和「拖尾密度」决定。" + BR
+            + "<b>注意：本项属于预设的一部分，切换预设会被重置为预设声明的值。</b>"
+            + "想保留你调好的手感，请先点「新建预设」把它存下来。";
 
     /** 高级（诊断）区：性能诊断开关的说明。该项不持久化。 */
     private static final String W_PAINT_DIAG =
@@ -417,15 +419,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 让 {@code isModified()} 恒为真（VDefects 的 V11-3c 当场抓到）。
      */
     private boolean suppressDerive;
-
-    /**
-     * 只跳过下一次派生（团队审查 T3-1 的连带）。
-     *
-     * <p>用于「删除自定义预设」：删除后当前值通常不等于内置常量，
-     * 而 apply() 末尾的 afterPendingEdited() 会立刻把它派生回来 ——
-     * 用户看到的却是「删了又出现」。
-     */
-    private boolean skipDeriveOnce;
 
     // 非 DSL 绑定控件：DialogPanel 不追踪它们，必须在 reset/apply/isModified 里手工同步
     private ColorPanel tailColorPanel;
@@ -1311,10 +1304,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         if (syncingControls || suppressDerive) {
             return;
         }
-        if (skipDeriveOnce) {
-            skipDeriveOnce = false;      // 一次性：只跳过本次（删除动作触发的那一次）
-            return;
-        }
         // A. 已在自定义预设上 → 持续同步快照
         if (!pending.animCustomName.isEmpty()) {
             if (CustomPresets
@@ -1334,10 +1323,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 原来只比 6 个动画值 → 用户在内置预设上【关掉辉光】时判为「没偏离」，
         // 于是不派生落脚点：滑块改动会派生副本，复选框改动不会 —— 同一类操作两种行为。
         // 现在把 useShadow / overlayFadeOut 也纳入判据（与 matchAnimPreset 同源）。
-        if (sameAnimValues(animValuesOf(pending), animConstantsOf(base))
-                && pending.useShadow == CursorPresets.ANIM_PRESETS[base].useShadow()
-                && pending.overlayFadeOut == CursorPresets.ANIM_PRESETS[base].overlayFadeOut()) {
-            return;                              // 没偏离，不派生
+        // 【第三轮审查 ③，high：判据必须覆盖预设的全部字段】
+        // 原来只比 8 项，漏了第 9 个 typingSmoothness —— 实测后果：
+        //   改 useShadow 会派生副本、改 typingSmoothness【不会】
+        //   → 下拉无自定义项、matchAnimPreset 返回 null，两头落空，改动无处可存。
+        // 更根本的做法是直接复用 matchAnimPreset（它就是"当前值属于哪个预设"的唯一判据），
+        // 这样以后加字段再也不会漏。
+        if (CursorPresetApplier.matchAnimPreset(pending) == CursorPresets.ANIM_PRESETS[base]) {
+            return;                              // 与基准预设完全一致，不派生
         }
         if (!CustomPresets
                 .canAdd(pending.customAnimPresets)) {
@@ -1557,12 +1550,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 而 afterPendingEdited() 看到「当前值 != 内置常量 且 animCustomName 为空」就会
         // 派生一个新副本 —— 于是用户刚删掉的预设在 apply 时又冒了出来。
         //
-        // 修法：删除这个动作本身要让「派生」暂停一次。用一次性标志，
-        // 而不是长期 suppressDerive（否则用户接着改参数也不会派生了）。
-        skipDeriveOnce = true;
-
-        // 值保持在当前参数上（用户看到的样子不变），只是不再挂在任何自定义预设下。
-        // 下次用户【主动改参数】时会重新派生 —— 那才是预期行为。
+        // 【第三轮审查 F3，medium：一次性标志不够】
+        // 最初用 skipDeriveOnce 挡一次，但它在 syncAllControlsFromPending() 里立刻被消耗，
+        // 而 apply() 末尾还会再调一次 afterPendingEdited() → 删掉的预设照样复活并被持久化。
+        //
+        // 更彻底的做法：删除后【吸附回当前基准内置预设】。
+        // 语义上也更对 —— 「删掉这个自定义预设」意味着「回到某个确定的状态」，
+        // 而不是「留在一个谁都不属于的中间态，等着下次编辑随便派生一个副本」。
+        int base = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+        applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[base]);
+        pending.animPresetBase = base;
         syncAllControlsFromPending();
     }
 
@@ -1679,12 +1676,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private void refreshDerivedHints() {
         if (singleMoveHint != null) {
-            float[] f = NeovideCursorSettings.deriveTrailFactors(pending.stretchRatioK);
+            // 双参版（含 typingSmoothness）+ rank2（横向实际用到的档），理由见 stretchText
+            float[] f = NeovideCursorSettings
+                    .deriveTrailFactors(pending.stretchRatioK, pending.typingSmoothness);
             long trailing = Math.round(pending.shortAnimationLength * 1000f * f[0]);
-            long leading = Math.round(pending.shortAnimationLength * 1000f * f[3]);
+            long leading = Math.round(pending.shortAnimationLength * 1000f * f[2]);
             singleMoveHint.setText(String.format(Locale.ROOT,
-                    "单行动画时长 = 短动画时长 × 拉伸系数：后缘 %d ms / 前缘 %d ms（系数 %.3f×）。",
-                    trailing, leading, f[3] > 0f ? f[0] / f[3] : 0f));
+                    "单行动画时长 = 短动画时长 × 拉伸系数：后缘 %d ms / 横向前缘 %d ms（系数 %.2f×）。",
+                    trailing, leading, f[2] > 0f ? f[0] / f[2] : 0f));
         }
         if (crossMoveHint != null) {
             long trailing = Math.round(pending.animationLength * 1000f);
@@ -1720,15 +1719,28 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * （{@code TrailCorner.java:221}）。0.9.5 起短动画时长可调，因此这里
      * <b>必须读 pending</b>，不能用任何写死的镜像常量（契约 §10.2 的 N-2）。
      */
+    /** 探针入口：{@link #stretchText} 的实际输出（验证面板口径与运行期一致）。 */
+    public String stretchTextForProbe(float k) {
+        return stretchText(k);
+    }
+
     String stretchText(float k) {
-        float[] f = NeovideCursorSettings.deriveTrailFactors(k);
+        // 【第三轮审查 ⑤，medium：必须用双参版（含 typingSmoothness）】
+        // 原来调单参 deriveTrailFactors(k)，而运行期用的是
+        // deriveTrailFactors(k, typingSmoothness)。实测（smooth=1.0 时）：
+        //   面板显示 前缘 18.2 ms / 7.692×      真实 前缘 116.2 ms / 1.205×
+        // 差 6.4 倍 —— 这正是用户"横向拉伸变小了却在面板上看不出来"的直接原因。
+        //
+        // 而且前缘必须报 rank2（横向打字实际用到的档）：
+        // 第三轮 VRank 实测，纯横向/纵向移动时四角 rank 恒为 {0,2}，rank3 不出现。
+        // 报 f[3] 会把前缘时长低报约 1.9 倍。
+        float[] f = NeovideCursorSettings
+                .deriveTrailFactors(k, pending.typingSmoothness);
         long trailingMs = Math.round(pending.shortAnimationLength * 1000f * f[0]);
-        long leadingMs = Math.round(pending.shortAnimationLength * 1000f * f[3]);
-        float ratio = f[3] > 0f ? f[0] / f[3] : 0f;
-        // 比值用三位小数：契约 §2.5 的自检表就是按 4.545 / 7.692 这种精度写的，
-        // 面板显示必须与它逐位对得上，否则"显示"和"文档"又是两套口径。
+        long leadingMs = Math.round(pending.shortAnimationLength * 1000f * f[2]);
+        float ratio = f[2] > 0f ? f[0] / f[2] : 0f;
         return String.format(Locale.ROOT,
-                "%.1f×   后缘 %d ms / 前缘 %d ms   (rank0 最拖 → rank3 最跟手，实际比值 %.3f×)",
+                "%.1f×   后缘 %d ms / 横向前缘 %d ms   (rank0 最拖 → rank2 跟手，横向实际比值 %.2f×)",
                 k, trailingMs, leadingMs, ratio);
     }
 

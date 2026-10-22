@@ -51,12 +51,15 @@ public final class VHints {
         System.out.println("    单行提示： " + single0);
         System.out.println("    跨行提示： " + cross0);
 
-        float[] f = NeovideCursorSettings.deriveTrailFactors(4.5f);
+        // 【口径修正 rank3 → rank2】VRank 实测：纯横向/纵向移动时四角 rank 恒为 {0,2}，
+        // rank3 根本不出现。面板提示必须报横向前缘（rank2），否则低报约 1.9 倍。
+        // 同时必须用【双参版】deriveTrailFactors(k, smooth) —— 运行期就是它。
+        float[] f = NeovideCursorSettings.deriveTrailFactors(4.5f, 0f);
         long trailMs = Math.round(0.11f * 1000f * f[0]);
-        long leadMs = Math.round(0.11f * 1000f * f[3]);
+        long leadMs = Math.round(0.11f * 1000f * f[2]);
         check("H-2 单行提示含自算的后缘毫秒数（" + trailMs + "）",
                 single0.contains(trailMs + " ms"), single0);
-        check("H-3 单行提示含自算的前缘毫秒数（" + leadMs + "）",
+        check("H-3 单行提示含自算的【横向前缘】毫秒数（" + leadMs + "，rank2 口径）",
                 single0.contains(leadMs + " ms"), single0);
         check("H-4 跨行提示含 animationLength 的毫秒数（100）",
                 cross0.contains("100 ms"), cross0);

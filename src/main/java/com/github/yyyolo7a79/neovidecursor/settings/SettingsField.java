@@ -473,4 +473,62 @@ public final class SettingsField {
         }
         return applied;
     }
+
+    /**
+     * 同 {@link #restore}，但<b>跳过指定的键</b>。
+     *
+     * <p><b>为什么需要它（第三轮审查 ②，high）</b>：自定义预设快照存的是全部 19 个参数，
+     * 其中包含 {@code enabled} / {@code hideNativeCaret} / {@code trailMode} /
+     * {@code alwaysHighFps} 这四个<b>运行环境开关</b>。
+     *
+     * <p>直接整份 restore 会造成：
+     * <ul>
+     *   <li>快照里 {@code enabled=false} → 点一下预设<b>把整个插件关掉</b>；</li>
+     *   <li>反向：已经关掉的插件被点开；</li>
+     *   <li>{@code hideNativeCaret} 被改动会写 IDEA 配色方案（不可逆副作用）。</li>
+     * </ul>
+     *
+     * <p>而内置预设路径（{@code applyAnimPreset}）<b>从不碰</b>这四个字段 ——
+     * 两条路径语义必须一致，否则「切内置预设安全、切自定义预设危险」。
+     *
+     * @param skip 要跳过的字段 key（可变参数，null 安全）
+     * @return 成功写入的字段数
+     */
+    public static int restoreSkipping(NeovideCursorSettings.State s, String snapshot,
+                                      String... skip) {
+        if (s == null || snapshot == null || snapshot.isEmpty()) {
+            return 0;
+        }
+        java.util.Set<String> skipSet = new java.util.HashSet<>();
+        if (skip != null) {
+            for (String k : skip) {
+                if (k != null) {
+                    skipSet.add(k);
+                }
+            }
+        }
+        int applied = 0;
+        for (String entry : snapshot.split(";")) {
+            if (entry == null) {
+                continue;
+            }
+            String e = entry.trim();
+            int eq = e.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String key = e.substring(0, eq).trim();
+            if (skipSet.contains(key)) {
+                continue;                   // 明确的运行环境开关：预设无权改动
+            }
+            SettingsField f = byKey(key);
+            if (f == null || !f.inPreset) {
+                continue;
+            }
+            if (f.decode(s, e.substring(eq + 1))) {
+                applied++;
+            }
+        }
+        return applied;
+    }
 }

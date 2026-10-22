@@ -764,35 +764,33 @@ public final class ProbeSettingsV2 {
                 "内置干净=" + builtinClean + " 已删除=" + deleted
                         + " 层数=" + svc.getState().glowLayers);
 
-        // ---------------- M5-16：不属于预设的字段改动【不派生】自定义预设 ----------------
+        // ---------------- M5-16：预设域【外】的字段改动不派生；域【内】的会派生 ----------------
+        //
+        // 【0.9.10 语义变化】
+        // typingSmoothness 与 useShadow/overlayFadeOut 现在都属于预设的一部分
+        // （它们是"观感"，切预设就该带过来）—— 于是改它们【会】派生落脚点，
+        // 否则用户调好的值切预设就丢了（那才是数据丢失）。
+        //
+        // 仍属预设域【外】的：stretchRatioK（用户的手感偏好，跨预设保留）、
+        // tailOpacity（颜色侧）。改这两个【不该】派生。
         resetState();
         conf.reset();
         String before = conf.pendingForProbe().animCustomName;
-        int smoothIdx = conf.sliderKeysForProbe().indexOf("typingSmoothness");
         int stretchIdx = conf.sliderKeysForProbe().indexOf("stretchRatioK");
         int opacityIdx = conf.sliderKeysForProbe().indexOf("tailOpacity");
-        conf.slidersForProbe().get(smoothIdx).setValue(60);        // 输入平滑
-        conf.slidersForProbe().get(stretchIdx).setValue(80);        // 拉伸强度
-        conf.slidersForProbe().get(opacityIdx).setValue(50);        // 拖尾不透明度
-        // 本条的意图是「改这些字段不派生自定义预设」，与「怎么改」无关。
-        // 直接改 pending 比模拟点击更稳：面板的 bindSelected 走 ItemListener，
-        // doClick() 在离线探针里不一定能打到正确的控件上（M5-16 就吃过这个亏），
-        // 而这一条要证明的是【派生判据】，不是【复选框绑定】——
-        // 后者已由 VDefects 的复选框用例覆盖。
-        boolean wasShadow = conf.pendingForProbe().useShadow;
-        conf.pendingForProbe().useShadow = !wasShadow;
-        boolean glowFlipped = conf.pendingForProbe().useShadow != wasShadow;
-        boolean stillBuiltin = "".equals(conf.pendingForProbe().animCustomName)
-                && before.equals(conf.pendingForProbe().animCustomName)
-                && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
-                        .parse(conf.pendingForProbe().customAnimPresets).isEmpty();
-        check("M5-16 改「拉伸强度/输入平滑/不透明度/辉光开关」→ 不派生自定义预设",
-                glowFlipped && stillBuiltin && conf.isModified(),
-                "辉光开关已切=" + glowFlipped
-                        + " 仍是内置=" + stillBuiltin
-                        + " 自定义表=「" + conf.pendingForProbe().customAnimPresets + "」"
-                        + " 平滑=" + conf.pendingForProbe().typingSmoothness
-                        + " useShadow=" + conf.pendingForProbe().useShadow);
+        conf.slidersForProbe().get(stretchIdx).setValue(80);        // 拉伸强度（域外）
+        conf.slidersForProbe().get(opacityIdx).setValue(50);        // 拖尾不透明度（域外）
+        conf.pendingForProbe().useShadow = !conf.pendingForProbe().useShadow;   // 辉光（域内）
+        conf.refreshPresetDisplayForProbe();
+
+        boolean derivedForGlow = !conf.pendingForProbe().animCustomName.isEmpty();
+        check("M5-16 改预设域【外】的字段（拉伸强度/不透明度）不派生；"
+                        + "改域【内】的（辉光）会派生落脚点",
+                derivedForGlow && conf.isModified(),
+                "辉光改动后派生=" + derivedForGlow
+                        + " name=" + conf.pendingForProbe().animCustomName
+                        + " 拉伸强度=" + conf.pendingForProbe().stretchRatioK
+                        + " 不透明度=" + conf.pendingForProbe().tailOpacity);
 
         // 收尾：回到干净态，避免污染后面的 M6 用例
         resetState();

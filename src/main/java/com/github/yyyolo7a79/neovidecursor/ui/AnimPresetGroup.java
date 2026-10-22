@@ -29,11 +29,7 @@ public final class AnimPresetGroup extends DefaultActionGroup {
     public AnimPresetGroup() {
         super(CursorPresets.MENU_ANIM, true);          // 第二个参数 true = popup
 
-        // 内置预设（只读）
-        for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
-            add(new ApplyAnimPresetAction(p));
-        }
-
+        // 内置 + 自定义全部由 rebuildCustom 建（避免两处各建一半、累加口径不一）
         // 自定义预设（用户自己存的）—— 动态展开。
         //
         // 【为什么必须在这里加（用户多次反馈："保存了自定义设置但是 tools 依旧没有"）】
@@ -45,12 +41,24 @@ public final class AnimPresetGroup extends DefaultActionGroup {
         rebuildCustom();
     }
 
-    /** 从 settings 重建自定义预设部分（内置部分不动）。 */
+    /**
+     * 重建整个菜单 = 内置（只读） + 可选分隔线 + 自定义（运行期数据）。
+     *
+     * <p><b>为什么必须 removeAll() 后整体重建，而不是"只删自定义那部分"</b>
+     * （第三轮审查 ①，blocker）：
+     * 最初只 {@code remove(ApplyCustomAnimPresetAction)}，<b>从不删 {@code addSeparator()}
+     * 加的分隔线</b>，而本方法在 {@link #update} 里每次弹出菜单都会调 ——
+     * 实测打开 50 次菜单后子项 5→55、分隔线 1→51，菜单被撑爆。
+     *
+     * <p>而且 {@code list.isEmpty()} 提前 return 时也不清理，删光自定义预设后仍残留一条空线。
+     *
+     * <p>整体重建的代价可以忽略（菜单项最多几十个），换来的是"任何时刻菜单内容都严格等于
+     * 当前 state"，不存在累加或残留。
+     */
     private void rebuildCustom() {
-        for (AnAction a : getChildActionsOrStubs()) {
-            if (a instanceof ApplyCustomAnimPresetAction) {
-                remove(a);
-            }
+        removeAll();
+        for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
+            add(new ApplyAnimPresetAction(p));
         }
         NeovideCursorSettings svc = settingsOrNull();
         if (svc == null) {
@@ -60,7 +68,7 @@ public final class AnimPresetGroup extends DefaultActionGroup {
                 com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
                         .parse(svc.getState().customAnimPresets);
         if (list.isEmpty()) {
-            return;
+            return;                      // 没有自定义预设 → 不加分隔线（不留空线）
         }
         addSeparator();
         for (com.github.yyyolo7a79.neovidecursor.settings.CustomPresets.Entry e : list) {
@@ -125,9 +133,19 @@ public final class AnimPresetGroup extends DefaultActionGroup {
         @Override
         public boolean isSelected(@NotNull AnActionEvent e) {
             // 与面板同源的判据：matchAnimPreset(state) == preset。
-            // 这样天然保证「最多一个勾选」—— 不需要任何「记住上次点了哪个」的状态。
-            return currentState() != null
-                    && CursorPresetApplier.matchAnimPreset(currentState()) == preset;
+            //
+            // 【第三轮审查 ④，high：必须排除「正在用自定义预设」的状态】
+            // 内置项按【数值】判定（matchAnimPreset），自定义项按【名字】判定（animCustomName）
+            // —— 两套判据可以同时为真。实测：自定义预设的数值恰好等于「基础」时，
+            // 「基础」与「我的基础副本」两项【同时打勾】，单选契约被打破。
+            // 用户在内置预设上点「新建预设」必然触发（副本数值就是原样复制的）。
+            //
+            // 修法：animCustomName 非空 = 当前在用某个自定义预设 → 内置项一律不勾。
+            // 这与面板下拉的「自定义优先」是同一个语义。
+            NeovideCursorSettings.State st = currentState();
+            return st != null
+                    && st.animCustomName.isEmpty()
+                    && CursorPresetApplier.matchAnimPreset(st) == preset;
         }
 
         @Override

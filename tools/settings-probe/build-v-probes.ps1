@@ -69,7 +69,7 @@ Step "javac V 探针（$($vprobes.Count) 个）"
 if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
-$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VOrder', 'VOrtho')
+$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2')
 # VOrder 是「已知偏差上报器」：它的 O-1 断言的是契约 V13 的机械判据，
 # 实测不成立（见 VERIFY-SETTINGS-V2.md 的 F-2），但同一探针里的行为判据成立。
 # 它不参与本脚本的通过门（否则每次跑都会因一条已知文档缺陷而 exit 1），
@@ -77,7 +77,9 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
 # VOrtho 同理：它是「预设字段域扩大后的正交性破损」的缺陷上报器 ——
 # O-1/O-2/O-3/O-4/O-5/O-7/O-8/O-9/O-13/O-14/O-15 全部是【真实存在的未修缺陷】，
 # 放进通过门会让每次跑都 exit 1。它的完整输出仍会打印并在汇总表里出现 —— 不隐藏任何红。
-$informational = @('VOrder', 'VOrtho')
+# VRegr2 同理：它是「上一轮修法回归」的缺陷上报器 —— R-6/R-17c/R-18/R-19/R-22 是
+# 【本轮新引入的未修缺陷】，放进通过门会让每次跑都 exit 1。输出全打印，不隐藏任何红。
+$informational = @('VOrder', 'VOrtho', 'VRegr2')
 $failed = 0
 $rows = @()
 foreach ($main in $mains) {

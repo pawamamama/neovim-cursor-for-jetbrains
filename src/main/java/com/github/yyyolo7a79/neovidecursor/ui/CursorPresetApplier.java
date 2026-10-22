@@ -103,7 +103,17 @@ public final class CursorPresetApplier {
         if (snap == null) {
             return false;                       // 名字不存在（可能在别处被删了）
         }
-        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.restore(s, snap);
+        // 【第三轮审查 ②，high：恢复预设不能把插件关掉】
+        // 原实现直接 SettingsField.restore(s, snap) 整份 19 字段还原，其中包含
+        // enabled / hideNativeCaret / trailMode / alwaysHighFps ——
+        // 实测：快照里 enabled=false 时点该预设会把插件整体关掉；
+        // 反向会把已经关掉的插件打开；hideNativeCaret 还会触发配色方案的不可逆写入。
+        //
+        // 内置预设路径（applyAnimPreset）从不碰这四个字段，所以自定义路径也必须一致。
+        // 这四个是「运行环境开关」，不是「观感参数」—— 不该被预设快照带走。
+        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.restoreSkipping(
+                s, snap,
+                "enabled", "hideNativeCaret", "trailMode", "alwaysHighFps");
         s.animCustomName = name;
         svc.persistQuietly();
         NeovideCaretManager.applyConfig();
