@@ -39,12 +39,17 @@ public final class VTools {
         check("M-1 动画预设组可实例化", animGroup != null, "");
         check("M-2 动画组是 DefaultActionGroup（AnActionGroup 在本机 jar 里不存在）",
                 animGroup instanceof DefaultActionGroup, "");
-        check("M-3 动画组有 7 个子项", animItems.length == 7, "n=" + animItems.length);
+        // 【0.9.10】动画预设精简到 3 个；断言与预设表同源，不再写死数字。
+        check("M-3 动画组子项数 == ANIM_PRESETS.length",
+                animItems.length == com.github.yyyolo7a79.neovidecursor.settings.CursorPresets
+                        .ANIM_PRESETS.length,
+                "n=" + animItems.length + " 表="
+                        + com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.ANIM_PRESETS.length);
         boolean allToggle = true;
         for (AnAction a : animItems) {
             allToggle &= a instanceof ToggleAction;
         }
-        check("M-4 动画组 7 个子项全是 ToggleAction（勾选态天然单选）", allToggle, "");
+        check("M-4 动画组全部子项是 ToggleAction（勾选态天然单选）", allToggle, "");
 
         ColorPresetGroup colorGroup = new ColorPresetGroup();
         AnAction[] colorItems = colorGroup.getChildActionsOrStubs();
@@ -101,7 +106,8 @@ public final class VTools {
 
         // ---- setSelected(true) 应用且只改动画字段 ----
         before = VFields.snapshot(svc.getState());
-        ((ToggleAction) animItems[6]).setSelected(null, true);            // 高对比
+        // 用最后一个预设（原写死 [6] 指「高对比」，已随预设精简删除）
+        ((ToggleAction) animItems[animItems.length - 1]).setSelected(null, true);
         after = VFields.snapshot(svc.getState());
         // 【F7 的连带影响，必须写清楚】
         // F7 之后 applyAnimPreset 会同步前移 animPresetBase（与面板 onAnimPresetPicked() 一致），

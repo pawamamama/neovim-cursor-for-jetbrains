@@ -100,9 +100,18 @@ public final class VPreset {
                 c0.tailColor() + " vs " + cfg.tailColor);
         check("V4-8 shadowColor 预设1 == 默认值", c0.shadowColor().equalsIgnoreCase(cfg.shadowColor),
                 c0.shadowColor() + " vs " + cfg.shadowColor);
-        check("V4-9 预设表数量：动画 7 + 颜色 5",
-                CursorPresets.ANIM_PRESETS.length == 7 && CursorPresets.COLOR_PRESETS.length == 5,
+        // 【0.9.10 精简】动画预设从 7 个减到 3 个（基础 / 缎带 / 纯平滑输入），
+        // 颜色预设保持 5 个不变。断言改为精确匹配当前契约数量，防止数量漂移。
+        check("V4-9 预设表数量：动画 3 + 颜色 5",
+                CursorPresets.ANIM_PRESETS.length == 3 && CursorPresets.COLOR_PRESETS.length == 5,
                 "anim=" + CursorPresets.ANIM_PRESETS.length + " color=" + CursorPresets.COLOR_PRESETS.length);
+        check("V4-9b 动画预设名称精确匹配契约（基础 / 缎带 / 纯平滑输入）",
+                "基础".equals(CursorPresets.ANIM_PRESETS[0].name())
+                        && "缎带".equals(CursorPresets.ANIM_PRESETS[1].name())
+                        && "纯平滑输入".equals(CursorPresets.ANIM_PRESETS[2].name()),
+                CursorPresets.ANIM_PRESETS[0].name() + " / "
+                        + CursorPresets.ANIM_PRESETS[1].name() + " / "
+                        + CursorPresets.ANIM_PRESETS[2].name());
 
         // State 的初值必须与 NeovideConfig 一致（干净安装的路径）
         NeovideCursorSettings.State s = new NeovideCursorSettings.State();
@@ -154,7 +163,7 @@ public final class VPreset {
                         + before.get(f) + "  ->  " + after.get(f));
             }
         }
-        check("V5a-1 7 个动画预设都不改任何颜色字段（逐位）", bad == 0, bad + " 个预设污染颜色");
+        check("V5a-1 全部动画预设都不改任何颜色字段（逐位）", bad == 0, bad + " 个预设污染颜色");
 
         // 动画预设也不许碰 stretchRatioK / trailMode（契约 §5.3）
         System.out.println();
@@ -176,7 +185,7 @@ public final class VPreset {
             System.out.println("    " + (ok ? "PASS " : "FAIL ") + CursorPresets.ANIM_PRESETS[i].name()
                     + " stretchRatioK=" + bits(p.stretchRatioK) + " trailMode=" + p.trailMode);
         }
-        check("V5a2 7 个动画预设都不改 stretchRatioK / trailMode", bad2 == 0, bad2 + " 个越界");
+        check("V5a2 全部动画预设都不改 stretchRatioK / trailMode", bad2 == 0, bad2 + " 个越界");
     }
 
     // ------------------------------------------------------- V5 正交性（颜色）
@@ -380,7 +389,7 @@ public final class VPreset {
                 System.out.println("    FAIL 预设 " + p.name() + " 应用后匹配不回来");
             }
         }
-        check("V15-3 7 个动画预设应用后都能被 matchAnimPreset 反查回来", unmatched == 0,
+        check("V15-3 全部动画预设应用后都能被 matchAnimPreset 反查回来", unmatched == 0,
                 unmatched + " 个匹配不上");
 
         int cunmatched = 0;
@@ -397,7 +406,9 @@ public final class VPreset {
         // Tools 路径（全量替换）也必须正交
         svc.getState().tailColor = "#0F0F0F";
         svc.getState().shadowColor = "#F0F0F0";
-        CursorPresetApplier.applyAnimPreset(CursorPresets.ANIM_PRESETS[6]);
+        // 用最后一个预设（原写死 [6] 指「高对比」，已随预设精简删除）
+        CursorPresetApplier.applyAnimPreset(
+                CursorPresets.ANIM_PRESETS[CursorPresets.ANIM_PRESETS.length - 1]);
         boolean toolsColorSame = "#0F0F0F".equalsIgnoreCase(svc.getState().tailColor)
                 && "#F0F0F0".equalsIgnoreCase(svc.getState().shadowColor);
         check("V15-5 Tools 应用动画预设不改颜色（与面板同源的正交性）", toolsColorSame,

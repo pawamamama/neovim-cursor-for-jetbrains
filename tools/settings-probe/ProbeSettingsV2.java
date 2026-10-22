@@ -187,7 +187,7 @@ public final class ProbeSettingsV2 {
                 c1.tailColor().equals(def.tailColor) && c1.shadowColor().equals(def.shadowColor),
                 c1.tailColor() + " / " + c1.shadowColor());
 
-        // P1..P7：7 个动画预设，逐字段 before/after + 落库
+        // P1..Pn：逐个动画预设，逐字段 before/after + 落库（数量与预设表同源）
         for (int i = 0; i < CursorPresets.ANIM_PRESETS.length; i++) {
             CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[i];
             resetState();
@@ -275,7 +275,7 @@ public final class ProbeSettingsV2 {
                 colorIntact--;
             }
         }
-        check("O1 换 7 个动画预设，两个 HEX 全程不变（动画 → 颜色 正交）",
+        check("O1 换全部动画预设，两个 HEX 全程不变（动画 → 颜色 正交）",
                 colorIntact == CursorPresets.ANIM_PRESETS.length,
                 colorIntact + "/" + CursorPresets.ANIM_PRESETS.length);
 
@@ -313,7 +313,9 @@ public final class ProbeSettingsV2 {
         resetState();
         svc.getState().tailColor = "#0F0F0F";
         svc.getState().shadowColor = "#F0F0F0";
-        CursorPresetApplier.applyAnimPreset(CursorPresets.ANIM_PRESETS[6]);   // 高对比
+        // 用最后一个预设（原写死 [6] 指「高对比」，已随预设精简删除）
+        CursorPresetApplier.applyAnimPreset(
+                CursorPresets.ANIM_PRESETS[CursorPresets.ANIM_PRESETS.length - 1]);
         check("O3 Tools applyAnimPreset 不改颜色", "#0F0F0F".equals(svc.getState().tailColor)
                 && "#F0F0F0".equals(svc.getState().shadowColor), svc.getState().tailColor);
 
@@ -964,7 +966,9 @@ public final class ProbeSettingsV2 {
                     toggles++;
                 }
             }
-            check("M3 7 项都是 ToggleAction（勾选态表示当前预设）", toggles == 7, toggles + "/7");
+            check("M3 全部子项都是 ToggleAction（勾选态表示当前预设）",
+                toggles == kids.length && toggles == CursorPresets.ANIM_PRESETS.length,
+                toggles + "/" + kids.length + "（表=" + CursorPresets.ANIM_PRESETS.length + "）");
 
             com.github.yyyolo7a79.neovidecursor.ui.ColorPresetGroup cg =
                     new com.github.yyyolo7a79.neovidecursor.ui.ColorPresetGroup();
@@ -999,12 +1003,20 @@ public final class ProbeSettingsV2 {
 
             // M7：setSelected(true) 应用对应预设
             resetState();
-            ToggleAction ta3 = (ToggleAction) kids[6];    // 高对比
+            // 用最后一个预设（原写死 kids[6] = 「高对比」，已随预设精简删除）。
+            // 断言改为「state 与该预设声明的值一致」，不写死具体数字。
+            int lastIdx = kids.length - 1;
+            CursorPresets.AnimPreset lastPreset = CursorPresets.ANIM_PRESETS[lastIdx];
+            ToggleAction ta3 = (ToggleAction) kids[lastIdx];
             ta3.setSelected(null, true);
-            check("M7 勾选「高对比」→ state 变成该预设（layers=10 opacity=0.75）",
-                    svc.getState().glowLayers == 10
-                            && Math.abs(svc.getState().glowOpacity - 0.75f) < CursorPresets.EPS,
-                    svc.getState().glowLayers + " / " + svc.getState().glowOpacity);
+            check("M7 勾选最后一个预设「" + lastPreset.name() + "」→ state 变成该预设",
+                    svc.getState().glowLayers == lastPreset.glowLayers()
+                            && Math.abs(svc.getState().glowOpacity - lastPreset.glowOpacity())
+                                    < CursorPresets.EPS
+                            && svc.getState().useShadow == lastPreset.useShadow(),
+                    "layers=" + svc.getState().glowLayers
+                            + " opacity=" + svc.getState().glowOpacity
+                            + " useShadow=" + svc.getState().useShadow);
 
             // M8：颜色组同理
             resetState();

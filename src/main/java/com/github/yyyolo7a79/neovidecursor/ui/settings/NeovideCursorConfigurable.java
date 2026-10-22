@@ -573,7 +573,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 panel.group("总开关", true, g -> {
                     g.row("启用拖尾光标（总开关）", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
+                        bindCheckTracked(row, () -> pending.enabled, v -> pending.enabled = v);
                         return kotlin.Unit.INSTANCE;
                     });
 
@@ -592,13 +592,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
 
                     g.row("隐藏原生光标（覆盖层充当光标）", row -> {
-                        bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
+                        bindCheckTracked(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
                                 .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
 
                     g.row("常驻刷新（永远按 8ms 调度）", row -> {
-                        bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
+                        bindCheckTracked(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
                                 .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
@@ -615,7 +615,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 panel.group("淡出", true, g -> {
                     g.row("辉光淡出（停止后柔和熄灭）", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> pending.overlayFadeOut, v -> {
+                        bindCheckTracked(row, () -> pending.overlayFadeOut, v -> {
                             pending.overlayFadeOut = v;
                             fadeOn.set(v);
                         });
@@ -654,7 +654,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
 
                     g.row("启用辉光", row -> {
-                        bindCheck(row, () -> pending.useShadow, v -> {
+                        bindCheckTracked(row, () -> pending.useShadow, v -> {
                             pending.useShadow = v;
                             shadowOn.set(v);
                         });
@@ -986,6 +986,26 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         suppressDerive = true;
         syncingControls = true;
         try {
+            // ---- ① 复选框 / 下拉 / 联动属性 ----
+            //
+            // 【2026-10-22 团队审查的 F1/F4 —— 这是三个已报 bug 的共同根因】
+            // 本方法原来只回灌「滑块 + ColorPanel + 提示」，漏掉了：
+            //   · 6 个复选框（enabled / hideNativeCaret / alwaysHighFps /
+            //     overlayFadeOut / useShadow / 性能诊断）
+            //   · trailModeCombo 下拉
+            //   · 3 个 GraphProperty（springMode / shadowOn / fadeOn）→ 控件置灰状态
+            //
+            // 后果：切到自定义预设后，那 6 个字段的【控件】仍是旧值，
+            // apply() 时被陈旧控件值反冲回去 → 19 字段快照实际只存住 13 个。
+            // 而且辉光/淡出的复选框不跟着变 → 用户看到「恢复预设没用」「切换预设辉光不回来」。
+            //
+            // super.reset() 走 DialogPanel 自己的回调表（全部绑定控件，含复选框与下拉），
+            // 这是平台提供的完整回灌路径 —— 自己再手写一份必然漏。
+            super.reset();
+            // GraphProperty 不在 DialogPanel 的绑定表里，必须单独刷
+            graphReset(pending);
+
+            // ---- ② 非绑定控件：滑块三件套 + ColorPanel ----
             for (SliderBinding b : bindings) {
                 int exact = b.spec.readTick.applyAsInt(pending);
                 int snapped = snapToTick(exact, b.spec.min, b.spec.max, b.spec.step);
@@ -1004,6 +1024,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             if (shadowColorPanel != null) {
                 shadowColorPanel.setSelectedColor(parseHex(pending.shadowColor));
             }
+
+            // ---- ③ 派生显示 ----
             refreshDerivedHints();
             refreshPresetDisplay();
         } finally {
@@ -1036,8 +1058,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return;
         }
         if (idx < CursorPresets.ANIM_PRESETS.length) {
-            // 内置预设：只写 6 个动画字段，其余 13 个参数一概不动（正交性硬判据）
-            writeAnimValues(pending, animConstantsOf(idx));
+            // 内置预设：写【全部】预设字段（含辉光/淡出开关）
+            // 【为什么不再是「只写 6 个动画字段」】那套正交性判据成立于「预设只描述动画」，
+            // 但用户要的是「预设 = 一整套观感」，且「纯平滑输入」必须能关辉光。
+            // 颜色两个 HEX 仍然不碰（颜色预设独立，这是真正需要正交的部分）。
+            applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[idx]);
             animBaseIdx = idx;
             pending.animPresetBase = idx;
             pending.animCustomName = "";
@@ -1327,8 +1352,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             if (animBaseIdx < 0 || animBaseIdx >= CursorPresets.ANIM_PRESETS.length) {
                 return;
             }
-            writeAnimValues(pending, animConstantsOf(animBaseIdx));
+            // 写【全部】预设字段，不只是 6 个动画字段（F-07：这是「恢复预设没用」的根因）
+            applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[animBaseIdx]);
             pending.animPresetBase = animBaseIdx;
+            pending.animCustomName = "";
             syncAllControlsFromPending();
         } finally {
             suppressDerive = prev;
@@ -1480,6 +1507,28 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 s.shadowBlurFactor,
                 s.glowOpacity
         };
+    }
+
+    /**
+     * 把内置预设的<b>全部字段</b>写进 State。
+     *
+     * <p><b>为什么不能只写 6 个动画字段（团队审查 F-07 / 用户报的 B1）</b>：
+     * 用户在某预设下关掉辉光 → {@code useShadow=false} 被持久化；
+     * 之后切到任何别的预设，辉光<b>都不会回来</b>
+     * （用户原话：「切换预设不能让辉光回来」「缎带没有扩散了，就是持久化了」）。
+     *
+     * <p>原实现只调 {@link #writeAnimValues}（6 项），所以恢复/切换预设对
+     * {@code useShadow} / {@code overlayFadeOut} 完全无效 —— 也就是「恢复预设没用」。
+     *
+     * <p>「纯平滑输入」这个预设还<b>必须</b>能表达「关辉光」，所以这不是补丁，
+     * 是预设字段域本身就该包含这两个开关。
+     */
+    public static void applyAnimPresetFields(NeovideCursorSettings.State s, CursorPresets.AnimPreset p) {
+        writeAnimValues(s, new float[]{
+                p.animationLength(), p.shortAnimationLength(), p.trailSize(),
+                p.glowLayers(), p.shadowBlurFactor(), p.glowOpacity()});
+        s.useShadow = p.useShadow();
+        s.overlayFadeOut = p.overlayFadeOut();
     }
 
     /** 把 6 个值写回 State（glowLayers 是整数：四舍五入，不截断）。 */
@@ -1887,6 +1936,30 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             @Override public Boolean get() { return getter.invoke(); }
             @Override public void set(Boolean v) {
                 setter.accept(v);
+            }
+        });
+    }
+
+    /**
+     * 带「改动即同步快照」的复选框绑定。
+     *
+     * <p><b>为什么不能直接用 {@link #bindCheck}</b>（团队审查的 F-06）：
+     * 7 个复选框的 setter 只写 {@code pending}，<b>不走 {@link #afterPendingEdited()}</b>。
+     * 而 {@code afterPendingEdited()} 才是「自定义预设的快照跟着当前值更新」的唯一入口。
+     *
+     * <p>实测症状：在自定义预设「A」上关掉辉光 → 应用 → 重新打开面板 → 选回「A」，
+     * 辉光<b>又开了</b>（快照里的 {@code useShadow} 还是 1，因为关辉光那次没写进快照）。
+     *
+     * <p>滑块路径没这个问题，因为它的 ChangeListener 里显式调了 {@code refreshPresetDisplay()}
+     * （内部会走 {@code afterPendingEdited}）。复选框漏了这一步。
+     */
+    private Cell<JBCheckBox> bindCheckTracked(Row row,
+                                              Function0<Boolean> getter,
+                                              final java.util.function.Consumer<Boolean> setter) {
+        return bindCheck(row, getter, v -> {
+            setter.accept(v);
+            if (!syncingControls) {
+                afterPendingEdited();
             }
         });
     }

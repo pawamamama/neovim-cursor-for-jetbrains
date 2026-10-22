@@ -39,6 +39,8 @@ public final class VCustom {
         crud();
         builtinReadOnly();
         buttonsExist();
+        presetWritesAllFields();
+        survivesXmlRoundTrip();
         autoDerive();
 
         System.out.println();
@@ -254,6 +256,111 @@ public final class VCustom {
             }
         }
         return false;
+    }
+
+    // ---------------------------------------------------------------- 3.6 预设必须写全字段
+
+    /**
+     * 切换/恢复预设时，{@code useShadow} / {@code overlayFadeOut} 必须跟着变。
+     *
+     * <p><b>这是用户报的 B1/B3 的守门断言</b>：
+     * 「辉光淡入淡出关闭了，恢复预设没用」「切换预设不能让辉光回来」
+     * 「实测缎带没有扩散了，就是持久化了」。
+     *
+     * <p>根因：预设原来只描述 6 个动画字段，{@code useShadow} 不在字段域内
+     * → 用户在别处关掉辉光后，切任何预设都不会把它打开。
+     */
+    private static void presetWritesAllFields() {
+        System.out.println();
+        System.out.println("--- 3.6 切换/恢复预设必须写全字段（含辉光/淡出开关）---");
+        NeovideCursorSettings svc2 = V0Env.svc;
+
+        // 造一个「辉光关、淡出关」的起点（模拟用户在别的预设下关掉了）
+        NeovideCursorSettings.State st = svc2.getState();
+        st.useShadow = false;
+        st.overlayFadeOut = false;
+        st.animCustomName = "";
+        st.customAnimPresets = "";
+
+        // 「基础」预设声明 useShadow=true / overlayFadeOut=true（见 CursorPresets）
+        NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
+        VUi ui = VUi.build(conf);
+        conf.reset();
+        conf.pickAnimPresetForProbe(0);
+
+        NeovideCursorSettings.State after = conf.pendingForProbe();
+        check("C-31 【B3】切到「基础」后 useShadow 恢复为 true",
+                after.useShadow, "useShadow=" + after.useShadow);
+        check("C-32 【B3】切到「基础」后 overlayFadeOut 恢复为 true",
+                after.overlayFadeOut, "overlayFadeOut=" + after.overlayFadeOut);
+
+        // 「纯平滑输入」必须能表达「关辉光 + 关淡出」
+        int last = com.github.yyyolo7a79.neovidecursor.settings.CursorPresets
+                .ANIM_PRESETS.length - 1;
+        conf.pickAnimPresetForProbe(last);
+        NeovideCursorSettings.State pure = conf.pendingForProbe();
+        check("C-33 「纯平滑输入」预设把 useShadow 关掉",
+                !pure.useShadow, "useShadow=" + pure.useShadow);
+        check("C-34 「纯平滑输入」预设把 overlayFadeOut 关掉",
+                !pure.overlayFadeOut, "overlayFadeOut=" + pure.overlayFadeOut);
+
+        // 关键回归：再切回「基础」，辉光必须回来（这正是用户报的症状）
+        conf.pickAnimPresetForProbe(0);
+        check("C-35 【B3 核心】从「纯平滑输入」切回「基础」→ 辉光重新打开",
+                conf.pendingForProbe().useShadow,
+                "useShadow=" + conf.pendingForProbe().useShadow);
+
+        // 恢复按钮同样必须写全字段（B1）
+        conf.pendingForProbe().useShadow = false;
+        conf.pendingForProbe().overlayFadeOut = false;
+        conf.animRestoreButtonForProbe().doClick();
+        check("C-36 【B1】点「恢复」后辉光/淡出回到该预设声明值",
+                conf.pendingForProbe().useShadow && conf.pendingForProbe().overlayFadeOut,
+                "useShadow=" + conf.pendingForProbe().useShadow
+                        + " overlayFadeOut=" + conf.pendingForProbe().overlayFadeOut);
+    }
+
+    // ---------------------------------------------------------------- 3.7 必须能活过 XML 落盘
+
+    /**
+     * 【F2 守门】自定义预设必须能活过平台的 XmlSerializer 落盘/回读。
+     *
+     * <p><b>这是最严重的一条</b>：最初分隔符用了 U+0001 / U+0002，
+     * 而它们是 <b>XML 1.0 非法码点</b>，IDEA 的 {@code XmlSerializer} 会静默丢弃。
+     * 实测后果：内存里 2 条预设 → 落盘再回读变成 <b>0 条</b>，
+     * 用户建的自定义预设重启后全部消失。
+     *
+     * <p>现在用 U+241F / U+241E（XML 合法）。本断言直接调真实平台序列化器验证，
+     * 不靠「分隔符看起来合法」这种推断。
+     */
+    private static void survivesXmlRoundTrip() {
+        System.out.println();
+        System.out.println("--- 3.7 自定义预设必须活过 XML 落盘（F2 守门）---");
+        try {
+            NeovideCursorSettings.State s = new NeovideCursorSettings.State();
+            s.glowLayers = 10;
+            String snap = com.github.yyyolo7a79.neovidecursor.settings.SettingsField.snapshot(s);
+            s.customAnimPresets = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                    .put("", "落盘测试", snap);
+            s.animCustomName = "落盘测试";
+
+            org.jdom.Element el = com.intellij.util.xmlb.XmlSerializer.serialize(s);
+            NeovideCursorSettings.State back = com.intellij.util.xmlb.XmlSerializer
+                    .deserialize(el, NeovideCursorSettings.State.class);
+
+            int n = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                    .parse(back.customAnimPresets).size();
+            check("C-37 【F2】1 条自定义预设落盘再回读仍是 1 条（分隔符必须是 XML 合法字符）",
+                    n == 1, "回读=" + n + " 条");
+            check("C-38 【F2】回读后名字与快照都没被黏连",
+                    back.customAnimPresets != null
+                            && com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                                    .get(back.customAnimPresets, "落盘测试") != null,
+                    back.customAnimPresets == null ? "null"
+                            : (back.customAnimPresets.length() + " 字符"));
+        } catch (Throwable t) {
+            check("C-37 【F2】XML 往返", false, "抛异常：" + t);
+        }
     }
 
     // ---------------------------------------------------------------- 4. 自动派生

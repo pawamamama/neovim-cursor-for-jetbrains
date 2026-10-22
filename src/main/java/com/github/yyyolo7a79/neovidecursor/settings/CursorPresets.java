@@ -67,9 +67,29 @@ public final class CursorPresets {
         private final int blurFactorTicks;      // ×100 → 0.20 存 20
         private final int glowOpacityTicks;     // ×100 → 0.55 存 55
 
+        /**
+         * 是否启用辉光。
+         *
+         * <p><b>为什么这个字段必须在预设里（团队审查 F-05）</b>：
+         * 预设表里已经有 3 个辉光参数（layers / blur / opacity），
+         * 唯独「开不开辉光」这个<b>总闸</b>不在 —— 归类自相矛盾。
+         *
+         * <p>实际后果：用户在某预设下关了辉光，这个值被持久化；
+         * 之后切到任何别的预设，<b>辉光都不会回来</b>
+         * （用户实测：「缎带没有扩散了，就是持久化了」）。
+         *
+         * <p>而且「纯平滑输入」这个预设<b>必须</b>能表达「关辉光 + 关淡出」，
+         * 6 字段模型根本写不出来。
+         */
+        private final boolean useShadow;
+
+        /** 是否启用淡出。理由同 {@link #useShadow}。 */
+        private final boolean overlayFadeOut;
+
         private AnimPreset(String name, int animLengthTicks, int shortLengthTicks,
                            int trailSizeTicks, int glowLayers,
-                           int blurFactorTicks, int glowOpacityTicks) {
+                           int blurFactorTicks, int glowOpacityTicks,
+                           boolean useShadow, boolean overlayFadeOut) {
             this.name = name;
             this.animLengthTicks = animLengthTicks;
             this.shortLengthTicks = shortLengthTicks;
@@ -77,6 +97,8 @@ public final class CursorPresets {
             this.glowLayers = glowLayers;
             this.blurFactorTicks = blurFactorTicks;
             this.glowOpacityTicks = glowOpacityTicks;
+            this.useShadow = useShadow;
+            this.overlayFadeOut = overlayFadeOut;
         }
 
         public String name() {
@@ -127,6 +149,16 @@ public final class CursorPresets {
             return glowOpacityTicks;
         }
 
+        /** 该预设是否启用辉光。见字段注释（F-05）。 */
+        public boolean useShadow() {
+            return useShadow;
+        }
+
+        /** 该预设是否启用淡出。 */
+        public boolean overlayFadeOut() {
+            return overlayFadeOut;
+        }
+
         @Override
         public String toString() {
             return name;
@@ -134,7 +166,7 @@ public final class CursorPresets {
     }
 
     /**
-     * 7 个动画预设（契约 §5.5，逐值冻结）。
+     * 3 个动画预设（0.9.10 精简：基础 / 缎带 / 纯平滑输入）。
      *
      * <p>第 8 个「残影模式」<b>不在表里</b>（契约 §0.2 的 R-3）：它只改 {@code trailMode}，
      * 不改任何动画字段；混进预设会让「预设」同时承载两种语义。它归 Tools 菜单既有第 3 项。
@@ -158,14 +190,15 @@ public final class CursorPresets {
      * 所以「快/平滑/柔和/高比对观感」这一层语义没有被抹平。
      */
     public static final AnimPreset[] ANIM_PRESETS = {
-            //                        名称            anim  short trail layers blur opacity
-            new AnimPreset("原版粉色",            10,  11,  100,  8,   20,  55),   // = NeovideConfig 默认值
-            new AnimPreset("缎带",                28,  11,  100,  8,   20,  55),   // 跨行拉长
-            new AnimPreset("Neovide 官方",        15,  11,  100,  8,   20,  55),   // 最接近原版；短跳 0.11（M3）
-            new AnimPreset("社区·快",             6,  11,  100,  8,   20,  55),   // 跟手；短跳 0.11（M3）
-            new AnimPreset("社区·平滑",           10,  11,   30,  8,   25,  45),   // 四角匀、柔和；短跳 0.11（M3）
-            new AnimPreset("柔和",                18,  11,   80,  6,   30,  40),   // 轻量；短跳 0.11（M3）
-            new AnimPreset("高对比",              12,  11,  100, 10,   15,  75),   // 强调；短跳 0.11（M3）
+            //                        名称          anim short trail layers blur opacity 辉光   淡出
+            // ① 基础：= NeovideConfig 默认值。日常用这个。
+            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true),
+            // ② 缎带：跨行动画拉长，斜缎带最明显。
+            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true),
+            // ③ 纯平滑输入：对齐 VS Code 原版的拖尾观感 —— 无辉光扩散、无淡出。
+            //    blur=0 是「最柔」端（外扩 0.60），但 useShadow=false 时它不参与绘制；
+            //    这里填 0 是为了万一用户手动开回辉光时得到柔和光雾而不是硬边。
+            new AnimPreset("纯平滑输入",        10,  11,  100,  8,    0,  30,  false, false),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */

@@ -25,37 +25,58 @@ import java.util.List;
  * <h2>存储格式</h2>
  *
  * <pre>
- *   customAnimPresets = 名称[U+0001]快照;[U+0001]...
+ *   customAnimPresets = 名称[U+241F]快照[U+241E]名称[U+241F]快照
  *   快照              = key=value;key=value;...   （{@link SettingsField#snapshot} 产出）
  * </pre>
  *
- * <p>分隔符用 {@code U+0001}（ASCII SOH）：
- * <ul>
- *   <li>用户不可能从面板键入它，所以名称<b>不需要任何转义</b>——
- *       中文、空格、{@code ;}、{@code =} 都能原样保存；</li>
- *   <li>它不会出现在 XML 的 CDATA 边界问题里（XML 1.0 允许 U+0001 以外的控制字符，
- *       而平台 {@code XmlSerializer} 用属性值转义，U+0001 会被写成字符引用）；</li>
- *   <li>比「用 {@code ;} 分隔 + 名称里转义 {@code ;}」简单得多 ——
- *       转义规则一旦有 bug 就是「名称乱码」这种用户可见的破坏。</li>
- * </ul>
+ * <h2>分隔符为什么是 U+241F / U+241E（这条踩过大坑，务必别改回去）</h2>
+ *
+ * <p>最初用的是 `U+0001`(SOH) / `U+0002`(STX)，理由是「用户不可能从键盘键入」。
+ * 但那是<b>键盘视角</b>，不是<b>存储视角</b> ——
+ * <b>U+0001/U+0002 是 XML 1.0 非法码点</b>（XML 1.0 只允许
+ * `#x9 | #xA | #xD | [#x20-#xD7FF] | ...`），
+ * 而 IDEA 的 {@code XmlSerializer} 把它们<b>静默丢弃</b>、也不会写成字符引用。
+ *
+ * <p>实测后果（2026-10-22 用真实平台类复现）：
+ * <pre>
+ *   内存：  测试预设[U+0001]enabled=1;trailMode=SPRING;...
+ *   XML ：  测试预设enabled=1;trailMode=SPRING;...     &lt;- 分隔符消失，名字与内容黏连
+ *   回读：  解析出 0 条预设                              &lt;- 用户建的自定义预设【全部消失】
+ * </pre>
+ *
+ * <p>换成 `U+241F`(SYMBOL FOR UNIT SEPARATOR) / `U+241E`(SYMBOL FOR RECORD SEPARATOR)：
+ * 两者都在 XML 1.0 合法区间内，且仍是「用户不可能从面板键入」的可打印符号
+ * （它们本身就是「可见形式的控制字符」符号，语义恰好对应）。
+ * 实测回读后 2 条预设完整保留。
+ *
+ * <p><b>兼容旧值</b>：{@link #parse} 同时接受旧分隔符（`U+0001`/`U+0002`），
+ * 这样已经落盘过的用户数据不会因为换分隔符而报废。
  *
  * <p><b>解析绝不抛异常</b>：坏条目整条忽略，其余照常。
  * 手改坏一个字符不该让整页设置打不开。
  */
 public final class CustomPresets {
 
-    /** 名称与快照之间的分隔符（ASCII SOH，用户无法从面板键入）。 */
-    public static final char NAME_SEP = (char) 1;
+    /**
+     * 名称与快照之间的分隔符 = U+241F（SYMBOL FOR UNIT SEPARATOR）。
+     *
+     * <p><b>必须是 XML 1.0 合法码点</b>。U+0001 曾是这里，被平台静默丢弃
+     * → 自定义预设重启后全消失。详见类注释。
+     */
+    public static final char NAME_SEP = '\u241F';
 
     /**
-     * 条目之间的分隔符（ASCII STX）。
+     * 条目之间的分隔符 = U+241E（SYMBOL FOR RECORD SEPARATOR）。
      *
      * <p><b>为什么条目分隔符不能用 {@code ;}</b>：快照内部本来就用 {@code ;} 分隔键值对，
-     * 而<b>名称允许含 {@code ;}</b>（用户可能就想叫「A;B」）。两者共用 {@code ;} 时，
-     * 一个带分号的名称会把条目切碎 —— 我第一版就是这么写的，探针 C-6/C-8/C-10 当场抓到。
-     * 所以条目用 {@code U+0002}，名称里出现不了它（用户无法从面板键入）。
+     * 而<b>名称允许含 {@code ;}</b>。两者共用 {@code ;} 时，一个带分号的名称会把条目切碎
+     * （探针 C-6/C-8/C-10 当场抓到过）。
      */
-    public static final char ENTRY_SEP = (char) 2;
+    public static final char ENTRY_SEP = '\u241E';
+
+    /** 旧分隔符（XML 非法，仅为兼容已经落盘的数据而保留读取能力）。 */
+    private static final char LEGACY_NAME_SEP = (char) 1;
+    private static final char LEGACY_ENTRY_SEP = (char) 2;
 
     private CustomPresets() {
     }
@@ -83,12 +104,19 @@ public final class CustomPresets {
         if (all == null || all.isEmpty()) {
             return Collections.emptyList();
         }
+        // 兼容新旧两套分隔符：旧值里可能是 U+0002 / U+0001（XML 非法，见类注释）。
+        // 换分隔符不能让已经落盘的用户数据报废。
+        char entrySep = all.indexOf(ENTRY_SEP) >= 0 ? ENTRY_SEP
+                : (all.indexOf(LEGACY_ENTRY_SEP) >= 0 ? LEGACY_ENTRY_SEP : ENTRY_SEP);
+        char nameSep = all.indexOf(NAME_SEP) >= 0 ? NAME_SEP
+                : (all.indexOf(LEGACY_NAME_SEP) >= 0 ? LEGACY_NAME_SEP : NAME_SEP);
+
         List<Entry> out = new ArrayList<>();
-        for (String raw : all.split(String.valueOf(ENTRY_SEP))) {
+        for (String raw : all.split(java.util.regex.Pattern.quote(String.valueOf(entrySep)))) {
             if (raw == null || raw.isEmpty()) {
                 continue;
             }
-            int sep = raw.indexOf(NAME_SEP);
+            int sep = raw.indexOf(nameSep);
             if (sep <= 0) {
                 continue;                       // 缺分隔符 / 名称为空 → 坏条目，忽略
             }
@@ -116,7 +144,9 @@ public final class CustomPresets {
             if (sb.length() > 0) {
                 sb.append(ENTRY_SEP);
             }
-            sb.append(e.name).append(NAME_SEP).append(e.snapshot);
+            // 名称里若混进了任一分隔符（粘贴 / 手改 XML 都可能），必须剔掉 ——
+            // 否则一条坏名字会把整张表切碎（和 F2 是同一类破坏）。
+            sb.append(sanitizeName(e.name)).append(NAME_SEP).append(e.snapshot);
         }
         return sb.toString();
     }
@@ -221,6 +251,32 @@ public final class CustomPresets {
     /** 是否还能再加。 */
     public static boolean canAdd(String all) {
         return parse(all).size() < MAX_PRESETS;
+    }
+
+    /**
+     * 把名称里混进来的分隔符剔掉。
+     *
+     * <p>为什么需要：用户可能从网页/聊天粘贴一个名字，或者手改 XML。
+     * 只要名字里出现 U+241F / U+241E / 旧的 U+0001 / U+0002，
+     * 解析时就会把它当成条目边界，<b>整张表被切碎</b>。
+     *
+     * <p>换成空格而不是直接删除：让名字仍然可读（「A[B」→「A B」而不是「AB」）。
+     */
+    static String sanitizeName(String name) {
+        if (name == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder(name.length());
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c == NAME_SEP || c == ENTRY_SEP
+                    || c == LEGACY_NAME_SEP || c == LEGACY_ENTRY_SEP) {
+                sb.append(' ');
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString().trim();
     }
 
     private static Entry find(List<Entry> list, String name) {

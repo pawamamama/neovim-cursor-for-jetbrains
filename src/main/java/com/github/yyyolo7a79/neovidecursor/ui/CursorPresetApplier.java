@@ -51,12 +51,17 @@ public final class CursorPresetApplier {
         }
         NeovideCursorSettings.State s = svc.getState();
 
-        s.animationLength = p.animationLength();
-        s.shortAnimationLength = p.shortAnimationLength();
-        s.trailSize = p.trailSize();
-        s.glowLayers = p.glowLayers();
-        s.shadowBlurFactor = p.shadowBlurFactor();
-        s.glowOpacity = p.glowOpacity();
+        // 写【全部】预设字段（含辉光/淡出开关）。
+        //
+        // 【为什么不能只写 6 个动画字段（团队审查 F-05 / 用户报的 B3）】
+        // 用户在某预设下关掉辉光 → useShadow=false 被持久化；之后从 Tools 切到
+        // 任何别的预设，辉光【都不会回来】（用户原话：「切换预设不能让辉光回来」
+        // 「缎带没有扩散了，就是持久化了」）。
+        //
+        // 而「纯平滑输入」这个预设必须能表达「关辉光」—— 6 字段模型写不出来，
+        // 所以这不是补丁，是预设字段域本身就该包含这两个开关。
+        com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable
+                .applyAnimPresetFields(s, p);
 
         int idx = indexOf(p);
         if (idx >= 0) {

@@ -8,7 +8,7 @@ import com.intellij.openapi.actionSystem.ToggleAction;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Tools | Neovide 光标：动画预设 ▸ —— 7 个动画预设的快捷切换（契约 §8）。
+ * Tools | Neovide 光标：动画预设 ▸ —— 内置动画预设的快捷切换（数量与 {@code ANIM_PRESETS} 同源）。
  *
  * <p><b>为什么用 {@link DefaultActionGroup} 而不是方案写的 {@code AnActionGroup}</b>：
  * 本机 381 个 jar 里<b>不存在</b> {@code com.intellij.openapi.actionSystem.AnActionGroup}
