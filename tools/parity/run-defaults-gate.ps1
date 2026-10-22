@@ -30,6 +30,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+
+# 【行尾归一】金表提交到 git 后会被 autocrlf 转成 LF，
+# 而 dump 输出是平台相关行尾。不归一的话，比对会在【内容完全相同时】误报红。
+# 归一成 LF 再比。
+function Normalize-Eol([string]$t) {
+    if ($null -eq $t) { return "" }
+    return ($t -replace "`r`n", "`n").TrimEnd()
+}
 function Step($m) { Write-Host "==> $m" }
 
 $goldenPath = Join-Path $Repo "tools\parity\defaults-golden.txt"
@@ -58,7 +67,10 @@ $javaArgs = @("-Djava.awt.headless=true", "-Dfile.encoding=UTF-8", "-cp", "$work
 if ($LASTEXITCODE -ne 0) { throw "DefaultsDump 运行失败" }
 
 if ($UpdateGolden) {
-    Copy-Item $outFile $goldenPath -Force
+    # 写入时归一成 LF，与 .gitattributes/autocrlf 无关
+    $normalized = Normalize-Eol (Get-Content $outFile -Raw)
+    [System.IO.File]::WriteAllText($goldenPath, $normalized + "`n",
+        (New-Object System.Text.UTF8Encoding $false))
     $h = (Get-FileHash $goldenPath -Algorithm SHA256).Hash.Substring(0, 16)
     Step "已更新金表 (SHA16=$h)"
     Write-Host ""
@@ -72,8 +84,8 @@ if (-not (Test-Path $goldenPath)) {
     exit 1
 }
 
-$golden = Get-Content $goldenPath -Raw
-$actual = Get-Content $outFile -Raw
+$golden = Normalize-Eol (Get-Content $goldenPath -Raw)
+$actual = Normalize-Eol (Get-Content $outFile -Raw)
 
 if ($golden -ceq $actual) {
     $h = (Get-FileHash $goldenPath -Algorithm SHA256).Hash.Substring(0, 16)
