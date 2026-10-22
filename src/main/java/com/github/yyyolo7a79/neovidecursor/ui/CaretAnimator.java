@@ -138,6 +138,23 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final int MAX_ADAPTIVE_DELAY_MS = 40;
 
     /**
+     * 自适应退避的「试探回高帧率」周期（帧数）。
+     *
+     * <p><b>解决的问题</b>：{@code adaptive = smoothedIntervalMs × 0.85} 是负反馈 ——
+     * 卡顿让估计值变大 → 退避 → 出帧更少 → 估计值仍旧大 → 永远回不来。
+     *
+     * <p>每 30 帧（约 240ms）强制走一次 {@link #ACTIVE_DELAY_MS}：
+     * <ul>
+     *   <li>环境恢复了 → 这次试探的实测间隔会变小 → 估计值自然回落 → 回到满帧率</li>
+     *   <li>环境仍卡 → 试探的那一帧被丢弃（framePending），代价只有一帧</li>
+     * </ul>
+     *
+     * <p>取 30：约 240ms 一次，人眼不会察觉"周期性卡一下"；
+     * 若取更小（如 10）会变成频繁无效提交，取更大则恢复太慢。
+     */
+    private static final int PROBE_INTERVAL_FRAMES = 30;
+
+    /**
      * 单帧最大时间步长，防止 IDE 卡顿后弹簧"跳变"。
      *
      * <p><b>【缺陷 1 —— 审计确认】必须 ≥ {@link #MAX_ADAPTIVE_DELAY_MS}。</b>
@@ -385,6 +402,9 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 实际是整个空闲期的长度，并非真实帧间隔，喂给平滑器会再次污染估计量。
      */
     private boolean skipNextIntervalMeasurement = false;
+
+    /** 自适应退避的试探计数器（见 {@link #PROBE_INTERVAL_FRAMES}） */
+    private int probeCounter = 0;
 
     /**
      * 上次记录的视觉位置，用于低成本地判断光标是否移动。
@@ -783,8 +803,31 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         if (active) {
+            // 【性能优化 2：打破负反馈退避】
+            //
+            // 原逻辑：adaptive = smoothedIntervalMs × 0.85
+            //   → 卡顿使 smoothedIntervalMs 变大 → 退避到 40ms
+            //   → 出帧变少 → 但"测到的间隔"依然大（退出就是现实）
+            //   → 继续退避 → 永远回不到 8ms
+            //
+            // 实测证据（用户机器 2609 条记录）：
+            //   delay=8  档 fps 中位 36.4
+            //   delay=40 档 fps 中位 17.6
+            //   一旦退避到 40，就再没回来过。
+            //
+            // 修法：每 PROBE_INTERVAL_FRAMES 帧强制试探一次高帧率。
+            // 若试探时确实卡（下一帧的实测间隔仍然大），就再退避 —— 但"试探"
+            // 保证了不会永久停在低档。这是控制论里的"抖探"（dithering）。
+            probeCounter++;
+            boolean probing = (probeCounter % PROBE_INTERVAL_FRAMES) == 0;
+
             int adaptive = (int) Math.round(smoothedIntervalMs * 0.85);
-            return Math.max(ACTIVE_DELAY_MS, Math.min(adaptive, MAX_ADAPTIVE_DELAY_MS));
+            int clamped = Math.max(ACTIVE_DELAY_MS, Math.min(adaptive, MAX_ADAPTIVE_DELAY_MS));
+
+            if (probing) {
+                return ACTIVE_DELAY_MS;         // 试探：强制走最高档
+            }
+            return clamped;
         }
         return isEditorFocused() ? IDLE_DELAY_MS : IDLE_UNFOCUSED_DELAY_MS;
     }
