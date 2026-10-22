@@ -118,9 +118,20 @@ public final class VTools {
         // 它不参与 matchAnimPreset 的逐字段比对，也不进 NeovideConfig。
         // 所以它归入「应用预设时允许变化」这一侧，而不是「其余字段逐位不变」那一侧。
         // 这不是放宽断言：动画字段之外的 18 个字段仍然要求 0 变化。
+        // 【0.9.10 预设字段域扩大（F-05/F-07）】
+        // 预设现在描述「一整套观感」，除 6 个动画字段外还包含 useShadow / overlayFadeOut。
+        // 这是【有意设计】：用户在某预设下关掉辉光，切到别的预设必须能把辉光打开
+        // （用户实测：「切换预设不能让辉光回来」「缎带没有扩散了，就是持久化了」）。
+        // 而「纯平滑输入」这个预设本身就必须表达「关辉光」—— 6 字段模型写不出来。
+        //
+        // 所以这三项归入「应用预设时允许变化」一侧。这不是放宽断言：
+        // 颜色 2 项 + stretchRatioK + typingSmoothness + cursorDisappearDelay +
+        // cursorFadeOutDuration + tailOpacity + enabled + trailMode + hideNativeCaret +
+        // alwaysHighFps 共 12 个字段仍然要求逐位不变（颜色正交性硬判据不变）。
         java.util.Set<String> animFields = new java.util.HashSet<>(java.util.Arrays.asList(
                 "animationLength", "shortAnimationLength", "trailSize", "glowLayers",
                 "shadowBlurFactor", "glowOpacity",
+                "useShadow", "overlayFadeOut",
                 "animPresetBase"));
         java.util.Set<String> others = new java.util.HashSet<>(before.keySet());
         others.removeAll(animFields);
@@ -136,9 +147,9 @@ public final class VTools {
         // countDiff 的第三参是「忽略集合」：忽略动画字段 → 数出非动画字段的变化数。
         int nonAnimChanged = VFields.countDiff(before, after, animFields);
         int animChanged = VFields.countDiff(before, after, others);
-        check("M-11 Tool 应用「高对比」只改动画字段 + animPresetBase（其余字段逐位不变）",
+        check("M-11 Tool 应用预设：只改预设字段域（动画 6 项 + 辉光/淡出 + base），其余逐位不变",
                 nonAnimChanged == 0 && animChanged > 0,
-                "非动画字段变化 = " + nonAnimChanged + "，动画字段变化 = " + animChanged);
+                "预设域外变化 = " + nonAnimChanged + "，预设域内变化 = " + animChanged);
 
         // ---- 颜色组单选 ----
         CursorPresetApplier.applyColorPreset(CursorPresets.COLOR_PRESETS[2]); // 薄荷
