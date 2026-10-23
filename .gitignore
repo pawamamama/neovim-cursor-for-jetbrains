@@ -37,3 +37,6 @@ dist/
 diag/
 _backup-*/
 _probe/
+
+# 演示视频太大（10MB），放在 media 分支，不进主仓
+docs/media/

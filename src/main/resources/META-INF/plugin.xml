@@ -6,12 +6,25 @@
     <vendor>pawamamama</vendor>
 
     <description><![CDATA[
-    Neovide 风格「拖尾光标」—— 光标移动时留下渐隐的拉伸残影，带辉光效果。
+    <b>Neovide 风格的拖尾光标，带完整设置面板。</b>
     <br/>
-    参数语义与 VS Code 版 neovide-cursor 保持一致，便于跨平台迁移配置。
+    光标移动时留下渐隐的拉伸拖尾 + 辉光光晕。参数语义对齐 VS Code 版 neovide-cursor。
+    <br/><br/>
+    <b>与其它实现相比，本版的重点是「可配置」：</b>
+    <ul>
+      <li><b>设置面板</b>：11 个滑块 + 7 个复选框，全部实时生效</li>
+      <li><b>持久化</b>：配置存进 IDE，重启保留</li>
+      <li><b>3 个动画预设 + 5 个颜色预设</b>：一键切换</li>
+      <li><b>自定义预设</b>：把你调好的一套存下来（上限 50 个）</li>
+      <li><b>Tools 菜单快捷切换</b>：不用每次进设置</li>
+    </ul>
+    设置位置：<code>Settings → 其他设置 → Neovide 光标</code>
+    <br/><br/>
+    <b>已知限制</b>：不支持多光标；帧率受 Swing EDT 限制（提供"残影模式"作为低帧率替代）。
+    详见项目 README 的「已知缺陷」章节。
     <br/><br/>
     <b>本插件是 <a href="https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains">yyyyolo7a79-sketch/neovim-cursor-for-jetbrains</a> 的独立 fork</b>，
-    由 pawamamama 维护，遵循 MIT 协议；上游原始版权声明见附带 LICENSE。
+    核心拖尾物理来自上游，由 pawamamama 维护并补充了设置系统，遵循 MIT 协议。
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
