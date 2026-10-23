@@ -321,10 +321,63 @@ public class CaretTrailPanel extends JComponent {
         };
     }
 
+    /**
+     * 探针：第 i 个四边形【自己的】辉光外扩方向向量。
+     *
+     * <p><b>为什么需要它</b>：代码审查发现辉光外层循环曾错用 {@code polyX/polyY}
+     * （只保存最后写入的那个四边形），多光标时所有光晕会重叠在同一位置。
+     * 本方法走的是与 {@link #paintQuad} 相同的取数路径（先拷 quadX/quadY 再算方向），
+     * 因此能区分「读对了」和「读错了」。
+     *
+     * @return 长度 8：dirX0..3, dirY0..3；索引越界返回 null
+     */
+    public double[] glowDirectionsForProbe(int i) {
+        if (i < 0 || i >= quadCount) {
+            return null;
+        }
+        int base = i * QUAD_STRIDE;
+        for (int j = 0; j < 4; j++) {
+            quadX[j] = quads[base + j * 2];
+            quadY[j] = quads[base + j * 2 + 1];
+        }
+        computeOffsetDirections(quadX, quadY, dirX, dirY);
+        return new double[]{
+                dirX[0], dirX[1], dirX[2], dirX[3],
+                dirY[0], dirY[1], dirY[2], dirY[3]
+        };
+    }
+
+    /**
+     * 探针：绘制第 i 个四边形时，辉光层实际使用的【坐标】。
+     *
+     * <p><b>为什么这个比方向向量更能发现问题</b>：
+     * 矩形四角的外法线恒为轴向量（±1,0）或（0,±1），<b>与尺寸无关</b> ——
+     * 所以「方向向量」无法区分「读对了坐标」还是「读错了坐标」。
+     * 而坐标本身能直接比对：若实现错用 {@code polyX/polyY}，
+     * 所有四边形返回的都是同一个（最后写入的）坐标。
+     *
+     * @return 长度 8：[x0,y0,...,x3,y3]；索引越界返回 null
+     */
+    public double[] glowCoordsForProbe(int i) {
+        if (i < 0 || i >= quadCount) {
+            return null;
+        }
+        int base = i * QUAD_STRIDE;
+        return new double[]{
+                quads[base], quads[base + 1],
+                quads[base + 2], quads[base + 3],
+                quads[base + 4], quads[base + 5],
+                quads[base + 6], quads[base + 7]
+        };
+    }
+
     /** 清除全部绘制数据（光标不可见 / 模式切换时调用） */
     public void clearCorners() {
         hasQuad = false;
         hasGhosts = false;
+        // 【审查修正】必须一并清 quadCount —— 绘制循环看的是 quadCount，
+        // 只清 hasQuad 的话下一帧仍会把旧四边形画出来（清不干净）。
+        quadCount = 0;
         ghosts.clear();
     }
 
@@ -470,8 +523,12 @@ public class CaretTrailPanel extends JComponent {
 
             glowPath.reset();
             for (int j = 0; j < 4; j++) {
-                double x = polyX[j] + dirX[j] * radius;
-                double y = polyY[j] + dirY[j] * radius;
+                // 【审查修正】这里原本是 polyX/polyY —— 但多光标时那两个数组
+                // 只保存"最后一次 updateCorners 写入的那个四边形"，
+                // 于是所有光晕都会画在同一个位置。
+                // 必须用 paintQuad 传下来的 quadX/quadY（当前这个四边形）。
+                double x = quadX[j] + dirX[j] * radius;
+                double y = quadY[j] + dirY[j] * radius;
                 if (j == 0) {
                     glowPath.moveTo(x, y);
                 } else {

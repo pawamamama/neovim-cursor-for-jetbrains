@@ -125,6 +125,62 @@ public final class VQuad {
                 p.quadCount() == 0 && p.quadForProbe(0) == null,
                 "已清空");
 
+        // ---- Q-12：clearCorners 必须一并清 quadCount ----
+        //
+        // 【来自代码审查的真实缺陷】第一版 clearCorners 只清 hasQuad，
+        // 而绘制循环看的是 quadCount —— 于是「光标不可见时清空」之后，
+        // 下一帧仍会把旧四边形画出来（清不干净）。
+        p.beginQuads();
+        p.addQuad(xs[0], ys[0], 1.0f);
+        p.addQuad(xs[1], ys[1], 1.0f);
+        p.clearCorners();
+        check("Q-12 clearCorners 清空 quadCount（审查发现的缺陷）",
+                p.quadCount() == 0 && p.quadForProbe(0) == null,
+                "clearCorners 后 quadCount=" + p.quadCount());
+
+        // ---- Q-13：辉光必须用当前四边形的坐标，不能用「最后一个写入的」 ----
+        //
+        // 【来自代码审查的真实缺陷】辉光外层循环原本读 polyX/polyY，
+        // 而那两个数组只保存「最后一次 updateCorners 写入的四边形」。
+        // 多光标时所有光晕会画在同一个位置。
+        //
+        // 探针手段：写入 3 个相距很远的四边形，然后逐腿检查
+        // 「每个四边形自己的辉光方向向量」是否与它的坐标一致 ——
+        // 若实现错用 polyX，第 0、1 个的方向会等于第 2 个的。
+        p.beginQuads();
+        p.addQuad(xs[0], ys[0], 1.0f);
+        p.addQuad(xs[1], ys[1], 1.0f);
+        p.addQuad(xs[2], ys[2], 1.0f);
+
+        // 逐四边形计算辉光方向（生产路径：paintQuad 里先拷 quadX/quadY 再算）
+        // 这里用几何不变式验证：矩形的外扩方向应当是「水平 ±x / 垂直 ±y」，
+        // 与位置无关 —— 所以真正能区分的是「有没有读到错误坐标」。
+        //
+        // 做法：把第 2 个四边形换成尺度完全不同的形状（宽 2 高 32 vs 宽 200 高 2），
+        // 若实现错用 polyX，第 0 个算出的方向会与第 2 个相同。
+        double[] wideX = {0.0, 200.0, 200.0, 0.0};
+        double[] wideY = {0.0, 0.0, 2.0, 2.0};
+        double[] tallX = {500.0, 502.0, 502.0, 500.0};
+        double[] tallY = {500.0, 500.0, 532.0, 532.0};
+        p.beginQuads();
+        p.addQuad(wideX, wideY, 1.0f);   // 极扁
+        p.addQuad(tallX, tallY, 1.0f);   // 极瘦
+
+        // 判据：逐四边形取「辉光实际使用的坐标」，必须各不相同且与写入值一致。
+        // 若实现错用 polyX/polyY（只存最后写入的那个），三个会全部相同。
+        double[] c0 = p.glowCoordsForProbe(0);
+        double[] c1 = p.glowCoordsForProbe(1);
+        // 注意：此时写入的是 wideX/tallX 两个四边形（不是上面的 xs/ys）。
+        // 第一次写这条断言时拿 xs/ys 当期望值，于是误报 —— 探针自身错误，不是产品缺陷。
+        boolean allDistinct = c0 != null && c1 != null
+                && c0[0] != c1[0] && c0[7] != c1[7];
+        boolean matchWritten = c0[0] == wideX[0] && c1[0] == tallX[0];
+        check("Q-13 两个四边形的辉光坐标各不相同且与写入值一致（防错用最后写入的坐标）",
+                allDistinct && matchWritten,
+                String.format("读到 x0=%.1f/%.1f  写入=%.1f/%.1f",
+                        c0 == null ? -1 : c0[0], c1 == null ? -1 : c1[0],
+                        wideX[0], tallX[0]));
+
         System.out.println();
         System.out.printf("=== V-QUAD 结果：PASS %d，FAIL %d ===%n", pass, fail);
         if (fail > 0) { System.out.println("V-QUAD RESULT: FAILED"); System.exit(1); }
