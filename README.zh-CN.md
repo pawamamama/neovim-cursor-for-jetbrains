@@ -17,7 +17,7 @@
 
 > ### ⚠️ 先说一件事：视频看着比实际卡
 >
-> 视频文件存放在 [`media`](https://github.com/pawamamama/neovim-cursor-for-jetbrains/tree/media) 分支上，
+> 视频存放在本仓库 [`docs/media/`](docs/media/)，
 > **点击链接可下载观看（GitHub 不支持在 README 内嵌 mp4 播放）**。
 >
 > 下面四个视频是 **60fps 屏幕录制**，但录屏本身会掉帧、压缩也会损失细节。
@@ -31,13 +31,13 @@
 
 ### 1. 大幅拖尾（跨行跳转）
 
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/media/01-large-trail.mp4
+https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/01-large-trail.mp4
 
 `docs/media/01-large-trail.mp4` · 11 秒 · 1436×444 · 60fps
 
 ### 2. 打字与删除
 
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/media/02-typing-delete.mp4
+https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/02-typing-delete.mp4
 
 `docs/media/02-typing-delete.mp4` · 10 秒 · 1040×442 · 60fps
 
@@ -45,7 +45,7 @@ https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/media/02-typing-de
 
 ### 3. Tools 菜单快捷切换预设（动画 + 颜色）
 
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/media/03-tools-preset.mp4
+https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/03-tools-preset.mp4
 
 `docs/media/03-tools-preset.mp4` · 45 秒 · 1630×878 · 60fps
 
@@ -53,7 +53,7 @@ https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/media/03-tools-pre
 
 ### 4. 设置面板（可调参数全览）
 
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/media/04-settings-panel.mp4
+https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/04-settings-panel.mp4
 
 `docs/media/04-settings-panel.mp4` · 39 秒 · 1722×1074 · 60fps
 
