@@ -61,6 +61,33 @@ public class CaretTrailPanel extends JComponent {
     /** 是否已有可绘制的四边形 */
     private boolean hasQuad = false;
 
+    // ===== 多光标：N 个四边形（扁平数组 + 步长，零分配）=====
+
+    /**
+     * 每个四边形占用的 double 个数：4 个角 × 2 坐标 + 1 个辉光强度 = 9。
+     *
+     * <p>步长式布局（而不是 {@code List<Quad>}）是为了<b>零对象分配</b>：
+     * 数组按需扩容，稳定后不再产生垃圾。多光标每帧最多 32 个四边形，
+     * 若每帧新建 32 个对象，GC 压力会直接反映到 EDT 掉帧。
+     */
+    private static final int QUAD_STRIDE = 9;
+
+    /** 多四边形数据：[x0,y0,x1,y1,x2,y2,x3,y3,glow] × N */
+    private double[] quads = new double[QUAD_STRIDE * 4];
+
+    /** 本帧实际写入的四边形个数 */
+    private int quadCount = 0;
+
+    /**
+     * 绘制单个四边形时用的坐标中转（复用，避免每帧分配）。
+     *
+     * <p>辉光绘制与 {@link #computeOffsetDirections} 都按「4 个点的数组」工作，
+     * 而数据存的是步长式扁平数组。每次绘制把一个四边形拷进这两个数组，
+     * 就能复用既有的几何算式，不必为多光标重写一套。
+     */
+    private final double[] quadX = new double[4];
+    private final double[] quadY = new double[4];
+
     // ===== 辉光绘制复用对象（避免每帧分配，见 drawQuadGlow）=====
 
     /** 辉光路径 —— 复用同一个 Path2D，每层覆盖前必须 reset */
@@ -161,7 +188,12 @@ public class CaretTrailPanel extends JComponent {
 
     // ==================== 数据写入 ====================
 
-    /** 弹簧模式：写入四边形角点 */
+    /**
+     * 弹簧模式：写入【单个】四边形角点（单光标快捷方式）。
+     *
+     * <p>内部转调 {@link #beginQuads()} + {@link #addQuad}，与多光标路径共用同一份存储。
+     * 辉光强度沿用 {@link #glowStrength} 字段（由 {@link #setGlowStrength} 写入）。
+     */
     public void updateCorners(double x0, double y0,
                               double x1, double y1,
                               double x2, double y2,
@@ -175,8 +207,69 @@ public class CaretTrailPanel extends JComponent {
         polyY[2] = y2;
         polyX[3] = x3;
         polyY[3] = y3;
+
+        // 同步进多四边形存储，让绘制路径只有一条（避免两套代码分叉）
+        beginQuads();
+        addQuad(polyX, polyY, glowStrength);
+    }
+
+    /**
+     * 开始一帧的多四边形写入 —— 清空上一帧的计数。
+     *
+     * <p>调用顺序必须是 {@code beginQuads() → addQuad() × N}，然后重绘。
+     * 只调 {@code beginQuads()} 不 {@code addQuad()} 等于「本帧什么都不画」。
+     */
+    public void beginQuads() {
+        quadCount = 0;
+        hasQuad = false;
+        hasGhosts = false;
+    }
+
+    /**
+     * 追加一个四边形（多光标）。
+     *
+     * <p>与 {@link #updateCorners} 的关系：那个是「只有一个四边形」的快捷方式，
+     * 内部转调本方法。两者共用同一份 {@link #quads} 存储，因此<b>不能混用</b> ——
+     * 一次重绘要么走单四边形路径，要么走多四边形路径。
+     *
+     * @param xs   4 个角点的 x（顺时针：左上→右上→右下→左下）
+     * @param ys   4 个角点的 y
+     * @param glow 该光标自己的辉光强度（0~1），静止时为 0
+     */
+    public void addQuad(double[] xs, double[] ys, float glow) {
+        int need = (quadCount + 1) * QUAD_STRIDE;
+        if (need > quads.length) {
+            // 按 2 倍扩容，避免逐个 addQuad 反复复制
+            quads = java.util.Arrays.copyOf(quads, Math.max(need, quads.length * 2));
+        }
+        int base = quadCount * QUAD_STRIDE;
+        for (int j = 0; j < 4; j++) {
+            quads[base + j * 2] = xs[j];
+            quads[base + j * 2 + 1] = ys[j];
+        }
+        quads[base + 8] = glow < 0f ? 0f : Math.min(glow, 1f);
+        quadCount++;
         hasQuad = true;
         hasGhosts = false;
+    }
+
+    /** 本帧写入的四边形个数（探针与重绘区域计算用） */
+    public int quadCount() {
+        return quadCount;
+    }
+
+    /**
+     * 探针：读取第 i 个四边形的 8 个坐标 + 辉光。
+     *
+     * @return 长度 9 的数组 [x0,y0,...,x3,y3,glow]；索引越界返回 null
+     */
+    public double[] quadForProbe(int i) {
+        if (i < 0 || i >= quadCount) {
+            return null;
+        }
+        double[] out = new double[QUAD_STRIDE];
+        System.arraycopy(quads, i * QUAD_STRIDE, out, 0, QUAD_STRIDE);
+        return out;
     }
 
     /** 残影模式：写入残影列表（每项 [x, y, width, height, alpha]） */
@@ -260,8 +353,9 @@ public class CaretTrailPanel extends JComponent {
             if (hasGhosts) {
                 paintGhosts(g2);
             }
-            if (hasQuad) {
-                paintQuad(g2);
+            // 弹簧模式：逐四边形绘制（单光标时 quadCount == 1，行为与旧路径一致）
+            for (int i = 0; i < quadCount; i++) {
+                paintQuad(g2, i);
             }
         } finally {
             g2.dispose();
@@ -270,10 +364,17 @@ public class CaretTrailPanel extends JComponent {
 
     // ==================== 弹簧模式绘制 ====================
 
-    private void paintQuad(Graphics2D g2) {
-        Path2D.Double path = buildQuadPath();
+    private void paintQuad(Graphics2D g2, int index) {
+        // 把一个四边形从步长数组拷进中转数组，供辉光几何算式使用
+        int base = index * QUAD_STRIDE;
+        for (int j = 0; j < 4; j++) {
+            quadX[j] = quads[base + j * 2];
+            quadY[j] = quads[base + j * 2 + 1];
+        }
+        Path2D.Double path = buildQuadPath(index);
+        float glow = (float) quads[base + 8];
 
-        drawQuadGlow(g2, path);
+        drawQuadGlow(g2, path, glow);
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
         g2.setColor(fillColor);
@@ -287,12 +388,13 @@ public class CaretTrailPanel extends JComponent {
      * Polygon 的构造函数只吃 {@code int[]}，会把亚像素坐标截断，导致顶点每帧跳 1px（抖动）。
      * Path2D 保留 double，配合抗锯齿即可在亚像素级平滑移动 —— 与 canvas 行为一致。
      */
-    private Path2D.Double buildQuadPath() {
+    private Path2D.Double buildQuadPath(int index) {
+        int base = index * QUAD_STRIDE;
         quadPath.reset();
-        quadPath.moveTo(polyX[0], polyY[0]);
-        quadPath.lineTo(polyX[1], polyY[1]);
-        quadPath.lineTo(polyX[2], polyY[2]);
-        quadPath.lineTo(polyX[3], polyY[3]);
+        quadPath.moveTo(quads[base], quads[base + 1]);
+        quadPath.lineTo(quads[base + 2], quads[base + 3]);
+        quadPath.lineTo(quads[base + 4], quads[base + 5]);
+        quadPath.lineTo(quads[base + 6], quads[base + 7]);
         quadPath.closePath();
         return quadPath;
     }
@@ -324,7 +426,7 @@ public class CaretTrailPanel extends JComponent {
      * IntelliJ 光标极窄（2×32），于是最亮的那层只向外扩不到 1px 且随即被
      * 不透明主体盖住；而真正扩得够远的层，alpha 已衰减到 2% 以下。
      */
-    private void drawQuadGlow(Graphics2D g2, Path2D.Double ignoredPath) {
+    private void drawQuadGlow(Graphics2D g2, Path2D.Double ignoredPath, float quadGlow) {
         if (!config.useShadow || config.glowLayers <= 0 || glowWidth <= 0.5f) {
             return;
         }
@@ -336,8 +438,15 @@ public class CaretTrailPanel extends JComponent {
         // 【F2 / 批次2】再乘上 glowFade：拖尾停止后辉光淡出，光标本体不受影响。
         // 这是本批唯一改动的算式位置 —— 其余几何算法（角点、外扩方向、层数、
         // 半序、Math.pow 反解）一字未改。
+        // 【多光标】强度改为逐四边形传入（quadGlow），不再读全局 glowStrength。
+        //
+        // 为什么要改：多光标时每个光标独立运动，有的在动（辉光满强度）、
+        // 有的已静止（辉光应为 0）。若仍读全局字段，静止的光标也会发光。
+        //
+        // 单光标路径由 updateCorners() 把 glowStrength 写进四边形槽位，
+        // 因此行为与改造前完全一致。
         float peak = config.glowOpacity * (glowColor.getAlpha() / 255f)
-                * glowStrength * glowFade;
+                * quadGlow * glowFade;
         if (peak <= 0f) {
             return;
         }
@@ -353,7 +462,7 @@ public class CaretTrailPanel extends JComponent {
                 glowColor.getBlue(), argb));
 
         // 角点的外扩方向：沿该方向平移 radius，即"四边形向外偏移 radius"
-        computeOffsetDirections(polyX, polyY, dirX, dirY);
+        computeOffsetDirections(quadX, quadY, dirX, dirY);
 
         // 从最外层向内绘制，半径线性分布
         for (int i = layers; i >= 1; i--) {
