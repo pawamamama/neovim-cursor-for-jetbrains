@@ -370,9 +370,6 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     private int frameCount = 0;
     private int peakRepaintArea = 0;
-
-    /** 本窗口内「无动画」的帧数（用于区分"真在动"与"空闲空转"） */
-    private int idleFrames = 0;
     private long fpsWindowStart = 0L;
 
     /** 上一次记账的时刻；0 表示本窗口还没有过第二帧 */
@@ -820,26 +817,11 @@ public class CaretAnimator implements Disposable, CaretListener {
      * </ol>
      */
     private int computeNextDelay(boolean active) {
-        // 【常驻刷新：有动画时永远 8ms，无动画时降频】
-        //
-        // 原来的写法是无条件 return ACTIVE_DELAY_MS —— 完全无视 active 参数。
-        // 实测后果（用户机器 0.9.16-diag，29 条样本）：
-        //   最后 13 条记录 fps=64.2 / area=1272px / idle=321 恒定不变
-        //   → 编辑器早已停止打字，却仍每 8ms 醒来一次、跑完整个 tick、
-        //     算完物理、提交一次重绘（重画同一块 1272px 的静止区域）
-        //   → 5 秒窗口内 321 帧全部是"无动画的无效帧"
-        //
-        // 这是纯粹的浪费：CPU 在算一个不动的光标。
-        //
-        // 修法：有动画 → 8ms（保持"停手后第一次操作无冷启动"的原意）；
-        //       无动画 → 回落到 IDLE_DELAY_MS(120ms)。
-        //
-        // 【为什么这样不会丢"冷启动"体验】
-        // 光标事件（caretPositionChanged）会调 wakeUp()，
-        // 它把 currentDelayMs 拉回 8ms 并立刻打断调度线程的 sleep ——
-        // 所以"停手很久后打第一个字"仍会在 ~1ms 内响应，不是 120ms。
+        // 常驻刷新：不区分有无动画，永远走活跃档。
+        // 这样停手后第一次操作也不会"冷启动"—— 下一帧最多 8ms 就到。
+        // 代价见 NeovideConfig#alwaysHighFps（会持续占用 EDT）。
         if (config.alwaysHighFps) {
-            return active ? ACTIVE_DELAY_MS : IDLE_DELAY_MS;
+            return ACTIVE_DELAY_MS;
         }
 
         if (active) {
@@ -917,15 +899,8 @@ public class CaretAnimator implements Disposable, CaretListener {
      * </ul>
      */
     private void recordFrameStats(long now, boolean active) {
-        // 【性能诊断：active=false 时也要统计】
-        //
-        // 原实现 !active 直接 return —— 于是"卡到动不了"（active=false）反而没有数据，
-        // 正好漏掉最需要看的情况。
-        //
-        // 现在改成：只要 tick 执行了就计数，另记 idleFrames 区分"有动画/无动画"。
-        // 这样日志里能看到"空闲时 EDT 是否还在空转"。
         if (!active) {
-            idleFrames++;
+            return;
         }
         if (fpsWindowStart == 0L) {
             fpsWindowStart = now;
@@ -956,39 +931,32 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         long elapsed = now - fpsWindowStart;
         if (elapsed >= STATS_WINDOW_NANOS) {
-            // 【性能诊断：提到 INFO 级】
-            //
-            // 原实现在 LOG.isDebugEnabled() 内 —— 用户机器上 Debug Log 默认关闭，
-            // 于是【一条数据都收不到】，无法验证优化效果。
-            // 现在改为 INFO，让 fps 数据无条件可见。
-            //
-            // 写入门控：每 STATS_WINDOW_NANOS(5s) 一次 per animator。
-            // 8 个编辑器 = 每秒约 1.6 行，可接受。
-            //
-            // 【字段顺序不可改】build/analyze-log.ps1 与 diag/extract.py 用固定顺序
-            // 的正则解析前六个字段，中间插字段会让既有证据链失效。
-            String editorTag;
-            try {
-                editorTag = editor.getEditorKind().name();
-            } catch (Throwable t) {
-                // 编辑器正在销毁时取不到 kind，退化为 UNKNOWN（不得影响统计口径）
-                editorTag = "UNKNOWN";
+            // 【T0-1】日志门控：Debug Log 未开时连 String.format 都不求值。
+            // 编辑器标识只在"窗口到期 + Debug 开启"时才计算（每帧绝不计算），
+            // 且必须追加在行尾 —— build/analyze-log.ps1:8 与 diag/extract.py:6
+            // 用固定顺序的正则解析前面六个字段，中间插字段会让既有证据链失效。
+            if (LOG.isDebugEnabled()) {
+                String editorTag;
+                try {
+                    editorTag = editor.getEditorKind().name();
+                } catch (Throwable t) {
+                    // 编辑器正在销毁时取不到 kind，退化为 UNKNOWN（不得影响统计口径）
+                    editorTag = "UNKNOWN";
+                }
+                LOG.debug(String.format(
+                        "neovide-cursor: fps=%.1f  frames=%d  window=%.0fms  maxGap=%.0fms  "
+                                + "peakRepaintArea=%dpx  delay=%dms  editor=%s#%d",
+                        frameCount * 1_000_000_000.0 / elapsed,
+                        frameCount,
+                        elapsed / 1_000_000.0,
+                        maxGapNanos / 1_000_000.0,
+                        peakRepaintArea,
+                        currentDelayMs,
+                        editorTag,
+                        System.identityHashCode(editor)));
             }
-            LOG.info(String.format(
-                    "neovide-cursor: fps=%.1f  frames=%d  window=%.0fms  maxGap=%.0fms  "
-                            + "peakRepaintArea=%dpx  delay=%dms  editor=%s#%d",
-                    frameCount * 1_000_000_000.0 / elapsed,
-                    frameCount,
-                    elapsed / 1_000_000.0,
-                    maxGapNanos / 1_000_000.0,
-                    peakRepaintArea,
-                    currentDelayMs,
-                    editorTag,
-                    System.identityHashCode(editor))
-                    + ("  idleFrames=" + idleFrames));
             frameCount = 0;
             peakRepaintArea = 0;
-            idleFrames = 0;
             maxGapNanos = 0L;
             fpsWindowStart = now;
         }
