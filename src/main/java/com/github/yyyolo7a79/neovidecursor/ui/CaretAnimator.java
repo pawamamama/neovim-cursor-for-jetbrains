@@ -1010,7 +1010,30 @@ public class CaretAnimator implements Disposable, CaretListener {
             lastVisualColumn = vp.column;
 
             double height = editor.getLineHeight();
-            double width = config.cursorWidth;
+
+            // 【P0 修复：光标宽度对齐】
+            //
+            // 原来直接用 config.cursorWidth(2px)，而 IDEA 原生光标宽度由
+            // EditorSettings.getLineCursorWidth() 决定（实测约 5px）。
+            //
+            // 后果（用户实测反馈"两个光标"）：
+            //   · hideNativeCaret=false（保留原生）→ 原生 5px 与覆盖层 2px 叠加，
+            //     两条边都露出来
+            //   · hideNativeCaret=true（常驻绘制）→ 覆盖层比用户惯用光标细
+            //
+            // 策略见本类静态方法 resolveCursorWidth（刻意放在 UI 层而不放 core/NeovideConfig：
+            // D0 门禁把 core/NeovideConfig.java 冻结了，任何改动都会让 D0 变红）：
+            //   常驻绘制 → 用 config 值（用户可调）
+            //   保留原生 → 跟随真实宽度（否则叠加错位）
+            //   读不到   → 回退 config 值（不能因为取不到就让功能失效）
+            int realCursorWidth = -1;
+            try {
+                realCursorWidth = editor.getSettings().getLineCursorWidth();
+            } catch (Throwable ignored) {
+                // 编辑器正在销毁 / settings 不可用：保持 -1，由 resolveCursorWidth 回退
+            }
+            double width = resolveCursorWidth(config.hideNativeCaret, realCursorWidth,
+                    config.cursorWidth);
 
             // 【字符移动量】供 {@link TrailCorner#jump} 判定「短跳」用。
             //
@@ -1489,5 +1512,48 @@ public class CaretAnimator implements Disposable, CaretListener {
         } catch (Throwable ignored) {
             // 忽略
         }
+    }
+
+    /**
+     * 解析「覆盖层该用多宽的光标」。
+     *
+     * <p><b>为什么放在这里而不是 {@link NeovideConfig}</b>：
+     * D0 门禁对 {@code core/NeovideConfig.java} 做 {@code git diff --exit-code}，
+     * <b>任何改动都会让 D0 变红</b>（该文件是冻结的默认值契约）。而这个函数是
+     * 纯 UI 层的宽度决策，不属于配置默认值，因此放在这里。
+     *
+     * <p><b>要解决的问题</b>：{@code NeovideConfig.cursorWidth} 默认 2px 是写死的，
+     * 而 IDEA 原生光标宽度由 {@code EditorSettings.getLineCursorWidth()} 决定
+     * （实测约 5px）。两者不一致时：
+     * <ul>
+     *   <li>保留原生光标 → 原生 5px 与覆盖层 2px 叠加，<b>两条边都露出来，像两个光标</b></li>
+     *   <li>常驻绘制 → 覆盖层比用户惯用光标细，显得「光标变窄了」</li>
+     * </ul>
+     *
+     * <p><b>策略</b>：
+     * <ul>
+     *   <li>{@code hideNativeCaret = true}（我们自己画）→ 用 {@code cursorWidth}，
+     *       保留用户可调的自由度</li>
+     *   <li>{@code hideNativeCaret = false}（保留原生）→ <b>必须跟随真实宽度</b></li>
+     *   <li>真实宽度读不到（≤ 0，编辑器正在销毁）→ 回退 {@code cursorWidth}</li>
+     * </ul>
+     *
+     * <p>结果至少为 1.0：零宽会画出不可见的四边形，等于拖尾消失。
+     *
+     * @param hideNativeCaret 是否隐藏原生光标
+     * @param realWidth       IDEA 报告的光标宽度（像素），≤ 0 表示读取失败
+     * @param cursorWidth     用户配置的宽度
+     * @return 覆盖层应使用的宽度（像素）
+     */
+    public static double resolveCursorWidth(boolean hideNativeCaret, int realWidth, float cursorWidth) {
+        double w;
+        if (hideNativeCaret) {
+            w = cursorWidth;
+        } else if (realWidth > 0) {
+            w = realWidth;
+        } else {
+            w = cursorWidth;
+        }
+        return Math.max(w, 1.0);
     }
 }
