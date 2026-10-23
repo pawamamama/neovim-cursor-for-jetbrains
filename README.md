@@ -11,6 +11,9 @@
 > **What this edition adds**: on top of the original effect, a **full settings panel + persistence + preset system**.
 > The original only lets you tweak parameters by editing code — this one lets you adjust, save and switch directly inside the IDE.
 
+
+**Language** — [**English**](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja-JP.md) | [한국어](README.ko-KR.md)
+
 ---
 
 ## Demo
@@ -64,9 +67,54 @@ Built on [yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyy
 | **Tools menu entries** | 4 | ✅ **8** |
 | **Live preview in panel** | ❌ | ✅ |
 
-### Fixes contributed back upstream
+### Core contribution: character-based input detection
 
-Three fixes were merged into upstream **v0.5.1** ([PR #10](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/pull/10)):
+**This is the most fundamental difference from upstream, and the root of the better feel.**
+
+Upstream infers the character count from **pixels**:
+
+```java
+jumpX = displacement / caretWidth;
+isShortMove = |jumpX| <= threshold;   // threshold = max(16px, charWidth × 2.5)
+```
+
+This project uses the editor's **native character offset**:
+
+```java
+charsMoved = |currentOffset - previousOffset|;   // exact character count
+isShortJump = sameLine && charsMoved <= typingMaxChars(3);
+```
+
+| Scenario | Upstream | **This project** |
+|---|---|---|
+| Single CJK char | Needs `shortMoveMinChars` compensation at large fonts | **Correct by construction** |
+| Emoji / surrogate pairs | Must be converted manually | `getOffset()` gets it right |
+| Multiple keystrokes in one frame | Misjudged as a long jump | `sameLine` + char-count guard |
+| Changing font size | Threshold shifts, feel drifts | **Completely independent** |
+
+**This design took four failed attempts to land** (all documented in source comments):
+
+1. Normalize by caret width → a 2px caret can never exceed the threshold, so the short-jump branch **never fires**
+2. Hard-code 16px → a CJK char at font size 20 is judged a long jump: "**English is smooth, deleting Chinese stutters**"
+3. `FontMetrics.charWidth('m')` → 'm' is the Latin advance; CJK is twice that
+4. Measure "column 0 to column 1 width" → that samples the **first** char of the line; still doubles when the caret sits in a CJK region
+
+### Tuned input-feel parameters
+
+Upstream's `trailFactors` is a **hard-coded array** `{1.0, 0.9, 0.5, 0.3}` — changing it needs a rebuild.
+
+This project splits it into two **continuously adjustable** parameters:
+
+| Parameter | Effect | Range |
+|---|---|---|
+| **Stretch strength** (`stretchRatioK`) | Derives the four-corner gradient | 1–8, continuous |
+| **Typing smoothness** (`typingSmoothness`) | Flattens the gradient toward 1 | 0–100 |
+
+Computed by the pure function `deriveTrailFactors(k, smooth)`.
+**The number shown in the panel and the value used at runtime share the same formula**
+(this fixed a bug where the panel over-reported by 6.4×).
+
+### Fixes contributed back upstream (merged into v0.5.1 / PR #10)
 
 | Fix | Impact |
 |---|---|

@@ -161,7 +161,7 @@ accent 色是 `#6494ed`（`options/material_theme_new.xml` 里实测读到）。
 
 **而且我本地 README 是旧的（18 条），上游有 21 条** —— 多出来的三条里
 正好有宣判我改动的那条。已单独写成
-[SKILL-upstream-lessons-before-patching.md](SKILL-upstream-lessons-before-patching.md)。
+[SKILL-upstream-lessons-before-patching.md](../SKILL-upstream-lessons-before-patching.md)。
 
 ### 错误 2：把「删除卡」当成性能结论，用算术代替实测
 
@@ -204,7 +204,7 @@ accent 色是 `#6494ed`（`options/material_theme_new.xml` 里实测读到）。
 & pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\offline-build.ps1" -Version 0.4.4 -OutName 产出名.jar
 ```
 
-细节见 [SKILL-jetbrains-plugin-offline-build.md](SKILL-jetbrains-plugin-offline-build.md)。
+细节见 [SKILL-jetbrains-plugin-offline-build.md](../SKILL-jetbrains-plugin-offline-build.md)。
 JDK 25 在 `D:\java_learning\jdk25\bin`，`--release 21`；
 classpath 是 `D:\deepseekwork\_idea-anim\idea-libs` 下的 381 个 jar；
 脚本以官方 `.orig` jar 为容器、注入 `<version>` 与 `since-build="242"`，

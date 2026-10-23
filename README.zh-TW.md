@@ -13,6 +13,9 @@
 > **本版重點**：在原始效果之上，補上了**完整設定面板 + 持久化 + 預設系統**。
 > 原版只能改程式碼調參數，本版可以在 IDE 裡直接調、存、切換。
 
+
+**語言 / Language** — [English](README.md) | [简体中文](README.zh-CN.md) | [**繁體中文**](README.zh-TW.md) | [日本語](README.ja-JP.md) | [한국어](README.ko-KR.md)
+
 ---
 
 ## 本版獨有
