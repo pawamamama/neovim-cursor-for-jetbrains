@@ -117,23 +117,6 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 失焦且静止时的轮询间隔：编辑器没有焦点时光标不会动，无需高响应度 */
     private static final int IDLE_UNFOCUSED_DELAY_MS = 600;
 
-    /**
-     * 编辑器【不可见】时的调度间隔（毫秒）。
-     *
-     * <p><b>为什么需要它</b>：后台标签页 / 被遮挡的编辑器完全不需要绘制，
-     * 但原实现在 {@code computeNextDelay()} 里只要 {@code alwaysHighFps} 为真
-     * 就一律返回 {@link #ACTIVE_DELAY_MS}(8ms) —— 8 个编辑器就是每秒约 1000 个
-     * {@code invokeLater}，而同一时刻只有一个在前台。
-     *
-     * <p>取 120ms（与 {@link #IDLE_DELAY_MS} 同量级）：
-     * <ul>
-     *   <li>切回标签页时最坏等 120ms 就恢复绘制 —— 人眼可接受</li>
-     *   <li>不可见编辑器的 EDT 占用从 125fps 降到约 <b>8fps</b>（<b>15 倍</b>）</li>
-     * </ul>
-     * 取 500ms 虽然更省，但切回来会明显"闪一下没有光标"，体验得不偿失。
-     */
-    private static final int HIDDEN_DELAY_MS = 120;
-
     /** 自适应调度的间隔上限（毫秒） */
     private static final int MAX_ADAPTIVE_DELAY_MS = 40;
 
@@ -321,18 +304,6 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 是否已销毁 */
     private volatile boolean disposed = false;
-
-    /**
-     * 上一帧是否处于「可见」状态。
-     *
-     * <p>用于在【从可见变为不可见】的那一刻清一次残留绘制 ——
-     * 只在跨越边界时清，不在每一帧都清（每帧清会让 {@code clearCorners()} 变成热路径负担）。
-     */
-    private boolean hadVisibleContent = false;
-
-    /** {@link #isShowingCached()} 的缓存值 */
-    private boolean cachedShowing = true;
-    private long lastShowingCheckNanos = 0L;
 
     // ===== 性能统计（每秒输出一次，用于客观定位卡顿来源）=====
 
@@ -708,33 +679,16 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
         lastTickNanos = now;
 
-        // 【性能优化 1/3：不可见时在【一切工作之前】退出】
-        //
-        // 原实现把 isShowing() 检查放在 refreshTarget() 【之后】，
-        // 于是后台标签页仍然每帧跑一遍 getVisualPosition() + 坐标换算 ——
-        // 那些工作全部白做，而且 computeNextDelay() 照样返回 8ms，
-        // 任务继续按 125fps 往 EDT 投递。
-        //
-        // 实测背景（用户机器 8 个编辑器）：applyConfig 日志显示 animators=8，
-        // 每个都按 8ms 独立投递 → 每秒约 1000 个 invokeLater，
-        // 而同一时刻只有一个编辑器在前台。
-        //
-        // 现在：不可见 → 清掉残留绘制、登记低频、直接返回。
-        // 不做坐标换算、不做物理、不提交重绘。
-        if (!isShowingCached()) {
-            if (hadVisibleContent) {
-                // 从可见变为不可见：清一次残留，避免切回来时看到陈旧拖尾
-                panel.clearCorners();
-                hadVisibleContent = false;
-            }
-            currentDelayMs = HIDDEN_DELAY_MS;
-            return;
-        }
-        hadVisibleContent = true;
-
         boolean moved = refreshTarget();
 
         if (!initialized) {
+            return;
+        }
+
+        // 编辑器不可见（后台标签页、尚未完成初始化）时不绘制。
+        // 否则拖尾会停在一个错误的位置，看起来就是"光标莫名悬浮"。
+        if (!content.isShowing()) {
+            panel.clearCorners();
             return;
         }
 
@@ -787,30 +741,6 @@ public class CaretAnimator implements Disposable, CaretListener {
             return Math.max(ACTIVE_DELAY_MS, Math.min(adaptive, MAX_ADAPTIVE_DELAY_MS));
         }
         return isEditorFocused() ? IDLE_DELAY_MS : IDLE_UNFOCUSED_DELAY_MS;
-    }
-
-    /**
-     * 缓存的可见性判断。
-     *
-     * <p><b>为什么要缓存</b>：{@code Component.isShowing()} 会沿父链向上走到 Window
-     * 并检查 isVisible —— 每帧每编辑器各调一次，8 个编辑器就是 8×125 次/秒。
-     * 而窗口可见性变化并不频繁。
-     *
-     * <p>缓存一个 frame 周期：即使判断滞后一帧，也只在"切标签页"这种一次性边界上
-     * 多花一帧，无感知影响。
-     */
-    private boolean isShowingCached() {
-        long n = System.nanoTime();
-        if (n - lastShowingCheckNanos < 8_000_000L) {
-            return cachedShowing;
-        }
-        lastShowingCheckNanos = n;
-        try {
-            cachedShowing = content.isShowing();
-        } catch (Throwable t) {
-            cachedShowing = false;          // 组件正在销毁时按不可见处理
-        }
-        return cachedShowing;
     }
 
     /** 编辑器当前是否持有键盘焦点 */
