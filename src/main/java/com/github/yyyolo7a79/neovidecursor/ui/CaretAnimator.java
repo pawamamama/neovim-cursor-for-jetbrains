@@ -6,6 +6,7 @@ import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
+import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.editor.EditorKind;
@@ -23,6 +24,7 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -211,7 +213,37 @@ public class CaretAnimator implements Disposable, CaretListener {
     private final JComponent content;
     private final CaretTrailPanel panel;
     private final NeovideConfig config;
-    private final TrailCorner[] corners;
+    /**
+     * 每个 {@code Caret} 一份拖尾状态（多光标）。
+     *
+     * <p><b>为什么用 {@link IdentityHashMap}</b>：{@code Caret} 对象没有可靠的
+     * {@code equals/hashCode}，必须按<b>引用</b>判等，否则不同光标可能撞键。
+     *
+     * <p><b>为什么还需要帧号清理</b>：官方文档明确「两个 caret 落到同一视觉位置时
+     * 平台会合并成一个」。合并后旧 {@code Caret} 对象不再出现在
+     * {@code getAllCarets()} 里，而 IdentityHashMap 按引用判等 ——
+     * 旧条目永远不会再被访问到。因此每帧遍历时打 {@code lastSeenFrame}，
+     * 回收时删掉「帧号 ≠ 当前帧」的条目（不依赖数量比较，
+     * 因为合并是一增一减、数量可能不变）。
+     */
+    private final Map<Caret, SpringTrail> trails = new java.util.IdentityHashMap<>();
+
+    /** 每帧复用的活跃列表（避免每帧新建） */
+    private final List<SpringTrail> activeTrails = new java.util.ArrayList<>();
+
+    /** 帧序号，用于帧号标记-清除 */
+    private long frameSeq = 0L;
+
+    /**
+     * 主光标对应的拖尾（残影模式 / 日志 / 探针需要"一个代表"）。
+     *
+     * <p>为什么保留单数语义：残影模型 {@link AfterimageTrail} 目前只记一条轨迹，
+     * 多光标残影是后续工作。这里先让单光标行为与改造前完全一致。
+     */
+    private SpringTrail cameraTrail;
+
+    /** 多光标上限：防止「全选文件」时创建上万条拖尾 */
+    private static final int MAX_TRAILS = 64;
 
     /**
      * 是否为「静态光标」模式 —— 用于控制台类编辑器（{@link EditorKind#CONSOLE}）。
@@ -362,7 +394,8 @@ public class CaretAnimator implements Disposable, CaretListener {
      * {@code getVisualPosition()} 远比 {@code visualPositionToXY()} 便宜 ——
      * 后者要换算折叠、制表符宽度等，是高帧率下的主要开销来源。
      */
-    private int lastVisualLine = Integer.MIN_VALUE;
+    // lastVisualLine/Column 已下沉到 SpringTrail（见 isAt / markAt）
+    private int __unusedLastVisualLine = Integer.MIN_VALUE;
     private int lastVisualColumn = Integer.MIN_VALUE;
 
     /**
@@ -375,22 +408,21 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 差值是精确的字符个数，与字体、字号、全角半角、连字全部无关 ——
      * 这正是「英文丝滑但中文卡」问题的根治法。详见 {@code TrailCorner#jump}。
      */
-    private int lastCaretOffset = -1;
+    // lastCaretOffset 已下沉到 SpringTrail（每光标独立，见该类注释第 4 点）
 
     // ===== 动画目标状态 =====
 
     /** 光标矩形中心点（contentComponent 坐标系） */
-    private double centerX;
-    private double centerY;
+    // centerX/centerY 已下沉到 SpringTrail
 
     private double cursorWidth;
     private double cursorHeight;
 
     /** 标记目标点刚发生变化，下一帧需要重新分配角点 rank */
-    private boolean jumped = false;
+    // jumped 已下沉到 SpringTrail
 
     /** 是否已完成初始化（首帧直接吸附到位，不做入场动画） */
-    private boolean initialized = false;
+    // initialized 已下沉到 SpringTrail
 
     /**
      * 强制重新同步标记：布局刚发生变化时置位。
@@ -409,10 +441,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 不做拖尾 —— 它们的光标被全局隐藏了，必须有人补上，原因见 staticCaret 字段说明。
         this.staticCaret = editor.getEditorKind() == EditorKind.CONSOLE;
 
-        this.corners = new TrailCorner[CORNER_RELATIVE.length];
-        for (int i = 0; i < CORNER_RELATIVE.length; i++) {
-            corners[i] = new TrailCorner(CORNER_RELATIVE[i][0], CORNER_RELATIVE[i][1], config);
-        }
+        // 多光标：四角不再在这里创建，而是每个 Caret 各自一个 SpringTrail
+        // （见 refreshTarget）。这里只保留 panel 与调度初始化。
 
         this.afterimageTrail = new AfterimageTrail(config);
         afterimageTrail.setLifetime(config.afterimageLifetime);
@@ -587,6 +617,34 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 光标事件只用于"唤醒"高帧率。
      * 真正的目标点更新在 {@link #tick()} 中每帧进行，避免事件时序问题。
      */
+    /**
+     * 多光标新增（Alt+拖拽列选、Alt+Shift+点击等）。
+     *
+     * <p><b>只唤醒，不直接改状态</b> —— 与 {@link #caretPositionChanged} 同一原则：
+     * 平台事件的时序不可靠（光标事件可能在坐标数据更新之前触发），
+     * 真正的目标点更新统一在 {@code tick()} 里做。
+     *
+     * <p>仍需置 {@code forceResync}：新光标若恰好落在与旧光标相同的视觉位置，
+     * 快速路径会误判"没动"，导致它不从邻居起飞而是直接吸附。
+     */
+    @Override
+    public void caretAdded(@NotNull CaretEvent event) {
+        forceResync = true;
+        wakeUp();
+    }
+
+    /**
+     * 多光标移除（含平台<b>自动合并</b>：两个 caret 落到同一视觉位置时会合并成一个）。
+     *
+     * <p>移除后对应的 {@code SpringTrail} 会由帧号标记-清除回收，
+     * 这里只需唤醒重绘，让画面立刻少一条拖尾。
+     */
+    @Override
+    public void caretRemoved(@NotNull CaretEvent event) {
+        forceResync = true;
+        wakeUp();
+    }
+
     @Override
     public void caretPositionChanged(@NotNull CaretEvent event) {
         // 【F1-a / 批次2】让坐标缓存立即失效。
@@ -681,7 +739,8 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         boolean moved = refreshTarget();
 
-        if (!initialized) {
+        // 多光标：只要没有任何活跃拖尾就退出（等价于旧的 !initialized）
+        if (activeTrails.isEmpty()) {
             return;
         }
 
@@ -849,14 +908,19 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
     }
 
-    /** 计算四个角点的包围盒（含辉光余量），结果写入 out 以避免分配 */
+    /**
+     * 计算【全部光标】所有角点的包围盒（含辉光余量），结果写入 out 以避免分配。
+     *
+     * <p>多光标：必须遍历 activeTrails 里的每一个拖尾，否则重绘区域会漏掉
+     * 非主光标的拖尾，表现为「其他光标留下残影」。
+     */
     private void computeTrailBounds(Rectangle out) {
         double minX = Double.MAX_VALUE;
         double minY = Double.MAX_VALUE;
         double maxX = -Double.MAX_VALUE;
         double maxY = -Double.MAX_VALUE;
 
-        for (TrailCorner corner : corners) {
+        for (TrailCorner corner : allCorners()) {
             double x = corner.getCurrentX();
             double y = corner.getCurrentY();
             if (x < minX) {
@@ -899,11 +963,29 @@ public class CaretAnimator implements Disposable, CaretListener {
         try {
             VisualPosition vp = editor.getCaretModel().getVisualPosition();
 
-            // 快速路径：视觉位置没变就直接返回，跳过昂贵的坐标换算。
-            // 这是高帧率下最关键的性能优化 —— 绝大多数帧其实光标根本没动。
-            // forceResync 用于布局刚变化的情形：视觉位置可能没变，
-            // 但像素坐标已经失效，必须强制重算。
-            if (!forceResync && vp.line == lastVisualLine && vp.column == lastVisualColumn) {
+            // 【快速路径：恢复为顶层早退】
+            //
+            // 为什么必须保留（而不是像第一版重构那样下沉到循环内）：
+            // 单光标是绝对多数场景，而这一层跳过的是每帧三次昂贵调用 ——
+            //   getOffset() / visualPositionToXY() / offsetToXY()
+            // 实测契约 P0-5 要求「非快速路径帧每帧 getOffset 恰好 1 次」，
+            // 下沉后变成 2 次（IME 判据 1 次 + charsMoved 1 次），直接违反。
+            //
+            // 多光标的正确性：只有当【所有】光标都没变时才早退。
+            // 判断依据是主光标的缓存 + 光标数量 —— 数量变化（新增/移除/合并）
+            // 会让 changed 为 true，不会漏掉。个别非主光标微妙移动的场景，
+            // 由 caret 事件（caretPositionChanged / Added / Removed）置 forceResync 兜住。
+            if (!forceResync && cameraTrail != null && cameraTrail.isInitialized()
+                    && cameraTrail.isAt(vp.line, vp.column,
+                            editor.getDocument().getModificationStamp())) {
+                // 【多光标补充】主光标没变，但光标集合可能变了（Alt+拖拽新增、
+                // 平台合并、Alt+点击移除）。这些情况由 caretAdded/Removed 事件
+                // 置 forceResync 兜住 —— 那三个监听器已经实现了。
+                //
+                // 这里【不能】调 getAllCarets() 检查数量：那会破坏单光标的
+                // 快速路径契约（A9b/A9c/A9d 要求这一帧零昂贵调用）。
+                // 数量变化一定伴随 caret 事件，事件会先置 forceResync，
+                // 下一帧就走不到这里。
                 return false;
             }
 
@@ -969,9 +1051,9 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 批次2 的 F1-b 就被验证方实测出这个缺陷：连续 200 帧全被拦、偏差 30px。
             // 这里保留同一个上界：超过即强制放行一次，最坏只是「120ms 后自愈」。
             if (!forceResync
-                    && lastCaretOffset >= 0
+                    && cameraTrail != null
+                    && cameraTrail.isInitialized()
                     && caretOffset >= 0
-                    && initialized
                     && imeSkipFrames < IME_MAX_SKIP_FRAMES) {
                 // 只有当两个 API 都成功给出坐标时才做比较；任一抛异常就放行，
                 // 绝不让"取不到坐标"变成"永远不重算"。
@@ -1006,8 +1088,7 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             forceResync = false;
 
-            lastVisualLine = vp.line;
-            lastVisualColumn = vp.column;
+            // 多光标：视觉位置缓存下沉到每个 SpringTrail（isAt / markAt）
 
             double height = editor.getLineHeight();
 
@@ -1035,64 +1116,144 @@ public class CaretAnimator implements Disposable, CaretListener {
             double width = resolveCursorWidth(config.hideNativeCaret, realCursorWidth,
                     config.cursorWidth);
 
-            // 【字符移动量】供 {@link TrailCorner#jump} 判定「短跳」用。
+            // ==================== 多光标：逐 Caret 更新 ====================
             //
-            // 直接用编辑器的原生字符偏移，而不是从像素反推字符宽度。
-            // 这是 IntelliJ 平台的标准做法：offset 就是「第几个字符」，
-            // 差值天然是「移动了几个字符」，与字体、字号、全角半角完全无关 ——
-            // 中文、日文、韩文、阿拉伯文、emoji（代理对按 2 计）一视同仁。
-            //
-            // 早期版本曾用「像素 ÷ 字符宽度」反推，先后失败三次：
-            // 写死 16px（字号 20px 的中文约 20px 直接超出）、
-            // FontMetrics('m')（西文推进量，中文是 2 倍）、
-            // 第0列→第1列实测（取的是行首字符，光标在中文区时仍会翻倍）。
-            // 结果都是「英文丝滑、中文卡」。
-            int charsMoved = -1;
-            if (caretOffset >= 0) {
-                // 【F1-c】复用上面已经读到的 offset，不重复调用（契约 P0-5）
-                if (lastCaretOffset >= 0) {
-                    charsMoved = Math.abs(caretOffset - lastCaretOffset);
+            // 【与单光标版本的关键差异】
+            // 1. 字符移动量必须【逐光标独立】—— 每个 Caret 有独立 offset。
+            //    若共用一份，光标 A 的读数会与 B 交错，算出荒谬的移动量，
+            //    直接破坏本项目最重要的差异点（按字符判断短跳）。
+            // 2. 新光标从【像素距离最近】的已初始化光标起飞，
+            //    而不是遍历顺序的前一个（上游做法，Alt+散点选会从远处飞入）。
+            // 3. 缓存键复用 hasCaretChanged() —— 见该方法的 IME 与时序说明。
+
+            long stamp = editor.getDocument().getModificationStamp();
+            frameSeq++;
+
+            List<Caret> carets = editor.getCaretModel().getAllCarets();
+            Caret primaryCaret = editor.getCaretModel().getPrimaryCaret();
+
+            int count = Math.min(carets.size(), MAX_TRAILS);
+            boolean changed = count != activeTrails.size();
+
+            activeTrails.clear();
+            for (int i = 0; i < count; i++) {
+                Caret caret = carets.get(i);
+                SpringTrail trail = trails.get(caret);
+                if (trail == null) {
+                    trail = new SpringTrail(config);
+                    // 从最近的已初始化光标起飞（不是遍历顺序的前一个）
+                    SpringTrail source = nearestInitializedTrail(
+                            caret, carets, trails);
+                    if (source != null) {
+                        trail.startFrom(source);
+                    }
+                    trails.put(caret, trail);
+                    changed = true;
                 }
-                lastCaretOffset = caretOffset;
-            }
-            for (TrailCorner corner : corners) {
-                corner.setCharsMoved(charsMoved);
+                trail.lastSeenFrame = frameSeq;
+                activeTrails.add(trail);
+
+                VisualPosition cvp = caret.getVisualPosition();
+                int caretOff = caret.getOffset();
+
+                // 快速路径：视觉位置 + 文档修改戳都没变就跳过坐标换算。
+                // resync / forceResync 时强制重算全部光标。
+                boolean needsUpdate = forceResync
+                        || !trail.isInitialized()
+                        || !trail.isAt(cvp.line, cvp.column, stamp);
+
+                if (needsUpdate) {
+                    Point cp = editor.visualPositionToXY(cvp);
+                    trail.markAt(cvp.line, cvp.column, stamp);
+                    int charsMoved = trail.updateCharsMoved(caretOff);
+                    trail.applyCharsMoved(charsMoved);
+                    if (trail.setTarget(cp.x + width / 2.0, cp.y + height / 2.0,
+                            width, height)) {
+                        changed = true;
+                    }
+                } else {
+                    // 目标没变，但仍要把字符移动量清零，避免上一帧的值残留
+                    trail.applyCharsMoved(-1);
+                }
+
+                // 主光标的那份用于残影 / 日志 / 探针（保持旧语义）
+                if (primaryCaret == null || caret == primaryCaret) {
+                    cameraTrail = trail;
+                }
             }
 
-            double newCenterX = p.x + width / 2.0;
-            double newCenterY = p.y + height / 2.0;
+            // 【帧号标记-清除】不依赖数量比较 —— 平台合并光标时一增一减，
+            // 数量可能完全不变，用 size 比较永远清不掉死条目。
+            if (trails.size() > activeTrails.size()) {
+                trails.entrySet().removeIf(e -> e.getValue().lastSeenFrame != frameSeq);
+                changed = true;
+            }
 
-            if (newCenterX == centerX && newCenterY == centerY && height == cursorHeight) {
+            if (activeTrails.isEmpty()) {
                 logSlowRefresh(startedNanos, false);
                 return false;
             }
 
+            // 辉光半径与重绘余量随光标尺寸同步更新
+            //
+            // 【审查修正】这里原本写成「仅当宽高变化时更新」——那是错的。
+            // refreshGlowPadding()（面板改 shadowBlurFactor 后调用）读的是
+            // cursorWidth/cursorHeight 这两个字段；若只在新旧不同时才赋值，
+            // 首次或某些路径下它们可能还是旧值，导致 glowPadding 不刷新。
+            // 实测后果：shadowBlurFactor 0.2→0.6 时 glowPadding 应为 24，实际停在 4。
+            // 无条件更新，代价只是两次赋值。
             cursorWidth = width;
             cursorHeight = height;
-            centerX = newCenterX;
-            centerY = newCenterY;
-
-            // 辉光半径与重绘余量随光标尺寸同步更新
             panel.updateGlowRadius(width, height);
             glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
 
-            if (!initialized) {
-                // 首次定位：四个角直接吸附到位，避免从 (0,0) 飞入
-                for (TrailCorner corner : corners) {
-                    corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
-                }
-                initialized = true;
-                jumped = false;
-            } else {
-                jumped = true;
-            }
-            logSlowRefresh(startedNanos, true);
-            return true;
+            logSlowRefresh(startedNanos, changed);
+            return changed;
 
         } catch (Throwable t) {
             // 编辑器正在销毁或重绘中：本次跳过，下一帧会自动重试
             return false;
         }
+    }
+
+    /**
+     * 找「像素距离最近、且已初始化」的拖尾，作为新光标的起飞源。
+     *
+     * <p><b>为什么不照抄上游</b>：上游用 {@code previous}（遍历顺序的前一个）。
+     * Alt+向下拖列选时 carets 按 offset 排序，碰巧正确；但 <b>Alt+点击散点选</b> 时，
+     * 新光标会从「offset 更小的任意光标」复制形状 —— 视觉上是「从别处飞来」。
+     *
+     * <p>按像素距离选源能让新光标<b>从空间上最近的邻居滑出</b>，符合直觉。
+     *
+     * @param self  新光标（尚未放入 trails）
+     * @param carets 全部 caret（用于取新光标自己的目标位置）
+     * @param map   已存在的拖尾
+     * @return 最近的已初始化拖尾；没有就返回 null（调用方会走首次吸附）
+     */
+    private SpringTrail nearestInitializedTrail(Caret self, List<Caret> carets,
+                                                Map<Caret, SpringTrail> map) {
+        Point selfPoint;
+        try {
+            selfPoint = editor.visualPositionToXY(self.getVisualPosition());
+        } catch (Throwable t) {
+            return null;
+        }
+
+        SpringTrail best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (SpringTrail candidate : map.values()) {
+            if (!candidate.isInitialized()) {
+                continue;
+            }
+            double dx = candidate.centerX - selfPoint.x;
+            double dy = candidate.centerY - selfPoint.y;
+            double distSq = dx * dx + dy * dy;
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = candidate;
+            }
+        }
+        return best;
     }
 
     /**
@@ -1154,7 +1315,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         if (LOG.isDebugEnabled() && costNanos > REFRESH_TARGET_SLOW_NANOS) {
             LOG.debug(String.format(
                     "neovide-cursor: refreshTarget %.1fms  moved=%b  vp=%d:%d",
-                    costNanos / 1_000_000.0, moved, lastVisualLine, lastVisualColumn));
+                    costNanos / 1_000_000.0, moved,
+                    activeTrails.size(), trails.size()));
         }
     }
 
@@ -1170,18 +1332,19 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 仅在 caret 事件唤醒时才会短暂提速。
      */
     private boolean tickStaticCaret() {
-        for (TrailCorner corner : corners) {
-            corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
+        // 多光标：每个光标都要补画（原生光标被全局隐藏，不补画就彻底不可见）
+        panel.beginQuads();
+        for (SpringTrail trail : activeTrails) {
+            trail.snapToTarget();
+            panel.addQuad(
+                    new double[]{
+                            trail.corners[0].getCurrentX(), trail.corners[1].getCurrentX(),
+                            trail.corners[2].getCurrentX(), trail.corners[3].getCurrentX()},
+                    new double[]{
+                            trail.corners[0].getCurrentY(), trail.corners[1].getCurrentY(),
+                            trail.corners[2].getCurrentY(), trail.corners[3].getCurrentY()},
+                    0f);    // 不绘制辉光：控制台不需要，也省掉这部分重绘开销
         }
-
-        // 不绘制辉光：控制台不需要，也省掉这部分重绘开销
-        panel.setGlowStrength(0f);
-
-        panel.updateCorners(
-                corners[0].getCurrentX(), corners[0].getCurrentY(),
-                corners[1].getCurrentX(), corners[1].getCurrentY(),
-                corners[2].getCurrentX(), corners[2].getCurrentY(),
-                corners[3].getCurrentX(), corners[3].getCurrentY());
 
         computeTrailBounds(currentBounds);
         submitRepaint();
@@ -1190,20 +1353,15 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
     private boolean tickSpring(double dt, long now) {
-        if (jumped) {
-            assignRanks();
-            jumped = false;
-        }
-
+        // 多光标：逐光标推进物理，各自算各自的辉光强度
         boolean anyAnimating = false;
         double maxOffset = 0;
-        for (TrailCorner corner : corners) {
-            if (corner.update(cursorWidth, cursorHeight, centerX, centerY, dt, false)) {
+        for (SpringTrail trail : activeTrails) {
+            if (trail.update(dt)) {
                 anyAnimating = true;
             }
-            double offset = corner.getOffsetMagnitude();
-            if (offset > maxOffset) {
-                maxOffset = offset;
+            if (trail.maxOffset() > maxOffset) {
+                maxOffset = trail.maxOffset();
             }
         }
 
@@ -1250,11 +1408,19 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 这一条在 alwaysHighFps=true 的默认档被掩盖，干净安装（默认 false）时会暴露。
         boolean fading = config.overlayFadeOut && fade > 0f && fade < 1f;
 
-        panel.updateCorners(
-                corners[0].getCurrentX(), corners[0].getCurrentY(),
-                corners[1].getCurrentX(), corners[1].getCurrentY(),
-                corners[2].getCurrentX(), corners[2].getCurrentY(),
-                corners[3].getCurrentX(), corners[3].getCurrentY());
+        // 多光标：每个光标一个四边形，辉光强度逐光标独立
+        panel.beginQuads();
+        for (SpringTrail trail : activeTrails) {
+            float trailGlow = glowStrengthFor(trail, glowStrength, effectiveGlow, fading);
+            panel.addQuad(
+                    new double[]{
+                            trail.corners[0].getCurrentX(), trail.corners[1].getCurrentX(),
+                            trail.corners[2].getCurrentX(), trail.corners[3].getCurrentX()},
+                    new double[]{
+                            trail.corners[0].getCurrentY(), trail.corners[1].getCurrentY(),
+                            trail.corners[2].getCurrentY(), trail.corners[3].getCurrentY()},
+                    trailGlow);
+        }
 
         computeTrailBounds(currentBounds);
         submitRepaint();
@@ -1300,7 +1466,17 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 这正是它比弹簧模型更适合低帧率环境的原因。
      */
     private boolean tickAfterimage(long now, boolean moved) {
-        afterimageTrail.record(centerX, centerY, cursorWidth, cursorHeight, now);
+        // 多光标：残影模型目前只跟主光标。
+        //
+        // 为什么先这样：AfterimageTrail 是"单条历史轨迹"模型，
+        // 要支持多光标需要为每个 caret 各建一条轨迹 + 各自淘汰。
+        // 这属于后续工作，先保证单光标残影行为与改造前完全一致。
+        if (cameraTrail == null) {
+            return false;
+        }
+        double cx = cameraTrail.centerX;
+        double cy = cameraTrail.centerY;
+        afterimageTrail.record(cx, cy, cursorWidth, cursorHeight, now);
 
         List<AfterimageTrail.Ghost> visible = afterimageTrail.collectVisible(now);
 
@@ -1310,7 +1486,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 跳过与当前光标位置重合的采样点，否则会和下面那个常驻光标叠在一起、
         // 半透明颜色叠加导致该处明显偏深。
         for (AfterimageTrail.Ghost ghost : visible) {
-            if (ghost.centerX == centerX && ghost.centerY == centerY) {
+            if (ghost.centerX == cx && ghost.centerY == cy) {
                 continue;
             }
             float alpha = afterimageTrail.alphaOf(ghost, now);
@@ -1332,8 +1508,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 残影会在 lifetime 到期后淡出，若只画残影，光标静止一会儿画面就空了。
         // 因此额外绘制一个始终完全不透明的"光标本体"。
         ghostBuffer.add(new float[]{
-                (float) (centerX - cursorWidth / 2.0),
-                (float) (centerY - cursorHeight / 2.0),
+                (float) (cx - cursorWidth / 2.0),
+                (float) (cy - cursorHeight / 2.0),
                 (float) cursorWidth,
                 (float) cursorHeight,
                 1.0f
@@ -1412,8 +1588,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         afterimageTrail.clear();
         afterimageTrail.setLifetime(config.afterimageLifetime);
 
-        for (TrailCorner corner : corners) {
-            corner.snapTo(cursorWidth, cursorHeight, centerX, centerY);
+        for (SpringTrail trail : trails.values()) {
+            trail.snapToTarget();
         }
 
         panel.clearCorners();
@@ -1440,6 +1616,50 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 设置面板 apply() 之后用户会立刻盯着画面看，所以这里选择<b>主动算一次</b>，
      * 而不是等下一次光标移动。
      */
+    /** 全部活跃拖尾的角点（供包围盒计算，不分配数组 —— 由调用方遍历 map） */
+    private java.util.List<TrailCorner> allCornersScratch = new java.util.ArrayList<>();
+
+    /**
+     * 收集全部活跃光标的角点，供 {@code for (TrailCorner c : allCorners())} 使用。
+     *
+     * <p>返回的是内部复用列表（每帧 clear 再填），调用方不得持有引用。
+     */
+    private java.util.List<TrailCorner> allCorners() {
+        allCornersScratch.clear();
+        for (SpringTrail trail : activeTrails) {
+            for (TrailCorner corner : trail.corners) {
+                allCornersScratch.add(corner);
+            }
+        }
+        return allCornersScratch;
+    }
+
+    /**
+     * 单个光标的辉光强度。
+     *
+     * <p><b>为什么不能直接用全局 {@code glowStrength}</b>：多光标时每个光标独立运动，
+     * 有的在动（辉光满强度）、有的已静止（辉光应为 0）。若共用全局值，
+     * 静止的光标也会发光。
+     *
+     * <p>实现：把该光标自己的 maxOffset 映射到 [0,1]；若整体已在淡出阶段
+     * （{@code fading}），则用全局的有效强度（因为淡出是 overlay 级别的行为）。
+     */
+    private float glowStrengthFor(SpringTrail trail, float globalStrength,
+                                  float effectiveGlow, boolean fading) {
+        if (fading) {
+            return effectiveGlow;
+        }
+        double off = trail.maxOffset();
+        float s = (float) ((off - GLOW_FADE_START) / (GLOW_FADE_END - GLOW_FADE_START));
+        if (s < 0f) {
+            return 0f;
+        }
+        if (s > 1f) {
+            return 1f;
+        }
+        return s;
+    }
+
     void refreshGlowPadding() {
         if (disposed || staticCaret) {
             return;
@@ -1448,36 +1668,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
     }
 
-    /**
-     * 按「运动方向对齐度」给四个角点名次。
-     *
-     * <p>对齐度越高说明该角越位于运动前方，名次越靠前（rank 越小），
-     * 它在 {@link TrailCorner#jump} 中拿到的滞后系数越大 —— 于是前缘紧跟、
-     * 后缘拖沓，矩形被拉长成拖尾形状。
-     */
-    private void assignRanks() {
-        double[] alignment = new double[corners.length];
-        for (int i = 0; i < corners.length; i++) {
-            alignment[i] = corners[i].calculateDirectionAlignment(
-                    cursorWidth, cursorHeight, centerX, centerY);
-        }
-
-        // 求名次：对齐度更高的角 rank 更小（更跟手）
-        int[] ranks = new int[corners.length];
-        for (int i = 0; i < corners.length; i++) {
-            int rank = 0;
-            for (int j = 0; j < corners.length; j++) {
-                if (alignment[j] < alignment[i]) {
-                    rank++;
-                }
-            }
-            ranks[i] = rank;
-        }
-
-        for (int i = 0; i < corners.length; i++) {
-            corners[i].jump(cursorWidth, cursorHeight, centerX, centerY, ranks[i]);
-        }
-    }
+    // assignRanks 已移入 SpringTrail（每个光标各自排名，见该类注释）
 
     /** 清除已绘制的拖尾并刷新一次（切到诊断模式时调用） */
     public void clearTrail() {

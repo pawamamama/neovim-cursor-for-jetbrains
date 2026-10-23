@@ -472,6 +472,20 @@ public final class VerifyApplyConfig {
                     }
                 });
 
+        mockCaret = Proxy.newProxyInstance(
+                VerifyApplyConfig.class.getClassLoader(),
+                new Class<?>[]{com.intellij.openapi.editor.Caret.class},
+                (proxy, m, margs) -> {
+                    switch (m.getName()) {
+                        case "getVisualPosition":
+                            return new VisualPosition(vpLine, vpColumn);
+                        case "getOffset":
+                            return caretOffset;
+                        default:
+                            return defaultValue(m.getReturnType());
+                    }
+                });
+
         Constructor<?> ctor = CaretAnimator.class.getDeclaredConstructor(Editor.class, NeovideConfig.class);
         ctor.setAccessible(true);
         animator = (CaretAnimator) ctor.newInstance(editor, NeovideCaretManager.getConfig());
@@ -480,12 +494,46 @@ public final class VerifyApplyConfig {
 
         refreshTarget = CaretAnimator.class.getDeclaredMethod("refreshTarget");
         refreshTarget.setAccessible(true);
-        field(animator, "initialized").setBoolean(animator, true);
-        field(animator, "lastCaretOffset").setInt(animator, caretOffset);
+
+        // 【多光标改造适配 2026-10-23】
+        // initialized / lastCaretOffset 已从 CaretAnimator 下沉到 SpringTrail。
+        // 先跑一帧把主光标拖尾建起来，再把这两个值注入到那份拖尾上。
+        refreshTarget.invoke(animator);
+        Object mainTrail = mainTrail();
+        if (mainTrail != null) {
+            trailField(mainTrail, "initialized").setBoolean(mainTrail, true);
+            trailField(mainTrail, "lastCaretOffset").setInt(mainTrail, caretOffset);
+        }
+
+        // 【多光标改造适配 2026-10-23 补充】
+        // refreshGlowPadding() 读的是 cursorWidth/cursorHeight 两个字段。
+        // 改造后它们只在 refreshTarget 里被赋值，而 mock 的 getLineHeight()
+        // 可能返回 0 —— 那样 padding 永远算不出正确值。
+        // 这里显式注入探针期望的尺寸（与 V1 的 11 初值一致：0.2*32+4=11）。
+        field(animator, "cursorWidth").setDouble(animator, 2);
+        field(animator, "cursorHeight").setDouble(animator, 32);
 
         Map<Object, Object> map = animatorsMap();
         map.clear();
         map.put(editor, animator);
+    }
+
+    /** 主光标对应的 SpringTrail（多光标改造后单光标状态都在它身上） */
+    private static Object mainTrail() throws Exception {
+        Object t = fieldValue(animator, "cameraTrail");
+        if (t == null) {
+            Object act = fieldValue(animator, "activeTrails");
+            if (act instanceof java.util.List<?> list && !list.isEmpty()) {
+                t = list.get(0);
+            }
+        }
+        return t;
+    }
+
+    private static Field trailField(Object trail, String name) throws Exception {
+        Field f = trail.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        return f;
     }
 
     @SuppressWarnings("unchecked")
@@ -572,6 +620,8 @@ public final class VerifyApplyConfig {
         }
         return sb.append("]").toString();
     }
+
+    private static Object mockCaret;
 
     private static Object defaultValue(Class<?> t) {
         if (!t.isPrimitive()) {

@@ -63,9 +63,7 @@ public final class ImeGeomCriterionTest {
     private static CaretAnimator animator;
     private static Method refreshTarget;
     private static Field forceResyncField;
-    private static Field lastCaretOffsetField;
     private static Field imeSkipFramesField;
-    private static Field lastVisualColumnField;
 
     public static void main(String[] args) throws Exception {
         System.out.println("=== F1-c 几何判据验证（驱动真实的 CaretAnimator.refreshTarget） ===");
@@ -103,7 +101,27 @@ public final class ImeGeomCriterionTest {
 
     // ==================== 搭架子 ====================
 
+    /** 探针用的假 Caret：只需 getVisualPosition / getOffset */
+    private static Object mockCaret;
+
+    private static Object buildMockCaret() {
+        return Proxy.newProxyInstance(
+                ImeGeomCriterionTest.class.getClassLoader(),
+                new Class<?>[]{com.intellij.openapi.editor.Caret.class},
+                (proxy, method, margs) -> {
+                    switch (method.getName()) {
+                        case "getVisualPosition":
+                            return new com.intellij.openapi.editor.VisualPosition(vpLine, vpColumn);
+                        case "getOffset":
+                            return caretOffset;
+                        default:
+                            return defaultValue(method.getReturnType());
+                    }
+                });
+    }
+
     private static void buildAnimator() throws Exception {
+        mockCaret = buildMockCaret();
         // CaretModel：只实现本判据用到的三个方法
         Object caretModel = Proxy.newProxyInstance(
                 ImeGeomCriterionTest.class.getClassLoader(),
@@ -119,9 +137,15 @@ public final class ImeGeomCriterionTest {
                             }
                             return caretOffset;
                         case "getPrimaryCaret":
-                            return null;
-                        case "getAllCarets":
-                            return new ArrayList<>();
+                            return mockCaret;
+                        case "getAllCarets": {
+                            // 多光标改造后 refreshTarget 以 getAllCarets() 为准，
+                            // 探针必须提供一个"主光标"对象，否则循环为空、
+                            // refreshTarget 恒返回 false（第一版适配正是漏了这里）。
+                            java.util.List<Object> one = new ArrayList<>();
+                            one.add(mockCaret);
+                            return one;
+                        }
                         case "addCaretListener":
                         case "removeCaretListener":
                             return null;
@@ -212,14 +236,72 @@ public final class ImeGeomCriterionTest {
         refreshTarget.setAccessible(true);
 
         forceResyncField = field("forceResync");
-        lastCaretOffsetField = field("lastCaretOffset");
         imeSkipFramesField = field("imeSkipFrames");
-        lastVisualColumnField = field("lastVisualColumn");
 
-        // 越过首次定位：把 initialized 置 true，避免 A1 之外被首次定位分支干扰
-        Field initialized = field("initialized");
-        initialized.setBoolean(animator, true);
-        lastCaretOffsetField.setInt(animator, 10);
+        // 【多光标改造适配 2026-10-23】
+        //
+        // lastCaretOffset / initialized / centerX / centerY / corners 已从
+        // CaretAnimator 下沉到 SpringTrail（每个 Caret 一份）。
+        // 判据逻辑仍在 CaretAnimator.refreshTarget 里，因此本测试要
+        // 「注入一个已就位的主光标拖尾」，而不是直接写那几个字段。
+        //
+        // 做法：调用 refreshTarget 一次让 activeTrails 里有条目，
+        // 然后通过 cameraTrail 字段拿到那份 SpringTrail 并写它的字段。
+        cameraTrailField = field("cameraTrail");
+        activeTrailsField = field("activeTrails");
+        initBaselineTrail();
+    }
+
+    private static Field cameraTrailField;
+    private static Field activeTrailsField;
+
+    /** 取当前主光标拖尾（多光标改造后，单光标状态都在它身上） */
+    private static Object mainTrail() throws Exception {
+        Object t = cameraTrailField.get(animator);
+        if (t == null) {
+            java.util.List<?> act = (java.util.List<?>) activeTrailsField.get(animator);
+            if (act != null && !act.isEmpty()) {
+                t = act.get(0);
+            }
+        }
+        return t;
+    }
+
+    private static boolean getTrailBool(String name) throws Exception {
+        Object t = mainTrail();
+        if (t == null) { return false; }
+        Field f = t.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        return f.getBoolean(t);
+    }
+
+    private static int getTrailInt(String name) throws Exception {
+        Object t = mainTrail();
+        if (t == null) { return Integer.MIN_VALUE; }
+        Field f = t.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        return f.getInt(t);
+    }
+
+    private static void setTrailField(String name, Object value) throws Exception {
+        Object t = mainTrail();
+        if (t == null) {
+            return;     // 尚未建立拖尾：调用方会先跑一帧
+        }
+        Field f = t.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        f.set(t, value);
+    }
+
+    /** 建一个已就位的主光标拖尾（跑一帧 refreshTarget 即可） */
+    private static void initBaselineTrail() throws Exception {
+        xyByVisual = new Point(100, 50);
+        xyByOffset = new Point(100, 50);
+        caretOffset = 10;
+        vpColumn = 0;
+        refreshTarget.invoke(animator);
+        setTrailField("initialized", true);
+        setTrailField("lastCaretOffset", 10);
     }
 
     private static Field field(String name) throws Exception {
@@ -289,14 +371,33 @@ public final class ImeGeomCriterionTest {
      */
     private static void resetToStableBaseline(int lastOffset, int lastColumn,
                                               double cx, double cy) throws Exception {
+        // 【顺序很重要】先跑一帧把拖尾建起来（这会消耗计数），
+        // 再 resetCounters() 清零 —— 反过来会让基线帧的调用被算进被测帧。
+        // 这是多光标改造适配时踩到的坑（第一版把 resetCounters 放在了前面，
+        // 导致 A9/A10 的调用计数恒为 2）。
+        xyByVisual = new Point(100, 50);
+        xyByOffset = new Point(100, 50);
+        caretOffset = lastOffset;
+        vpColumn = lastColumn;
+        forceResyncField.setBoolean(animator, false);
+        forceResyncField.setBoolean(animator, true);   // 强制走完整路径建立拖尾
+        refreshTarget.invoke(animator);
+
         resetCounters();
         forceResyncField.setBoolean(animator, false);
-        field("initialized").setBoolean(animator, true);
         imeSkipFramesField.setInt(animator, 0);
-        lastCaretOffsetField.setInt(animator, lastOffset);
-        lastVisualColumnField.setInt(animator, lastColumn);
-        field("centerX").setDouble(animator, cx);
-        field("centerY").setDouble(animator, cy);
+
+        setTrailField("initialized", true);
+        setTrailField("lastCaretOffset", lastOffset);
+        setTrailField("centerX", cx);
+        setTrailField("centerY", cy);
+        // 缓存键必须与「即将被测的那一帧」匹配，否则快速路径不会命中：
+        //   A9 会设 vpColumn = lastColumn，期望命中 → 这里就要写同样的值。
+        setTrailField("lastLine", vpLine);
+        setTrailField("lastColumn", lastColumn);
+        // mock Document 的 getModificationStamp 恒返回同一个值（见 buildAnimator 的 Proxy），
+        // 这里用 0 与之对齐即可。
+        setTrailField("lastStamp", 0L);
         field("cursorHeight").setDouble(animator, 32);
         field("cursorWidth").setDouble(animator, 2);
         vpLine = 0;
@@ -310,14 +411,18 @@ public final class ImeGeomCriterionTest {
     private static void a1_firstCall() throws Exception {
         resetCounters();
         forceResyncField.setBoolean(animator, false);
-        // 首次：lastCaretOffset = -1（未定过位）
-        lastCaretOffsetField.setInt(animator, -1);
-        Field initialized = field("initialized");
-        initialized.setBoolean(animator, false);
-        // 清掉上次遗留的 centerX/centerY：refreshTarget 的返回值语义是
+        // 多光标改造后：主光标拖尾状态注入
+        xyByVisual = new Point(100, 50);
+        xyByOffset = new Point(100, 50);
+        caretOffset = 10;
+        vpColumn = 0;
+        refreshTarget.invoke(animator);
+        setTrailField("lastCaretOffset", -1);
+        setTrailField("initialized", false);
+        // 清掉上次遗留的目标点：refreshTarget 的返回值语义是
         // "中心点/高度是否变化"，遗留同值会让正确的路径也返回 false。
-        field("centerX").setDouble(animator, -999);
-        field("centerY").setDouble(animator, -999);
+        setTrailField("centerX", -999.0);
+        setTrailField("centerY", -999.0);
         field("cursorHeight").setDouble(animator, -999);
 
         // 即使几何不一致，首次也绝不能判为中间态（否则永远画不出第一帧）
@@ -327,13 +432,13 @@ public final class ImeGeomCriterionTest {
         vpColumn = 9;
 
         boolean moved = call();
-        boolean init = initialized.getBoolean(animator);
+        boolean init = getTrailBool("initialized");
         check("A1 首次调用不得误判（几何不一致也要正常定位）",
                 moved && init,
                 "refreshTarget=" + moved + " initialized=" + init);
         check("A1b 首次定位后 lastVisualColumn 已记为该 vp",
-                lastVisualColumnField.getInt(animator) == 9,
-                "lastVisualColumn=" + lastVisualColumnField.getInt(animator) + "（期望 9）");
+                getTrailInt("lastColumn") == 9,
+                "lastVisualColumn=" + getTrailInt("lastColumn") + "（期望 9）");
     }
 
     private static void a2_forceResync() throws Exception {
@@ -370,8 +475,8 @@ public final class ImeGeomCriterionTest {
                 moved,
                 "refreshTarget=" + moved + "（期望 true）");
         check("A3b lastVisualColumn 已更新",
-                lastVisualColumnField.getInt(animator) == 7,
-                "lastVisualColumn=" + lastVisualColumnField.getInt(animator) + "（期望 7）");
+                getTrailInt("lastColumn") == 7,
+                "lastVisualColumn=" + getTrailInt("lastColumn") + "（期望 7）");
     }
 
     /** ★ 本批核心：offset 与 column 都变了，但几何不一致 → 必须拦截 */
@@ -393,8 +498,8 @@ public final class ImeGeomCriterionTest {
                 !moved,
                 "refreshTarget=" + moved + "（期望 false）");
         check("A4b 被拦时不更新 lastVisualColumn",
-                lastVisualColumnField.getInt(animator) == 7,
-                "lastVisualColumn=" + lastVisualColumnField.getInt(animator) + "（期望仍为 7）");
+                getTrailInt("lastColumn") == 7,
+                "lastVisualColumn=" + getTrailInt("lastColumn") + "（期望仍为 7）");
         check("A4c 被拦时光标中心点不变（不画错位置）",
                 centerX() == beforeCenterX,
                 "centerX " + beforeCenterX + " -> " + centerX());
@@ -478,8 +583,8 @@ public final class ImeGeomCriterionTest {
                 moved,
                 "refreshTarget=" + moved + "（期望 true）");
         check("A8b getOffset 失败不影响 lastCaretOffset（保持旧值）",
-                lastCaretOffsetField.getInt(animator) == 50,
-                "lastCaretOffset=" + lastCaretOffsetField.getInt(animator) + "（期望 50）");
+                getTrailInt("lastCaretOffset") == 50,
+                "lastCaretOffset=" + getTrailInt("lastCaretOffset") + "（期望 50）");
     }
 
     private static void a9_fastPath() throws Exception {
@@ -553,9 +658,9 @@ public final class ImeGeomCriterionTest {
         int secondReleaseAt = -1;
         for (int i = 1; i <= 40; i++) {
             vpColumn = 3 + i;          // vp 持续变化（组合串在长）
-            int prevLastColumn = lastVisualColumnField.getInt(animator);
+            int prevLastColumn = getTrailInt("lastColumn");
             call();
-            boolean acceptedThisFrame = lastVisualColumnField.getInt(animator) != prevLastColumn;
+            boolean acceptedThisFrame = getTrailInt("lastColumn") != prevLastColumn;
             if (acceptedThisFrame) {
                 released++;
                 if (firstReleaseAt < 0) {
@@ -641,8 +746,11 @@ public final class ImeGeomCriterionTest {
         xyByVisual = new Point(120, 50);
         xyByOffset = new Point(100, 50);
 
-        Field cornersField = field("corners");
-        Object corners = cornersField.get(animator);
+        // 多光标改造后：四角在主光标那份 SpringTrail 上
+        Object mainTrail = mainTrail();
+        Field cornersField = mainTrail.getClass().getDeclaredField("corners");
+        cornersField.setAccessible(true);
+        Object corners = cornersField.get(mainTrail);
         int n = java.lang.reflect.Array.getLength(corners);
         double[][] before = new double[n][2];
         for (int i = 0; i < n; i++) {
@@ -668,8 +776,12 @@ public final class ImeGeomCriterionTest {
                 "moved=" + moved + " cornersUnchanged=" + same);
     }
 
+    /** 主光标拖尾的目标中心 x（多光标改造后状态在 SpringTrail 上） */
     private static double centerX() throws Exception {
-        Field f = field("centerX");
-        return f.getDouble(animator);
+        Object t = mainTrail();
+        if (t == null) { return Double.NaN; }
+        Field f = t.getClass().getDeclaredField("centerX");
+        f.setAccessible(true);
+        return f.getDouble(t);
     }
 }
