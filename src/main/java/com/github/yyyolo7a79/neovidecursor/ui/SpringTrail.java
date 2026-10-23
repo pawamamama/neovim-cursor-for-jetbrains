@@ -1,0 +1,248 @@
+package com.github.yyyolo7a79.neovidecursor.ui;
+
+import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
+
+/**
+ * 单个光标的弹簧拖尾状态 —— 四角 + 目标点 + 快速路径缓存。
+ *
+ * <p><b>为什么需要它</b>：多光标时每个 {@code Caret} 各有一份独立的四角弹簧与目标点。
+ * 改造前这些状态内联在 {@code CaretAnimator} 的字段里，只能表达一个光标。
+ *
+ * <p><b>与上游 v0.5.1 的差异（四处改进，均有明确依据）</b>：
+ * <ol>
+ *   <li><b>新增 {@link #lastSeenFrame}</b> —— 上游用
+ *       {@code trails.size() > activeTrails.size()} 判断清理时机，
+ *       而官方文档明确「两个 caret 落到同一视觉位置时平台会合并成一个」，
+ *       合并时一增一减、数量不变，清理不触发，死 {@code Caret} 条目滞留。
+ *       本类用帧号标记，配合无条件清除，不依赖数量比较。</li>
+ *   <li><b>{@link #startFrom} 由调用方按像素距离选源</b> —— 上游取「遍历顺序的
+ *       前一个」，Alt+点击散点选时会让新光标从远处飞入。</li>
+ *   <li><b>缓存键含文档修改戳</b> —— 只比 (行, 列) 会在第三方输入法上屏后误判
+ *       「没移动」（列号不变但像素位置已变）。这是上游 issue #6 的修复，保留。</li>
+ *   <li><b>{@code charsMoved} 逐光标独立</b> —— 上游用像素反推字符数；
+ *       本项目用编辑器的原生字符偏移，多光标时必须每个光标各记一份，
+ *       否则光标 A 的移动量会被光标 B 的读数污染。</li>
+ * </ol>
+ *
+ * <p><b>线程约束</b>：全部方法只在 EDT 上调用（与 {@code CaretAnimator} 一致）。
+ */
+final class SpringTrail {
+
+    /** 四个角点的相对位置（左上 → 右上 → 右下 → 左下，顺时针） */
+    private static final double[][] CORNER_RELATIVE = {
+            {-0.5, -0.5},
+            {0.5, -0.5},
+            {0.5, 0.5},
+            {-0.5, 0.5},
+    };
+
+    final TrailCorner[] corners;
+
+    /** 光标矩形中心点与尺寸（contentComponent 坐标系） */
+    double centerX;
+    double centerY;
+    double width;
+    double height;
+
+    /**
+     * 快速路径缓存键：上次换算坐标时的视觉位置 + 文档修改戳。
+     *
+     * <p>只看 (行, 列) 不够：文字变了但列号恰好没变时（第三方输入法把光标放进
+     * 拼音音节内部，上屏后列号相同但像素位置已变），会误判「没移动」、
+     * 覆盖层停在半个字宽处。加上修改戳后，文档一变就强制重算。
+     */
+    private int lastLine = Integer.MIN_VALUE;
+    private int lastColumn = Integer.MIN_VALUE;
+    private long lastStamp = Long.MIN_VALUE;
+
+    /**
+     * 本光标上次记录的字符偏移（用于算 {@code charsMoved}）。
+     *
+     * <p><b>为什么必须逐光标存</b>：多光标时每个 {@code Caret} 有独立 offset。
+     * 若共用一个字段，光标 A 的读数会与光标 B 的交错，算出荒谬的「移动了几个字符」，
+     * 直接破坏本项目最重要的差异点（按字符判断短跳）。
+     */
+    private int lastCaretOffset = -1;
+
+    /** 目标点刚变化，下一帧需要重新分配角点 rank */
+    private boolean jumped = false;
+
+    /** 是否已摆放到位（首次定位直接吸附，不做入场动画） */
+    private boolean initialized = false;
+
+    /** 本帧四角相对目标的最大偏移（像素），用于驱动辉光强度 */
+    private double maxOffset = 0;
+
+    /**
+     * 最后一次被 {@code CaretAnimator} 遍历到的帧号。
+     *
+     * <p>用于帧号标记-清除：平台会在光标合并时悄悄移除 {@code Caret} 对象，
+     * 而 {@code IdentityHashMap} 按引用判等，旧条目永远不会再被访问到。
+     * 每帧遍历时打标，回收时删掉「帧号 ≠ 当前帧」的条目 —— 不依赖数量比较，
+     * 因此在「一增一减数量不变」的合并场景下同样正确。
+     */
+    long lastSeenFrame = -1L;
+
+    SpringTrail(NeovideConfig config) {
+        corners = new TrailCorner[CORNER_RELATIVE.length];
+        for (int i = 0; i < CORNER_RELATIVE.length; i++) {
+            corners[i] = new TrailCorner(CORNER_RELATIVE[i][0], CORNER_RELATIVE[i][1], config);
+        }
+    }
+
+    boolean isInitialized() {
+        return initialized;
+    }
+
+    boolean isAt(int line, int column, long stamp) {
+        return line == lastLine && column == lastColumn && stamp == lastStamp;
+    }
+
+    void markAt(int line, int column, long stamp) {
+        lastLine = line;
+        lastColumn = column;
+        lastStamp = stamp;
+    }
+
+    /**
+     * 更新「上一个字符偏移」，返回本次移动了几个字符。
+     *
+     * @param caretOffset 当前 caret 的文档偏移；负值表示不可用
+     * @return 移动的字符数；首次调用或 offset 不可用时返回 -1（退化到像素判据）
+     */
+    int updateCharsMoved(int caretOffset) {
+        int moved = -1;
+        if (caretOffset >= 0) {
+            if (lastCaretOffset >= 0) {
+                moved = Math.abs(caretOffset - lastCaretOffset);
+            }
+            lastCaretOffset = caretOffset;
+        }
+        return moved;
+    }
+
+    /** 把本次的字符移动量分发给四个角点（供 {@code jump} 判定短跳） */
+    void applyCharsMoved(int charsMoved) {
+        for (TrailCorner corner : corners) {
+            corner.setCharsMoved(charsMoved);
+        }
+    }
+
+    /**
+     * 让本光标从另一个光标的当前形状起飞（多光标新增时调用）。
+     *
+     * <p>源光标尚未就位时不做处理，交给首次 {@link #setTarget} 直接吸附。
+     * <b>选哪个 source 由调用方决定</b> —— 应按像素距离取最近的，
+     * 而不是遍历顺序的前一个（见类注释第 2 点）。
+     */
+    void startFrom(SpringTrail source) {
+        if (source == null || !source.initialized) {
+            return;
+        }
+        for (int i = 0; i < corners.length; i++) {
+            corners[i].placeAt(source.corners[i].getCurrentX(),
+                    source.corners[i].getCurrentY());
+        }
+        width = source.width;
+        height = source.height;
+        initialized = true;
+        jumped = false;
+        maxOffset = 0;
+    }
+
+    /**
+     * 更新目标点。
+     *
+     * @return true 表示目标确实发生了变化
+     */
+    boolean setTarget(double cx, double cy, double w, double h) {
+        if (initialized && cx == centerX && cy == centerY
+                && w == width && h == height) {
+            return false;
+        }
+        centerX = cx;
+        centerY = cy;
+        width = w;
+        height = h;
+        if (!initialized) {
+            snapToTarget();
+            initialized = true;
+        } else {
+            jumped = true;
+        }
+        return true;
+    }
+
+    /** 四角直接吸附到目标（静态光标 / 模式切换 / 首次定位时用） */
+    void snapToTarget() {
+        for (TrailCorner corner : corners) {
+            corner.snapTo(width, height, centerX, centerY);
+        }
+        jumped = false;
+        maxOffset = 0;
+    }
+
+    /**
+     * 推进一帧物理。
+     *
+     * @return true 表示仍在运动
+     */
+    boolean update(double dt) {
+        if (jumped) {
+            assignRanks();
+            jumped = false;
+        }
+        boolean animating = false;
+        maxOffset = 0;
+        for (TrailCorner corner : corners) {
+            if (corner.update(width, height, centerX, centerY, dt, false)) {
+                animating = true;
+            }
+            double offset = corner.getOffsetMagnitude();
+            if (offset > maxOffset) {
+                maxOffset = offset;
+            }
+        }
+        return animating;
+    }
+
+    double maxOffset() {
+        return maxOffset;
+    }
+
+    /**
+     * 按「运动方向对齐度」给四个角点名次。
+     *
+     * <p>与原 JS 版一致按对齐度<b>升序</b>：rank 0 是最靠后的角，
+     * 拿最长时长、最慢；越靠前 rank 越大、时长越短 ——
+     * 于是前缘紧跟、后缘拖沓，矩形被拉长成拖尾形状。
+     */
+    private void assignRanks() {
+        double[] alignment = new double[corners.length];
+        for (int i = 0; i < corners.length; i++) {
+            alignment[i] = corners[i].calculateDirectionAlignment(width, height, centerX, centerY);
+        }
+        for (int i = 0; i < corners.length; i++) {
+            int rank = 0;
+            for (int j = 0; j < corners.length; j++) {
+                if (alignment[j] < alignment[i]) {
+                    rank++;
+                }
+            }
+            corners[i].jump(width, height, centerX, centerY, rank);
+        }
+    }
+
+    /**
+     * 探针：当前中心点与四角是否自洽（用于断言「起飞后形状与源一致」）。
+     */
+    double[] cornersForProbe() {
+        return new double[]{
+                corners[0].getCurrentX(), corners[0].getCurrentY(),
+                corners[1].getCurrentX(), corners[1].getCurrentY(),
+                corners[2].getCurrentX(), corners[2].getCurrentY(),
+                corners[3].getCurrentX(), corners[3].getCurrentY()
+        };
+    }
+}

@@ -325,6 +325,29 @@ public class TrailCorner {
         springY.reset();
     }
 
+    /**
+     * 直接把角点摆到【任意绝对坐标】（多光标：新光标从相邻光标起飞时用）。
+     *
+     * <p>与 {@link #snapTo} 的区别：那个算的是「目标点 + 相对偏移」，
+     * 这个接收的是已经算好的绝对坐标 —— 因为起飞时要复制的是
+     * <b>别的光标的当前形状</b>，不是自己的目标点。
+     *
+     * <p>弹簧位移与速度一并归零：起飞是「从那个形状开始动」，
+     * 不是「带着别人的速度继续冲」。
+     *
+     * @param x 绝对 x（contentComponent 坐标系）
+     * @param y 绝对 y
+     */
+    public void placeAt(double x, double y) {
+        currentX = x;
+        currentY = y;
+        // previousDest 用于下一帧算「移动方向」，起飞时没有上一帧，置成当前值
+        previousDestX = x;
+        previousDestY = y;
+        springX.reset();
+        springY.reset();
+    }
+
     private static void clampSpring(DampedSpring spring, double max) {
         double p = spring.getPosition();
         if (p > max) {
