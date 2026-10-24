@@ -59,6 +59,25 @@ public final class PreviewShowcase {
         // 3 秒后取消置顶，不干扰后续操作
         new javax.swing.Timer(3000, e -> f.setAlwaysOnTop(false)) {{ setRepeats(false); }}.start();
         System.out.println("[2a] frame bounds=" + f.getBounds() + " visible=" + f.isVisible());
+
+        // 【诊断】2.5 秒后打印每个预览窗的真实尺寸与状态
+        new javax.swing.Timer(2500, e -> {
+            System.out.println("--- 诊断（2.5s 后）---");
+            dump(f, 0);
+        }) {{ setRepeats(false); }}.start();
+    }
+
+    private static void dump(java.awt.Container c, int depth) {
+        if (c instanceof AnimationPreview) {
+            AnimationPreview ap = (AnimationPreview) c;
+            System.out.println("    ".repeat(depth) + "Preview " + ap.getWidth() + "x" + ap.getHeight()
+                    + "  " + ap.probeState());
+        }
+        for (java.awt.Component k : c.getComponents()) {
+            if (k instanceof java.awt.Container) {
+                dump((java.awt.Container) k, depth + 1);
+            }
+        }
     }
 
     private static JPanel section(String title, AnimationPreview a, AnimationPreview b, int w, int h) {
@@ -69,40 +88,31 @@ public final class PreviewShowcase {
         lbl.setForeground(new Color(0xD0D0D0));
         lbl.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
         p.add(lbl, BorderLayout.NORTH);
-        // 【修复 2：高度被压扁】
+        // 【修复 3：组件被压成 1x1】
         //
-        // 上一版用 FlowLayout，它按组件 preferredSize 摆，但 JPanel 自己的
-        // preferredSize 只算「首行高度」→ pack() 后三版高度全变成一样的扁条。
+        // GridBagLayout + fill=NONE 时组件不展开，实测每个 Preview 只有 1x1 → 全空。
+        // FlowLayout 又会压扁高度。
         //
-        // 改用 GridBagLayout + 显式 weighty=0 / fill=HORIZONTAL：
-        // 每个组件拿到【自己声明的高度】，且不会被拉伸。
-        JPanel row = new JPanel(new GridBagLayout());
+        // 改用【绝对定位】—— 这是唯一能精确控制「每个组件拿多少像素」的方式。
+        // 布局管理器的各种约束在这里全是干扰。
+        int rowW = w + w / 2 + 10;
+        JPanel row = new JPanel(null);          // null layout = 绝对定位
         row.setOpaque(false);
-        a.setPreferredSize(new Dimension(w, h));
-        b.setPreferredSize(new Dimension(w / 2, h));
+        row.setPreferredSize(new Dimension(rowW, h));
+        row.setMinimumSize(new Dimension(rowW, h));
 
-        GridBagConstraints gc = new GridBagConstraints();
-        gc.gridx = 0;
-        gc.gridy = 0;
-        gc.insets = new Insets(0, 0, 0, 10);
-        gc.fill = GridBagConstraints.NONE;
-        gc.anchor = GridBagConstraints.NORTHWEST;
-        row.add(a, gc);
-
-        gc.gridx = 1;
-        gc.insets = new Insets(0, 0, 0, 0);
-        row.add(b, gc);
-
-        // 关键：给 row 一个「最小高度」，否则 BorderLayout.CENTER 会把它压扁
-        int rowH = h;
-        row.setMinimumSize(new Dimension(w + w / 2 + 10, rowH));
-        row.setPreferredSize(new Dimension(w + w / 2 + 10, rowH));
+        a.setBounds(0, 0, w, h);
+        b.setBounds(w + 10, 0, w / 2, h);
+        row.add(a);
+        row.add(b);
 
         JPanel wrap = new JPanel(new BorderLayout());
         wrap.setOpaque(false);
         wrap.add(row, BorderLayout.CENTER);
-        wrap.setPreferredSize(new Dimension(w + w / 2 + 10, rowH));
+        wrap.setPreferredSize(new Dimension(rowW, h));
+        wrap.setMinimumSize(new Dimension(rowW, h));
         p.add(wrap, BorderLayout.CENTER);
+        p.setPreferredSize(new Dimension(rowW + 28, h + 40));
         return p;
     }
 
