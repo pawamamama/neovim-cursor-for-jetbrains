@@ -1393,16 +1393,35 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 尺寸是单个光标）。这里取该行选区起点的像素坐标，
                     // 尺寸用单字符 (width, height) —— 不合并成整块。
                     //
-                    // 【块选区：先用 blockStarts，靠诊断日志确认】
+                    // 【块选区：按扩展方向选 blockStarts / blockEnds】
                     //
-                    // 2026-10-24 实测数据：
-                    //   普通选区：vp 在动、lead 恒定  → 跟 vp（已修好）
-                    //   块选区：  vp 恒定、lead 在动  → 可能该跟 lead
+                    // 2026-10-24 日志实测（5 行块选区，按 Ctrl+Shift+→）：
+                    //   corner0X=368.0 目标cx=369.0  ← 恒定不变，说明用的那个数组没动
                     //
-                    // 但块选区的 vp/lead 是【主 caret】的，不是每行的。
-                    // 每行位置来自 blockStarts/blockEnds 数组。
-                    // 到底用哪个，先打日志看数组内容。
-                    caretOff = blockStarts[i];
+                    // 块选区是个矩形：
+                    //   blockStarts[] = 固定左边界（向右扩时不动）
+                    //   blockEnds[]   = 活动右边界（向右扩时增长）
+                    //
+                    // 而【向左扩】时，活动的变成左边界 ——
+                    // 这解释了之前「向左正常、向右失效」的现象。
+                    //
+                    // 所以必须【按方向选】：
+                    //   caret 在 lead 右边（向右扩）→ 用 blockEnds
+                    //   caret 在 lead 左边（向左扩）→ 用 blockStarts
+                    int blockChosenOffset;
+                    boolean useEnd = true;
+                    try {
+                        Caret pc = editor.getCaretModel().getPrimaryCaret();
+                        if (pc != null && pc.hasSelection()) {
+                            useEnd = pc.getOffset() >= pc.getLeadSelectionOffset();
+                        }
+                    } catch (Throwable ignored) {
+                        useEnd = true;
+                    }
+                    blockChosenOffset = (useEnd && blockEnds != null && i < blockEnds.length)
+                            ? blockEnds[i]
+                            : blockStarts[i];
+                    caretOff = blockChosenOffset;
                     try {
                         blockLine = editor.getDocument().getLineNumber(blockStarts[i]);
                         cvp = editor.offsetToVisualPosition(caretOff);
@@ -1414,9 +1433,9 @@ public class CaretAnimator implements Disposable, CaretListener {
                                 head(blockStarts), head(blockEnds));
                         Caret pc = editor.getCaretModel().getPrimaryCaret();
                         if (pc != null) {
-                            CursorDiag.caretSample("block", pc.hasSelection(),
-                                    fmtVp(pc.getVisualPosition()),
-                                    fmtVp(pc.getLeadSelectionPosition()), "BLOCK");
+                            boolean rightward = pc.getOffset() >= pc.getLeadSelectionOffset();
+                            CursorDiag.blockPick(rightward, blockChosenOffset,
+                                    useEnd ? "ENDS" : "STARTS");
                         }
                     }
                     targetW = width;

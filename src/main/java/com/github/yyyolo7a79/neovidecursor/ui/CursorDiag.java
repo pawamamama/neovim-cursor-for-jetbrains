@@ -135,6 +135,22 @@ final class CursorDiag {
                 + " ends=" + endsHead);
     }
 
+    /**
+     * 记录块选区的「方向判定 + 选中的 offset」。
+     *
+     * <p><b>为什么要单独记</b>：块选区有两个数组（starts / ends），
+     * 分别对应向左扩和向右扩。选错的表现是「某个方向完全没动画」，
+     * 而看 {@link #blockSample} 的数组原值无法判断到底选了哪个。
+     */
+    static void blockPick(boolean rightward, int chosenOffset, String which) {
+        if (!enabled()) {
+            return;
+        }
+        LOG.info("[pick] 方向=" + (rightward ? "向右扩" : "向左扩")
+                + " 选了=" + which
+                + " offset=" + chosenOffset);
+    }
+
     private static String fmt(double v) {
         return String.format("%.1f", v);
     }
