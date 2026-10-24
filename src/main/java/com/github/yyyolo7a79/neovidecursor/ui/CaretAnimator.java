@@ -287,14 +287,23 @@ public class CaretAnimator implements Disposable, CaretListener {
      * <p>块选区在语义上是一次整体移动，所有行移动的字符数必然相同。
      */
     private int updateBlockCharsMoved(int caretOffset) {
-        int moved = -1;
+        // 【0.9.56 修复：多光标横向拉伸比单行长得多的根因】
+        //
+        // TrailCorner.jump() 的分支判据是：
+        //     isShortJump = 同一行 && charsMoved <= typingMaxChars(3)
+        //
+        // 块选区的 blockStarts[i] 是 offset，跨行时天然差异极大
+        // （差一整行就是几十上百个字符）。用它算 charsMoved 必然 > 3，
+        // 于是连行内小步移动也被判成跨行 → 走 animationLength(0.28)
+        // 而不是 shortAnimationLength(0.11) → 横向拉伸暴涨 2.55 倍。
+        //
+        // 修法：块选区只传 -1，让 jump() 走归一化兜底分支 ——
+        // 那里按 deltaX/width、deltaY/height 判断，
+        // 块选区同一行内移动天然满足 |jumpY| <= 0.001，能正确走短跳。
         if (caretOffset >= 0) {
-            if (lastBlockOffset >= 0) {
-                moved = Math.abs(caretOffset - lastBlockOffset);
-            }
-            lastBlockOffset = caretOffset;
+            lastBlockOffset = caretOffset;   // 只为诊断保留
         }
-        return moved;
+        return -1;
     }
 
 
