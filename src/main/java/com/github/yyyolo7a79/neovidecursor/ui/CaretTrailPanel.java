@@ -119,6 +119,20 @@ public class CaretTrailPanel extends JComponent {
     private Color glowColor;
 
     /** 辉光最大外扩量：= shadowBlurFactor × 光标较长边，与原版 shadowBlur 语义一致 */
+    /**
+     * 【T3 实验性：RGB 渐变】默认关闭。
+     *
+     * <p>开启：{@code -Dneovide.cursor.rgb=true}
+     *
+     * <p><b>为什么默认关</b>：parity 是逐字节比对的黄金基准，
+     * 任何绘制变化都会让它变红。实验功能必须默认不影响默认路径。
+     */
+    private static final boolean RGB_EXPERIMENTAL =
+            Boolean.getBoolean("neovide.cursor.rgb");
+
+    /** RGB 渐变的终止色（硬编码，可调版明天做） */
+    private static final java.awt.Color RGB_END_COLOR = new java.awt.Color(0x7B68EE);
+
     private float glowWidth = 12f;
 
     /**
@@ -451,7 +465,28 @@ public class CaretTrailPanel extends JComponent {
         drawQuadGlow(g2, path, glow);
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
-        g2.setColor(fillColor);
+        if (RGB_EXPERIMENTAL) {
+            // 【T3 RGB 最小可运行案例 —— 实验性，默认关】
+            //
+            // 用户要求：「先做简单运行案例我明天带你做可调版本」。
+            //
+            // 纵向渐变：拖尾上端 → 下端。只在有宽度时看得出
+            // （2px 宽看不出横向渐变，这也是为什么先做宽度）。
+            //
+            // 开启方式：-Dneovide.cursor.rgb=true
+            // 关闭时走原来的 setColor，行为与之前完全一致（parity 不受影响）。
+            float top = (float) Math.min(Math.min(quadY[0], quadY[1]), Math.min(quadY[2], quadY[3]));
+            float bottom = (float) Math.max(Math.max(quadY[0], quadY[1]), Math.max(quadY[2], quadY[3]));
+            if (bottom - top > 0.5f) {
+                g2.setPaint(new java.awt.GradientPaint(
+                        0, top, fillColor,
+                        0, bottom, RGB_END_COLOR));
+            } else {
+                g2.setColor(fillColor);
+            }
+        } else {
+            g2.setColor(fillColor);
+        }
         g2.fill(path);
     }
 
