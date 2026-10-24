@@ -1066,8 +1066,21 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 判断依据是主光标的缓存 + 光标数量 —— 数量变化（新增/移除/合并）
             // 会让 changed 为 true，不会漏掉。个别非主光标微妙移动的场景，
             // 由 caret 事件（caretPositionChanged / Added / Removed）置 forceResync 兜住。
+            // 【关键修正：快速路径的判定基准必须与实际更新点一致】
+            //
+            // 用户反馈：「单行还是没有（跟随）」。
+            //
+            // 根因：快速路径用 vp = getVisualPosition()（caret 位置，Shift+→ 时不动），
+            // 而实际更新用 followPositionOf()（lead，在动）。
+            // → 按 Shift+→ 时 caret 不动 → 快速路径命中 → return false
+            // → 永远走不到 lead 的更新。
+            //
+            // 修正：快速路径也用 lead 判定。多花一次 hasSelection()，
+            // 但那是 cheap 调用（不是 visualPositionToXY）。
+            VisualPosition followVp = followPositionOf(
+                    editor.getCaretModel().getPrimaryCaret());
             if (!forceResync && cameraTrail != null && cameraTrail.isInitialized()
-                    && cameraTrail.isAt(vp.line, vp.column,
+                    && cameraTrail.isAt(followVp.line, followVp.column,
                             editor.getDocument().getModificationStamp())) {
                 // 【多光标补充】主光标没变，但光标集合可能变了（Alt+拖拽新增、
                 // 平台合并、Alt+点击移除）。这些情况由 caretAdded/Removed 事件
