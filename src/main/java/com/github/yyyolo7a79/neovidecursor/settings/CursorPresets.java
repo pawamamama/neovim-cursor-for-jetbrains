@@ -99,7 +99,6 @@ public final class CursorPresets {
          * </pre>
          * 也就是说：<b>预设如果管不了它，预设就等于失效一半</b>。
          */
-        private final int smoothTicks;
 
         /**
          * 拉伸强度（{@code stretchRatioK × 10}，10–80 → 1.0–8.0）。
@@ -117,7 +116,7 @@ public final class CursorPresets {
         private AnimPreset(String name, int animLengthTicks, int shortLengthTicks,
                            int trailSizeTicks, int glowLayers,
                            int blurFactorTicks, int glowOpacityTicks,
-                           boolean useShadow, boolean overlayFadeOut, int smoothTicks,
+                           boolean useShadow, boolean overlayFadeOut,
                            int stretchTicks) {
             this.name = name;
             this.animLengthTicks = animLengthTicks;
@@ -128,18 +127,7 @@ public final class CursorPresets {
             this.glowOpacityTicks = glowOpacityTicks;
             this.useShadow = useShadow;
             this.overlayFadeOut = overlayFadeOut;
-            this.smoothTicks = smoothTicks;
             this.stretchTicks = stretchTicks;
-        }
-
-        /** 输入平滑（0–100）。见 {@link #smoothTicks} 的注释。 */
-        public int typingSmoothnessTicks() {
-            return smoothTicks;
-        }
-
-        /** 输入平滑（0–1）。 */
-        public float typingSmoothness() {
-            return smoothTicks / 100f;
         }
 
         /** 拉伸强度（1.0–8.0）。见 {@link #stretchTicks} 的注释。 */
@@ -243,9 +231,9 @@ public final class CursorPresets {
     public static final AnimPreset[] ANIM_PRESETS = {
             //                        名称          anim short trail layers blur opacity 辉光   淡出   平滑
             // ① 基础：= NeovideConfig 默认值。日常用这个。
-            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,    0,  45),
+            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,   45),
             // ② 缎带：跨行动画拉长，斜缎带最明显。
-            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,    0,  80),
+            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,   80),
             // ③ 纯平滑输入：对齐 VS Code 原版的拖尾观感 —— 无辉光扩散、无淡出。
             //
             // 【blur 必须填 60 而不是 0（第二轮审查 F2，high）】
@@ -256,7 +244,7 @@ public final class CursorPresets {
             // → 下拉显示「基准项」但实际已经不是那个预设（显示层撒谎）。
             //
             // 60 = 0.60 = 最柔端。这是「万一用户手动开回辉光时得到柔和光雾」的正确取值。
-            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   0,  20),
+            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   20),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */

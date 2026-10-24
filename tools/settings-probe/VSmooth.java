@@ -60,7 +60,7 @@ public final class VSmooth {
             CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[i];
             double limit = 2.0;   // 物理上限（见上）
             for (float k : new float[]{4.5f, 8.0f}) {
-                float[] f = NeovideCursorSettings.deriveTrailFactors(k, p.typingSmoothness());
+                float[] f = NeovideCursorSettings.deriveTrailFactors(k, 0f /* 0.9.47: 平滑已改全局 */);
                 double leadMs = p.shortAnimationLength() * 1000.0 * f[2];   // rank2 = 横向真实档
                 double frames = leadMs / FRAME_MS;
                 double stepPx = MOVE_PX / frames;
@@ -74,7 +74,7 @@ public final class VSmooth {
 
         // 2) 横向梯度必须 >=2.2×（拉伸可感知）—— 用 rank2，不是 rank3
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
-            float[] f = NeovideCursorSettings.deriveTrailFactors(8.0f, p.typingSmoothness());
+            float[] f = NeovideCursorSettings.deriveTrailFactors(8.0f, 0f /* 0.9.47: 平滑已改全局 */);
             double grad = f[0] / f[2];
             check("S-2「" + p.name() + "」横向梯度 >= 2.2×（rank2 口径）",
                     grad >= 2.2, String.format("%.2f×", grad));
@@ -87,7 +87,7 @@ public final class VSmooth {
         //   short=0.24 → 15.9 px （明显滞后）
         // 所以必须先钉住它，否则"为了平滑而提 short"会把这一项搞坏。
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
-            double lag = comboTrailLag(p.shortAnimationLength(), p.typingSmoothness(), 80);
+            double lag = comboTrailLag(p.shortAnimationLength(), 0f /* 0.9.47: 平滑已改全局 */, 80);
             check("S-2b「" + p.name() + "」80ms 键间隔下后缘滞后 <= 8px",
                     lag <= 8.0, String.format("%.1f px", lag));
         }
@@ -95,7 +95,7 @@ public final class VSmooth {
         // 3) 真实轨迹验证：用 TrailCorner 跑一遍，量实际单帧最大位移
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
             double maxStep = measureMaxStep(8.0f, p.shortAnimationLength(),
-                    p.typingSmoothness());
+                    0f /* 0.9.47: 平滑已改全局 */);
             check("S-3「" + p.name() + "」真实轨迹的最大单帧位移 <= 2.0px",
                     maxStep <= 2.0,
                     String.format("%.3f px", maxStep));

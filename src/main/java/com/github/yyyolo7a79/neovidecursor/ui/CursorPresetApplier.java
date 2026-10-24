@@ -187,7 +187,14 @@ public final class CursorPresetApplier {
                     && Math.abs(s.glowOpacity - p.glowOpacity()) < CursorPresets.EPS
                     && s.useShadow == p.useShadow()
                     && s.overlayFadeOut == p.overlayFadeOut()
-                    && Math.abs(s.typingSmoothness - p.typingSmoothness())
+                    // 【0.9.47：输入平滑不再参与预设匹配】
+                    // 它已改为全局设置（不随预设变），若还比对它，
+                    // 用户把平滑拖到 40 后所有预设都会「匹配不上」→ 下拉显示空白。
+                    //
+                    // 【0.9.46 补充：拉伸强度必须参与匹配】
+                    // 上一轮把 stretchRatioK 加进了预设，却漏了这个判据 ——
+                    // 会导致「k 不同但其他相同」的两个预设被判为同一个。
+                    && Math.abs(s.stretchRatioK - p.stretchRatioK())
                             < CursorPresets.EPS) {
                 return p;
             }

@@ -46,7 +46,7 @@ public final class VPresetFeel {
         for (int i = 0; i < n; i++) {
             CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[i];
             factors[i] = NeovideCursorSettings.deriveTrailFactors(
-                    readStretch(p), p.typingSmoothness());
+                    readStretch(p), 0f);   // 平滑已是全局，算 factors 时用 0
             fdetail.append("\n        ").append(p.name()).append(" → ")
                     .append(java.util.Arrays.toString(factors[i]));
         }

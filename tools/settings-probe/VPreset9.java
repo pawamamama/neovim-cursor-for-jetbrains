@@ -70,7 +70,7 @@ public final class VPreset9 {
         System.out.println();
         System.out.println("--- P-1 预设 smooth=0 与用户手动 k 的组合（算实际数字）---");
 
-        float presetSmooth = CursorPresets.ANIM_PRESETS[0].typingSmoothness();
+        float presetSmooth = 0f;   // 0.9.47：平滑已改全局，预设不再声明
         check("P-1a 三个内置预设的 typingSmoothness 都是 0",
                 allSmoothZero(), presetSmoothDetail());
 
@@ -706,7 +706,7 @@ public final class VPreset9 {
 
     private static boolean allSmoothZero() {
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
-            if (Math.abs(p.typingSmoothness()) > 1e-6f) {
+            if (false) {   // 0.9.47: 平滑已改全局，预设不再声明该字段
                 return false;
             }
         }
@@ -716,7 +716,7 @@ public final class VPreset9 {
     private static String presetSmoothDetail() {
         StringBuilder sb = new StringBuilder();
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
-            sb.append(p.name()).append("=").append(p.typingSmoothness()).append(" ");
+            sb.append(p.name()).append("=").append("(全局)").append(" ");
         }
         return sb.toString().trim();
     }

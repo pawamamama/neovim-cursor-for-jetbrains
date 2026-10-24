@@ -162,8 +162,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     /** 动画时序：「输入平滑」的说明（M4）。必须说清「不改总时长」，否则会被当成第二个短动画时长。 */
     private static final String W_TYPING_SMOOTH =
-            "把前缘的「瞬间跳到新位置」压平一点，让打字更连贯。"
-            + "0% 原样，100% 最平。只影响单行，跨行不受影响。";
+            "<b>全局设置，不随预设变化</b>。把前缘的「瞬间跳到新位置」压平一点，让打字更连贯；"
+            + "0% 原样，100% 最平。只影响单行，跨行不受影响。"
+            + "<br/><b>注意：开得越大，单行连续快速输入时拖尾会跟不上。</b>";
 
     /** 高级（诊断）区：性能诊断开关的说明。该项不持久化。 */
     private static final String W_PAINT_DIAG =
@@ -735,7 +736,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
-                    g.row("输入平滑（拖尾形状）", row -> {
+                    g.row("输入平滑（拖尾形状 · 全局）", row -> {
                         addSlider(row, SPECS[10], null);
                         row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
@@ -1811,11 +1812,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 p.glowLayers(), p.shadowBlurFactor(), p.glowOpacity()});
         s.useShadow = p.useShadow();
         s.overlayFadeOut = p.overlayFadeOut();
-        // 【第 9 个字段：输入平滑】见 CursorPresets.AnimPreset#smoothTicks 的注释。
-        // 它乘进四角系数，是拉伸强度的头号旋钮；不写它 → 用户把 smooth 拖到 100 后
-        // 切任何预设都是规整矩形（"横向拉伸变小了，全部预设都这样"）。
-        s.typingSmoothness = p.typingSmoothness();
-        // 【第 10 个字段：拉伸强度】
+        // 【0.9.47：输入平滑不再属于预设】
+        //
+        // 用户决定：「平滑做成全局不随预设变化的」。
+        // 理由：它影响「单行连续打字的跟随性」，属于设备/习惯级设置，
+        // 不是「观感风格」。放预设里每次切换都被重置，反而烦。
+        //
+        // 三个预设原本 smoothTicks 全是 0 —— 本来就是死字段。
+        //
+        // 【拉伸强度】
         //
         // 【2026-10-24 用户实测 bug】只让 smooth 进预设、k 不进 →
         // 切任何预设 k 都保持用户上次拖出来的值 → 三个预设手感实际完全相同。

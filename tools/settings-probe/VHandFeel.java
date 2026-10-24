@@ -27,7 +27,7 @@ public final class VHandFeel {
             System.out.printf("  预设%d %-8s anim=%.2f short=%.2f trail=%.2f "
                             + "smooth=%d blur=%.2f layers=%d%n",
                     i, p.name(), p.animationLength(), p.shortAnimationLength(),
-                    p.trailSize(), p.typingSmoothnessTicks(),
+                    p.trailSize(), 0,   // 平滑已改为全局，预设不再有该字段
                     p.shadowBlurFactor(), p.glowLayers());
         }
 

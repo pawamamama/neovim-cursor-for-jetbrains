@@ -49,7 +49,7 @@ public final class VFrameRate {
                 : com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.ANIM_PRESETS) {
             for (float k : new float[]{4.5f, 8.0f}) {
                 float[] f = NeovideCursorSettings
-                        .deriveTrailFactors(k, p.typingSmoothness());
+                        .deriveTrailFactors(k, 0f);   // 0.9.47: 平滑已改全局
                 double leadMs = p.shortAnimationLength() * 1000.0 * f[2];
                 double frames = leadMs / REAL_FRAME_MS;
                 check("F-3 「" + p.name() + "」k=" + k + " 横向前缘跨 >= "

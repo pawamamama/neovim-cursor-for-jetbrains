@@ -213,17 +213,19 @@ public final class VRegr2 {
             CursorPresetApplier.applyAnimPreset(p);
             NeovideCursorSettings.State after = roundTrip(V0Env.svc.getState());
             CursorPresets.AnimPreset back = CursorPresetApplier.matchAnimPreset(after);
-            boolean ok = back == p
-                    && Math.abs(after.typingSmoothness - p.typingSmoothness())
-                            < CursorPresets.EPS;
+            // 【0.9.47 语义反转】输入平滑已改为全局设置（不随预设变化）。
+            // 原断言「切预设后 smooth == 预设值」不再成立。
+            // 新断言：match 得回来即可（smooth 不再参与匹配）。
+            boolean ok = back == p;
             if (!ok) {
                 bad++;
             }
             System.out.println("    " + (ok ? "PASS " : "FAIL ") + p.name()
                     + "  match=" + nameOf(back)
-                    + " smooth=" + after.typingSmoothness + "/" + p.typingSmoothness());
+                    + " smooth=" + after.typingSmoothness + "(全局)");
         }
-        check("R-5b 全部预设 apply + 落盘往返后 match 得回来，且 smooth 逐位等于预设值",
+        // 0.9.47：smooth 已移出预设，本断言只看 match。
+        check("R-5b 全部预设 apply + 落盘往返后 match 得回来（smooth 已改全局不参与）",
                 bad == 0, bad + " 个失配");
     }
 
@@ -830,7 +832,7 @@ public final class VRegr2 {
         }
         check("R-16 【任务9】「基础」预设写入的 9 个字段逐项等于干净安装的 State 初值"
                         + "（含 typingSmoothness = 默认 0f）",
-                bad == 0, bad + " 项不等 | 预设 smooth=" + a0.typingSmoothness()
+                bad == 0, bad + " 项不等 | 预设 smooth=(全局，不参与)"
                         + " State 初值 smooth=" + fresh.typingSmoothness
                         + " NeovideConfig 无 smooth 字段（派生量）");
 
