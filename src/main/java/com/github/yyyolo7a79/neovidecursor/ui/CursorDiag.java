@@ -116,8 +116,29 @@ final class CursorDiag {
                 ? "NA"
                 : (blockSpread <= 1.0 ? "OK" : "BAD(差" + f(blockSpread) + "px)");
 
+        // 【fps 直接算在这里】之前 fpsTick 在 tickSpring 的另一处，
+        // 那条路径有多个早退，实测打不出来。frameSummary 已被 shouldSample
+        // 限流且确认在输出，把 fps 挂这里最稳。
+        String fpsText = "";
+        long now = System.nanoTime();
+        if (fpsWindowStart == 0) {
+            fpsWindowStart = now;
+        } else {
+            fpsFrameCount++;
+            long elapsed = now - fpsWindowStart;
+            if (elapsed > 0) {
+                fpsText = String.format(" fps=%.1f", fpsFrameCount * 1e9 / elapsed);
+            }
+            if (elapsed >= FPS_WINDOW_NANOS) {
+                fpsWindowStart = now;
+                fpsFrameCount = 0;
+            }
+        }
+
         LOG.info("[frame] #" + frameSeq
                 + " carets=" + caretCount + " trails=" + trailCount
+                + " layers=" + glowLayersNow
+                + fpsText
                 + " targetMoved=" + targetMoved
                 + " offsetMoved=" + anyOffsetMoved
                 + " | I1不冻结=" + (i1Ok ? "OK" : "BAD")
@@ -188,6 +209,9 @@ final class CursorDiag {
      * 帧率统计窗口（纳秒）：每满 1 秒输出一次。
      */
     private static final long FPS_WINDOW_NANOS = 1_000_000_000L;
+
+    /** 最近一次记录的光标数 / 辉光层数（供 frameSummary 打印） */
+    static int glowLayersNow = 0;
 
     private static long fpsWindowStart = 0;
     private static int fpsFrameCount = 0;

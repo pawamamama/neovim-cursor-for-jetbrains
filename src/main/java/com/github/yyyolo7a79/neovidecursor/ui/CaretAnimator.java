@@ -1709,7 +1709,7 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         // 【fps 基线测量】每秒输出一次真实帧率 + 光标数 + 辉光层数。
         // 用于「多光标辉光该不该降级」的实测（没有基线就不做优化）。
-        CursorDiag.fpsTick(activeTrails.size(), config.glowLayers);
+        CursorDiag.glowLayersNow = config.glowLayers;
 
         computeTrailBounds(currentBounds);
         submitRepaint();
