@@ -118,7 +118,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             + "<b>调到最散会明显增加重绘开销</b>，慢机器可能掉帧。默认 73 比较适中。";
 
     private static final String W_STRETCH =
-            "越大拖尾拉得越长（后缘越慢）。默认 4.5× 是实测手感，调低会变平。";
+            "<b>只影响单行打字/退格</b>：越大后缘越慢、拉得越长。跨行缎带由「拖尾密度」控制。";
 
     private static final String W_FADE_OFF =
             "淡出关闭时这两个值不生效，辉光会瞬间消失。";
@@ -503,7 +503,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             previewConfig = new NeovideConfig();
         }
         if (inlinePreview == null) {
-            inlinePreview = new AnimationPreview(previewConfig, AnimationPreview.Mode.INLINE);
+            inlinePreview = AnimationPreview.inline(previewConfig);
         }
         return inlinePreview;
     }
@@ -514,7 +514,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             previewConfig = new NeovideConfig();
         }
         if (crossPreview == null) {
-            crossPreview = new AnimationPreview(previewConfig, AnimationPreview.Mode.CROSS);
+            crossPreview = AnimationPreview.cross(previewConfig);
         }
         return crossPreview;
     }
@@ -622,7 +622,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     // 来源：PluginManagerCore.getPlugin(PluginId.getId(...)).getVersion()
                     // —— 这就是 jar 内 plugin.xml 的 <version>，运行时唯一真值。
                     row.comment("Neovide Cursor v" + pluginVersion()
-                            + " ｜ 本页所有改动点「应用 / OK」后才生效；面板内不做实时预览。",
+                            + " ｜ <b>下方预览窗按当前参数实时渲染，拖动滑块/改颜色会立刻变化</b>；"
+                            + "但真正作用于编辑器仍需点「应用 / OK」。",
                             COMMENT, NO_LINK);
                     return kotlin.Unit.INSTANCE;
                 });
@@ -727,6 +728,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
+                    // 【0.9.38：从「多行缎带」移到此处】
+                    //
+                    // 它改的是 trailFactors，而 trailFactors 只在【短跳】分支被读
+                    // （见 TrailCorner.jump 的 isShortJump 分支），跨行分支用的是
+                    // trailSize + animationLength。
+                    // 放在「多行缎带」下会让用户以为它管跨行 —— 调了没反应。
+                    g.row("拉伸强度（行内后缘）", row -> {
+                        addSlider(row, SPECS[7], springMode);
+                        row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                        return kotlin.Unit.INSTANCE;
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
 
@@ -747,12 +759,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     // 语义上没坏，但索引契约被破坏。恢复原序。
                     g.row("拖尾密度（整体）", row -> {
                         addSlider(row, SPECS[6], springMode);
-                        row.rowComment("影响所有动作的拖尾长度，不只跨行。", COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("缎带拉伸强度", row -> {
-                        addSlider(row, SPECS[7], springMode);
-                        row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                        row.rowComment("<b>控制跨行缎带拉多长</b>（越大越长）。也影响行内，但行内主要由「缎带拉伸强度」决定。", COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
                     g.row("跨行动画时长", row -> {
