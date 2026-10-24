@@ -181,4 +181,60 @@ final class CursorDiag {
             return def;
         }
     }
+
+    // ==================== 帧率基线测量 ====================
+
+    /**
+     * 帧率统计窗口（纳秒）：每满 1 秒输出一次。
+     */
+    private static final long FPS_WINDOW_NANOS = 1_000_000_000L;
+
+    private static long fpsWindowStart = 0;
+    private static int fpsFrameCount = 0;
+    private static int fpsTrailCount = 0;
+    private static int fpsGlowLayers = 0;
+
+    /**
+     * 记录一帧，每秒输出一次真实 fps —— 用于「多光标辉光该不该降级」的基线测量。
+     *
+     * <p><b>为什么需要</b>：用户要调研「辉光层数随光标数降级」，
+     * 但前提是「多光标 + 满辉光确实卡」。这个前提没人验证过。
+     * 没有基线就做优化 = 盲目优化。
+     *
+     * <p>输出格式（每秒一行）：
+     * <pre>
+     *   [fps] 118.3 帧/秒  光标=8  拖尾=8  辉光层=8
+     * </pre>
+     *
+     * <p>启用方式：设置页勾选「诊断日志」，或 {@code -Dneovide.cursor.diag=true}。
+     */
+    static void fpsTick(int trailCount, int glowLayers) {
+        if (!enabled()) {
+            return;
+        }
+        long now = System.nanoTime();
+        if (fpsWindowStart == 0) {
+            fpsWindowStart = now;
+            return;
+        }
+        fpsFrameCount++;
+        fpsTrailCount = trailCount;
+        fpsGlowLayers = glowLayers;
+
+        long elapsed = now - fpsWindowStart;
+        if (elapsed >= FPS_WINDOW_NANOS) {
+            double fps = fpsFrameCount * 1e9 / elapsed;
+            LOG.info(String.format(
+                    "[fps] %.1f 帧/秒  光标=%d  拖尾=%d  辉光层=%d",
+                    fps, trailCount, trailCount, glowLayers));
+            fpsWindowStart = now;
+            fpsFrameCount = 0;
+        }
+    }
+
+    /** 重置帧率窗口（切换光标数时调用，避免平均值被旧数据污染） */
+    static void fpsReset() {
+        fpsWindowStart = 0;
+        fpsFrameCount = 0;
+    }
 }
