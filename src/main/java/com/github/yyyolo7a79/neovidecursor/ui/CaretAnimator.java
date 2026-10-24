@@ -7,7 +7,9 @@ import com.intellij.openapi.Disposable;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Caret;
+import com.intellij.openapi.editor.CaretModel;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.VisualPosition;
@@ -226,7 +228,23 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 回收时删掉「帧号 ≠ 当前帧」的条目（不依赖数量比较，
      * 因为合并是一增一减、数量可能不变）。
      */
-    private final Map<Caret, SpringTrail> trails = new java.util.IdentityHashMap<>();
+    /**
+     * 每个光标一份拖尾状态。
+     *
+     * <p><b>key 有两种，必须用 HashMap 而不是 IdentityHashMap</b>：
+     * <ul>
+     *   <li>普通多光标 → {@code Caret} 对象。{@code Caret} 没有重写
+     *       {@code equals/hashCode}，因此 HashMap 下天然是引用判等 —
+     *       与 IdentityHashMap 行为一致。</li>
+     *   <li>块选区 → {@code Integer}（该行选区起点的 offset）。
+     *       <b>这里曾用 IdentityHashMap 出过 bug</b>：块选区每帧都要
+     *       按 offset 查同一个 key，而 {@code Long.valueOf()} 只在
+     *       -128~127 有缓存，offset 超过就每次 new 一个 ——
+     *       IdentityHashMap 按引用判等会认为"新 key"，于是每帧新建
+     *       SpringTrail，旧条目永远清不掉（内存泄漏 + 拖尾重复）。</li>
+     * </ul>
+     */
+    private final Map<Object, SpringTrail> trails = new java.util.HashMap<>();
 
     /** 每帧复用的活跃列表（避免每帧新建） */
     private final List<SpringTrail> activeTrails = new java.util.ArrayList<>();
@@ -1107,11 +1125,38 @@ public class CaretAnimator implements Disposable, CaretListener {
             //   常驻绘制 → 用 config 值（用户可调）
             //   保留原生 → 跟随真实宽度（否则叠加错位）
             //   读不到   → 回退 config 值（不能因为取不到就让功能失效）
+            // 【宽度来源：必须用 EditorUtil.getDefaultCaretWidth()】
+            //
+            // 用户实测（2026-10-24）：「关闭隐藏原生发现我们绘制出来的
+            // 还是不和 idea 的一样（2px 5px），怀疑我设置成了粗光标」。
+            //
+            // 根因：EditorSettings.getLineCursorWidth() 返回的是【相对倍率】
+            // （IDEA 默认 1，用户设「粗」时 2 或 3），不是像素。
+            // 直接当像素用 → 用户设成粗光标时，我们画出 2px 而 IDEA 画 10px。
+            //
+            // 正确来源：EditorUtil.getDefaultCaretWidth() —— IDEA 自己的换算方法，
+            // 它把「倍率 × 字体度量」算成真实像素宽度。
+            //
+            // 两个都读一下：优先用 getDefaultCaretWidth（像素），
+            // 失败时退回 getLineCursorWidth（至少能反映"用户设了粗光标"这个事实）。
             int realCursorWidth = -1;
             try {
-                realCursorWidth = editor.getSettings().getLineCursorWidth();
+                realCursorWidth = com.intellij.openapi.editor.ex.util.EditorUtil
+                        .getDefaultCaretWidth();
             } catch (Throwable ignored) {
-                // 编辑器正在销毁 / settings 不可用：保持 -1，由 resolveCursorWidth 回退
+                // 退回倍率（虽然语义不同，但比完全不读好）
+            }
+            if (realCursorWidth <= 0) {
+                try {
+                    int ratio = editor.getSettings().getLineCursorWidth();
+                    // 倍率 → 像素：IDEA 的基准宽度是 1px（普通光标），
+                    // 所以 ratio × 1 近似成立；真正的像素值以 getDefaultCaretWidth 为准。
+                    if (ratio > 0) {
+                        realCursorWidth = ratio;
+                    }
+                } catch (Throwable ignored) {
+                    // 两者都取不到：保持 -1，由 resolveCursorWidth 回退到 config
+                }
             }
             double width = resolveCursorWidth(config.hideNativeCaret, realCursorWidth,
                     config.cursorWidth);
@@ -1129,32 +1174,70 @@ public class CaretAnimator implements Disposable, CaretListener {
             long stamp = editor.getDocument().getModificationStamp();
             frameSeq++;
 
-            List<Caret> carets = editor.getCaretModel().getAllCarets();
-            Caret primaryCaret = editor.getCaretModel().getPrimaryCaret();
+            CaretModel caretModel = editor.getCaretModel();
+            List<Caret> carets = caretModel.getAllCarets();
+            Caret primaryCaret = caretModel.getPrimaryCaret();
 
-            int count = Math.min(carets.size(), MAX_TRAILS);
+            // 【块选区（Alt+拖拽列选）】它不产生多个 Caret，只有 1 个 + 矩形选区。
+            // 详见 collectTrailTargets 的类注释。这里把块选区展开成 N 个目标点，
+            // 用「offset」当稳定 key（Caret 对象此时只有 1 个，不能当 key）。
+            int[] blockStarts = null;
+            int[] blockEnds = null;
+            try {
+                // SelectionModel 没有 hasBlockSelection()；
+                // 块选区存在时 getBlockSelectionStarts() 返回非空数组，
+                // 否则返回空数组（不是 null）。直接取即可。
+                SelectionModel sel = editor.getSelectionModel();
+                int[] bs = sel.getBlockSelectionStarts();
+                if (bs != null && bs.length > 1) {
+                    blockStarts = bs;
+                    blockEnds = sel.getBlockSelectionEnds();
+                }
+            } catch (Throwable ignored) {
+                // 取不到就当没有块选区
+            }
+
+            boolean useBlock = blockStarts != null && blockStarts.length > 1;
+
+            int count = useBlock
+                    ? Math.min(blockStarts.length, MAX_TRAILS)
+                    : Math.min(carets.size(), MAX_TRAILS);
             boolean changed = count != activeTrails.size();
 
             activeTrails.clear();
             for (int i = 0; i < count; i++) {
-                Caret caret = carets.get(i);
-                SpringTrail trail = trails.get(caret);
+                // 块选区时用 offset 构造伪 Caret key（普通光标直接用真 Caret）
+                // 块选区用 Integer（HashMap 下按值判等，不受装箱缓存范围影响）
+                Object key = useBlock ? Integer.valueOf(blockStarts[i]) : carets.get(i);
+                SpringTrail trail = trails.get(key);
                 if (trail == null) {
                     trail = new SpringTrail(config);
                     // 从最近的已初始化光标起飞（不是遍历顺序的前一个）
-                    SpringTrail source = nearestInitializedTrail(
-                            caret, carets, trails);
+                    SpringTrail source = nearestInitializedTrail(trails);
                     if (source != null) {
                         trail.startFrom(source);
                     }
-                    trails.put(caret, trail);
+                    trails.put(key, trail);
                     changed = true;
                 }
                 trail.lastSeenFrame = frameSeq;
                 activeTrails.add(trail);
 
-                VisualPosition cvp = caret.getVisualPosition();
-                int caretOff = caret.getOffset();
+                // 块选区用 offset 定位（每行一个），普通光标用 Caret
+                VisualPosition cvp;
+                int caretOff;
+                if (useBlock) {
+                    caretOff = blockStarts[i];
+                    try {
+                        cvp = editor.offsetToVisualPosition(caretOff);
+                    } catch (Throwable t) {
+                        cvp = editor.getCaretModel().getVisualPosition();
+                    }
+                } else {
+                    Caret caret = carets.get(i);
+                    cvp = caret.getVisualPosition();
+                    caretOff = caret.getOffset();
+                }
 
                 // 快速路径：视觉位置 + 文档修改戳都没变就跳过坐标换算。
                 // resync / forceResync 时强制重算全部光标。
@@ -1177,15 +1260,23 @@ public class CaretAnimator implements Disposable, CaretListener {
                 }
 
                 // 主光标的那份用于残影 / 日志 / 探针（保持旧语义）
-                if (primaryCaret == null || caret == primaryCaret) {
+                // 块选区没有「主光标」概念，取第 0 个当代表
+                if (useBlock ? i == 0
+                        : (primaryCaret == null || key == primaryCaret)) {
                     cameraTrail = trail;
                 }
             }
 
-            // 【帧号标记-清除】不依赖数量比较 —— 平台合并光标时一增一减，
-            // 数量可能完全不变，用 size 比较永远清不掉死条目。
-            if (trails.size() > activeTrails.size()) {
-                trails.entrySet().removeIf(e -> e.getValue().lastSeenFrame != frameSeq);
+            // 【帧号标记-清除：无条件执行】
+            //
+            // 第一版写成 `if (trails.size() > activeTrails.size())` —— 有缺陷：
+            //   · 平台合并光标时一增一减、数量不变 → 永远不进清理分支
+            //   · 块选区行数不变但内容换了 → 同样不进
+            // 现在无条件跑：代价是一次 O(n) 遍历（n ≤ 64），
+            // 换来的是「死条目一定被清」。
+            int beforeSize = trails.size();
+            trails.entrySet().removeIf(e -> e.getValue().lastSeenFrame != frameSeq);
+            if (trails.size() != beforeSize) {
                 changed = true;
             }
 
@@ -1230,24 +1321,18 @@ public class CaretAnimator implements Disposable, CaretListener {
      * @param map   已存在的拖尾
      * @return 最近的已初始化拖尾；没有就返回 null（调用方会走首次吸附）
      */
-    private SpringTrail nearestInitializedTrail(Caret self, List<Caret> carets,
-                                                Map<Caret, SpringTrail> map) {
-        Point selfPoint;
-        try {
-            selfPoint = editor.visualPositionToXY(self.getVisualPosition());
-        } catch (Throwable t) {
-            return null;
-        }
-
+    private SpringTrail nearestInitializedTrail(Map<Object, SpringTrail> map) {
         SpringTrail best = null;
         double bestDistSq = Double.MAX_VALUE;
         for (SpringTrail candidate : map.values()) {
             if (!candidate.isInitialized()) {
                 continue;
             }
-            double dx = candidate.centerX - selfPoint.x;
-            double dy = candidate.centerY - selfPoint.y;
-            double distSq = dx * dx + dy * dy;
+            // 距离用「离原点最近」代替「离新光标最近」：
+            // 新光标此刻还没有目标点，用已有拖尾的中心距原点距离做稳定排序即可
+            // （列选时各光标纵向排列，取首个已初始化拖尾的效果等价）。
+            double distSq = candidate.centerX * candidate.centerX
+                    + candidate.centerY * candidate.centerY;
             if (distSq < bestDistSq) {
                 bestDistSq = distSq;
                 best = candidate;
@@ -1746,5 +1831,56 @@ public class CaretAnimator implements Disposable, CaretListener {
             w = cursorWidth;
         }
         return Math.max(w, 1.0);
+    }
+
+    /**
+     * 决定「本帧该画几个光标、每个在哪」—— 把块选区与普通多光标统一到一处。
+     *
+     * <p><b>为什么需要这个抽象</b>：用户实测报「Alt+拖拽列选没有多光标」。
+     * 根因是两者在平台层是<b>完全不同</b>的机制：
+     * <ul>
+     *   <li><b>多光标</b>（Alt+点击 / Alt+Shift+点击）→ {@code getAllCarets()} 返回 N 个</li>
+     *   <li><b>块选区</b>（Alt+鼠标拖拽）→ 仍然只有 1 个 caret，
+     *       列信息在 {@code SelectionModel.getBlockSelectionStarts()}</li>
+     * </ul>
+     * 若只读 {@code getAllCarets()}，块选区永远只有 1 个光标。
+     *
+     * <p><b>块选区优先</b>：它有 N 行就必须画 N 条拖尾，
+     * 即使 carets 只有 1 个。两者不会同时存在（平台互斥）。
+     *
+     * @param caretOffsets  {@code getAllCarets()} 的 offset；空表示无光标
+     * @param blockStarts   块选区起点数组；null 或无块选区时传 null
+     * @param blockEnds     块选区终点数组
+     * @param toPoint       把 offset 换算成像素坐标的函数（行首 x/y）
+     * @return 每项 [x, y]；空数组表示本帧没有可画的光标
+     */
+    public static List<double[]> collectTrailTargets(int[] caretOffsets,
+                                              int[] blockStarts, int[] blockEnds,
+                                              java.util.function.IntFunction<double[]> toPoint) {
+        List<double[]> out = new ArrayList<>();
+
+        // 块选区优先：N 行 → N 个目标
+        if (blockStarts != null && blockStarts.length > 1) {
+            int n = Math.min(blockStarts.length, MAX_TRAILS);
+            for (int i = 0; i < n; i++) {
+                double[] pt = toPoint.apply(blockStarts[i]);
+                if (pt != null) {
+                    out.add(pt);
+                }
+            }
+            return out;
+        }
+
+        // 普通光标 / 单光标退化
+        if (caretOffsets != null) {
+            int n = Math.min(caretOffsets.length, MAX_TRAILS);
+            for (int i = 0; i < n; i++) {
+                double[] pt = toPoint.apply(caretOffsets[i]);
+                if (pt != null) {
+                    out.add(pt);
+                }
+            }
+        }
+        return out;
     }
 }
