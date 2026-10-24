@@ -1,119 +1,81 @@
-# 下次开工指令
+# 明天从这里继续
 
-> 事实核对：**2026-10-24** ｜ git HEAD：`4a2042f`
-> **先读 [PROJECT-GUIDE.md](PROJECT-GUIDE.md)** —— 那是权威的工作区地图。
-
----
-
-## 一句话指令（直接复制）
-
-```
-读 D:\deepseekwork\neovim-cursor-pr\docs\PROJECT-GUIDE.md
-和 docs\RESUME-HERE.md，然后跑 tools\settings-probe\run-t9-full.ps1 确认门禁，
-按下面的待办继续。每步先写探针再写实现。
-```
+> 2026-10-24 夜完成，2026-10-25 早读这份。
 
 ---
 
-## 项目现状（命令核对，不要信文字）
+## 昨晚做了什么（0.9.57，已装）
+
+| # | 任务 | 位置 |
+|---|---|---|
+| T1 | 光标宽度 0–5px | 设置 → 总开关 → 「光标宽度」 |
+| T2 | 光标高度 30–100% | 设置 → 总开关 → 「光标高度」 |
+| T3 | RGB 纵向渐变（实验） | `-Dneovide.cursor.rgb=true` |
+
+**三个都默认不改变原行为**：宽度 0=跟 IDEA、高度 100%=顶格、RGB 关。
+
+---
+
+## 今天要做的
+
+### 1. 先验收昨晚三项
+
+```
+打开 IDEA，测试：
+  1. 光标宽度拉到 5px → 变粗了吗？
+  2. 光标高度拉到 30% → 变短了吗？
+  3. 静止时（不动）也保持这个大小吗？  ← 关键
+  4. RGB：加 -Dneovide.cursor.rgb=true 重启，看有无纵向渐变
+```
+
+### 2. RGB 可调版（你说「明天带你做」）
+
+需要你决定：
+```
+· 起止色怎么配？（两个 ColorPanel？还是预设几套？）
+· 渐变方向：纵向 / 横向 / 沿拖尾年龄
+· 要不要跟拖尾年龄联动（尾端更淡）
+```
+
+---
+
+## 待办全貌
+
+| # | 事项 | 备注 |
+|---|---|---|
+| 1 | GitHub 发布追平 | **线上 v0.9.33 / 本地 0.9.57**，落后 24 版 |
+| 2 | RGB 可调版 | 今天带做 |
+| 3 | 块选区 `charsMoved` 拆参数 | 技术债 |
+
+---
+
+## 调研结论（已存档 docs/design/RGB-CURSORSIZE-RESEARCH.md）
+
+**纯平滑输入为什么不倾斜**：
+```
+k=2.0 → trailFactors [1.00, 0.82, 0.63, 0.50] → 最大/最小 2.0×
+对比基础 k=4.5 → [1.00, 0.72, 0.42, 0.22] → 4.5×
+四角时长差小 → 矩形不变形 → 不斜
+```
+**不是 bug，是参数。**
+
+**平滑输入是自创的**：
+```
+公式 f'[i] = f[i] + (1-f[i]) × smooth × 0.8
+代码注释自称「本插件早期自创的」，Neovim 原版没有
+```
+
+---
+
+## 快速命令
 
 ```powershell
-cd D:\deepseekwork\neovim-cursor-pr
-git log --oneline -1
-(Get-ChildItem src\main\java -Recurse -Filter *.java).Count
-(Get-ChildItem tools\settings-probe -Filter V*.java).Count
-Get-ChildItem dist -Filter 'neovide-cursor-*.jar' | Sort-Object Name | Select-Object -Last 1
+# 读诊断日志（我直接读盘，不用你复制）
+pwsh -NoProfile -ExecutionPolicy Bypass -File D:\deepseekwork\neovim-cursor-pr\tools\read-diag.ps1
+
+# 跑门禁
+pwsh -NoProfile -ExecutionPolicy Bypass -File D:\deepseekwork\neovim-cursor-pr\tools\settings-probe\run-t9-full.ps1
+
+# 构建+安装
+pwsh -NoProfile -ExecutionPolicy Bypass -File D:\deepseekwork\neovim-cursor-pr\build\i57.ps1
 ```
-
-**核对时的值（2026-10-24）**：
-
-| 项 | 值 |
-|---|---|
-| git HEAD | `4a2042f` |
-| java 文件 | 30 |
-| 探针 | 55 |
-| 本地最新 jar | `neovide-cursor-0.9.23.jar` |
-| 用户已装 | 0.9.22 |
-| GitHub 已发布 | v0.9.14（落后 9 版） |
-
----
-
-## 待办（按优先级）
-
-### P0：验证 0.9.23 的选区跟随
-
-```
-1. 单行：行首按 Ctrl+Shift+→ → 拖尾跟选区右端
-2. 单行：选中后 Shift+← 缩回 → 拖尾往回跟
-3. 多行（块选区）：Alt+拖选 3 行 + Ctrl+Shift+→ → 3 条线都跟
-4. 多行：缩回选区 → 应该坍缩
-```
-
-**如果仍不对，先分清是：**
-- A：跟随点错了（lead vs caret）
-- B：块选区没走 followPositionOf
-- C：速度不一致（charsMoved 或 rank）
-
-### P1：GitHub 发布追平
-
-本地领先 9 个版本，Release 停在 v0.9.14。
-需要：打 tag + 上传 jar + 更新 Release 说明。
-
-### P2：残影模式多光标
-
-`AfterimageTrail` 是「单条历史轨迹」模型，多光标需要每光标一条轨迹 + 各自淘汰。
-
-### P3：IME 探针 6 项破损
-
-`tools/ime-probe/ImeGeomCriterionTest.java` 卡在 mock 基线顺序，
-已在 `run-ime-geom-test.ps1` 标为「已知破损 + 警告」。
-
----
-
-## 开发规则（硬性）
-
-### 1. 先写探针，再写实现
-
-**这不是建议。** 2026-10-24 一天内因跳过它返工 6 次：
-
-| 返工 | 原因 |
-|---|---|
-| 块选区做成一整块矩形 | 没先确认「6 行退回 1 行应坍缩」这个判据 |
-| 选区跟随修反 | 没先测 getVisualPosition vs getLeadSelectionPosition |
-| 破坏 P0-5 契约 | 加了 getPrimaryCaret() 中转 |
-
-### 2. 边界
-
-| 规则 | 说明 |
-|---|---|
-| `core/NeovideConfig.java` | **冻结**，D0 用 git diff 守 |
-| 默认值 | D0b 金表比对 24 个字段 |
-| 构建 | 只用 `build/offline-build.ps1`，不用 Gradle |
-| 安装 | **必须先清空 lib 目录** |
-
-### 3. 常用命令
-
-见 [PROJECT-GUIDE.md 第三节](PROJECT-GUIDE.md)。
-
----
-
-## 绝对不要做的
-
-| 禁止 | 原因 |
-|---|---|
-| 把块选区做成整块矩形 | 0.9.19 试过，多光标变一整块、退回不坍缩 |
-| 恢复「前缘硬吸附」默认开启 | 与「平滑输入」矛盾，用户明确反对 |
-| 改 `shortAnimationLength` 到 0.24 | 实测后缘滞后从 2.8px 恶化到 15.9px |
-| 按 `active` 给常驻刷新降频 | 滚动/选择/补全不触发 caret 事件，会卡 |
-| 改 `DampedSpring` 的衰减因子 `c` | 会逐帧累积放大 |
-| 只换 jar 不清 lib | IDEA 会加载旧版本（10-24 真实事故） |
-
----
-
-## 用户偏好
-
-1. **只用中文**
-2. **命令给可复制的纯文本块，用绝对路径**
-3. **先给方案再动手** —— 「能不能做 X」是探询，不是开工令
-4. **每完成一个功能就本地 git commit**（不推送）
-5. **不要编造** —— 没实测就说没实测
