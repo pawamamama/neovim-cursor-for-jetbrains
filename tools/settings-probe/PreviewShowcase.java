@@ -15,8 +15,23 @@ public final class PreviewShowcase {
     private static final String[] NAMES = {"A-紧凑", "B-中等", "C-大"};
 
     public static void main(String[] args) throws Exception {
+        System.out.println("[1] main 开始 headless="
+                + java.awt.GraphicsEnvironment.isHeadless());
+
         if (args.length > 0 && "--snap".equals(args[0])) { snapshot(); return; }
-        SwingUtilities.invokeLater(PreviewShowcase::showWindow);
+
+        // 【必须用 invokeAndWait + 显式打印异常】
+        // 之前用 invokeLater，EDT 里的异常被吞掉，表现为「跑了但没窗口」。
+        SwingUtilities.invokeAndWait(() -> {
+            try {
+                showWindow();
+                System.out.println("[2] 窗口已 setVisible");
+            } catch (Throwable t) {
+                System.out.println("[X] showWindow 失败: " + t);
+                t.printStackTrace();
+            }
+        });
+        System.out.println("[3] main 结束（EDT 仍在跑）");
     }
 
     private static void showWindow() {
@@ -34,24 +49,60 @@ public final class PreviewShowcase {
         f.setContentPane(root);
         f.pack();
         f.setLocationRelativeTo(null);
+        // 【置顶 + 抢焦点】之前窗口开在屏幕中间但被 IDEA 挡住，
+        // 用户以为「没出来」。这三行确保一定看得见。
+        f.setAlwaysOnTop(true);
         f.setVisible(true);
+        f.toFront();
+        f.requestFocus();
+        f.repaint();
+        // 3 秒后取消置顶，不干扰后续操作
+        new javax.swing.Timer(3000, e -> f.setAlwaysOnTop(false)) {{ setRepeats(false); }}.start();
+        System.out.println("[2a] frame bounds=" + f.getBounds() + " visible=" + f.isVisible());
     }
 
     private static JPanel section(String title, AnimationPreview a, AnimationPreview b, int w, int h) {
         JPanel p = new JPanel(new BorderLayout());
         p.setBackground(new Color(0x2B2D30));
         p.setBorder(BorderFactory.createEmptyBorder(10, 14, 14, 14));
-        JLabel lbl = new JLabel(title);
+        JLabel lbl = new JLabel(title + "   (单行窗 2 倍宽 = 跨行窗)");
         lbl.setForeground(new Color(0xD0D0D0));
         lbl.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
         p.add(lbl, BorderLayout.NORTH);
-        JPanel row = new JPanel(new GridLayout(1, 2, 10, 0));
+        // 【修复 2：高度被压扁】
+        //
+        // 上一版用 FlowLayout，它按组件 preferredSize 摆，但 JPanel 自己的
+        // preferredSize 只算「首行高度」→ pack() 后三版高度全变成一样的扁条。
+        //
+        // 改用 GridBagLayout + 显式 weighty=0 / fill=HORIZONTAL：
+        // 每个组件拿到【自己声明的高度】，且不会被拉伸。
+        JPanel row = new JPanel(new GridBagLayout());
         row.setOpaque(false);
-        a.setPreferredSize(new Dimension(w / 2 - 5, h));
-        b.setPreferredSize(new Dimension(w / 2 - 5, h));
-        row.add(a);
-        row.add(b);
-        p.add(row, BorderLayout.CENTER);
+        a.setPreferredSize(new Dimension(w, h));
+        b.setPreferredSize(new Dimension(w / 2, h));
+
+        GridBagConstraints gc = new GridBagConstraints();
+        gc.gridx = 0;
+        gc.gridy = 0;
+        gc.insets = new Insets(0, 0, 0, 10);
+        gc.fill = GridBagConstraints.NONE;
+        gc.anchor = GridBagConstraints.NORTHWEST;
+        row.add(a, gc);
+
+        gc.gridx = 1;
+        gc.insets = new Insets(0, 0, 0, 0);
+        row.add(b, gc);
+
+        // 关键：给 row 一个「最小高度」，否则 BorderLayout.CENTER 会把它压扁
+        int rowH = h;
+        row.setMinimumSize(new Dimension(w + w / 2 + 10, rowH));
+        row.setPreferredSize(new Dimension(w + w / 2 + 10, rowH));
+
+        JPanel wrap = new JPanel(new BorderLayout());
+        wrap.setOpaque(false);
+        wrap.add(row, BorderLayout.CENTER);
+        wrap.setPreferredSize(new Dimension(w + w / 2 + 10, rowH));
+        p.add(wrap, BorderLayout.CENTER);
         return p;
     }
 
@@ -62,8 +113,9 @@ public final class PreviewShowcase {
             int w = VARIANTS[v][0], h = VARIANTS[v][1];
             AnimationPreview inl = AnimationPreview.inline(new NeovideConfig());
             inl.setSize(w, h);
-            for (int i = 0; i < 40; i++) inl.probeTick(i % 12 == 0);
-            System.out.println("  v" + v + " inline: " + inl.probeState());
+            // 打到 12 个字符（打完但还没删的时刻）
+            for (int i = 0; i < 150; i++) inl.probeTick(i % 19 == 0);
+            System.out.println("  v" + v + " (" + w + "x" + h + ") " + inl.probeState());
             save(inl, new File(dir, "v" + v + "-inline.png"));
             AnimationPreview crs = AnimationPreview.cross(new NeovideConfig());
             crs.setSize(w, h);

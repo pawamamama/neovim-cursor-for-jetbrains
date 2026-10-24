@@ -62,13 +62,26 @@ public final class AnimationPreview extends JComponent {
     private static final int FRAME_MS = 8;
 
     /** 打字：慢到看得清每个字 */
-    private static final int TYPE_MS = 200;
+    private static final int TYPE_MS = 150;
 
-    /** 打完停顿（让人看清完整单词） */
-    private static final int HOLD_MS = 900;
+    /**
+     * 【用户要求：「输入完之后等几秒 再删除 不然看不出来」】
+     *
+     * <p>打完要停 2 秒 —— 让人看清「完整句子长什么样」，再开始删。
+     * 上一版打完立即删，反而看不出「输入」这件事。
+     */
+    private static final int HOLD_AFTER_TYPE_MS = 2000;
 
-    /** 退格：比打字稍快，但每个字仍看得清（用户要 ffffffffff 这种） */
-    private static final int BACKSPACE_MS = 130;
+    /**
+     * 退格节奏：一直连续激发，不停顿。
+     *
+     * <p>真实按住 Backspace 就是连续删（Windows 默认重复率约 10~12 字/秒）。
+     * 90ms ≈ 11 字/秒。
+     */
+    private static final int BACKSPACE_MS = 90;
+
+    /** 删空后停顿，再切换语言重新打 */
+    private static final int SWITCH_PAUSE_MS = 800;
 
     /** 跨行换行间隔 */
     private static final int CROSS_MS = 1100;
@@ -81,6 +94,9 @@ public final class AnimationPreview extends JComponent {
     private double centerY;
     private boolean placed;
     private boolean glowSized;
+
+    /** 字体来源（诊断用：独立窗口里能看出取到的是哪个） */
+    private String fontSource = "(未取)";
 
     /** 编辑器行距（来自 FontPreferences；默认 1.5 与 IDEA 一致） */
     private float editorLineSpacing = 1.5f;
@@ -99,12 +115,20 @@ public final class AnimationPreview extends JComponent {
     private int phase;
     /** 中英轮换 */
     private boolean chinese;
-    /** 跨行当前是第几行 */
-    private int row;
+    /** 跨行演示步骤（0=行尾 1=下行行首 2=回行尾） */
+    private int crossStep = -1;
 
-    /** 演示串：先 pawamamama，退格后切英文短句 */
-    private static final String TEXT_ID1 = "pawamamama";
-    private static final String TEXT_ID2 = "typing test";
+    /**
+     * 演示串。
+     *
+     * <p>用户反馈「输入删除的太少了看不出来」——加到 16 字符，
+     * 退格过程能持续 2 秒以上，看得清光标一个个往左退。
+     */
+    private static final String TEXT_ID1 = "pawamamama_trail";
+    private static final String TEXT_ID2 = "neovide_cursor";
+    /** 跨行演示：第一行、第二行（真实换行：第二行在 i 的正下方） */
+    private static final String CROSS_LINE0 = "int x = 0;";
+    private static final String CROSS_LINE1 = "return x;";
 
     AnimationPreview(@NotNull NeovideConfig config, @NotNull Mode mode) {
         this.config = config;
@@ -152,7 +176,20 @@ public final class AnimationPreview extends JComponent {
      * <p><b>为什么</b>：用户要求「字体选正在用的字体」——
      * 硬编码 monospace 在他机器上可能不是实际编辑器字体，预览就不真实。
      */
+    /**
+     * 取编辑器正在用的字体。
+     *
+     * <p><b>用户反馈</b>：「展示字体不对不知道是窗口问题还是你没设置」。
+     *
+     * <p>原因：独立窗口（PreviewShowcase）里没有 IDEA 的 Application，
+     * {@code EditorColorsManager.getInstance()} 会抛异常 → 走兜底 monospace。
+     * 在 IDEA 里是能取到的。
+     *
+     * <p>现在加两级兜底：IDEA 取不到时，去注册表里找系统等宽字体，
+     * 避免盲退到 Java 默认 monospaced（那个在大字号下很难看）。
+     */
     private Font editorFont() {
+        // 1) IDEA 编辑器字体（最准）
         try {
             com.intellij.openapi.editor.colors.FontPreferences pref =
                     com.intellij.openapi.editor.colors.EditorColorsManager
@@ -160,16 +197,35 @@ public final class AnimationPreview extends JComponent {
             if (pref != null) {
                 String family = pref.getFontFamily();
                 if (family != null && !family.isEmpty()) {
-                    // 同时取编辑器行距 —— 预览要和真实编辑器一致
                     float sp = pref.getLineSpacing();
                     if (sp > 0.8f && sp < 3.0f) {
                         editorLineSpacing = sp;
                     }
+                    fontSource = "IDEA:" + family;
                     return new Font(family, Font.PLAIN, BASE_FONT_SIZE);
                 }
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            fontSource = "IDEA 取不到(" + t.getClass().getSimpleName() + ")";
         }
+
+        // 2) 系统等宽字体按优先级挑（JetBrains Mono > Cascadia > Consolas > ...）
+        String[] candidates = {
+                "JetBrains Mono", "Cascadia Code", "Cascadia Mono",
+                "Consolas", "Fira Code", "Source Code Pro", "Menlo", "Monaco"
+        };
+        java.util.Set<String> available = new java.util.HashSet<>(
+                java.util.Arrays.asList(java.awt.GraphicsEnvironment
+                        .getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
+        for (String c : candidates) {
+            if (available.contains(c)) {
+                fontSource = "系统:" + c;
+                return new Font(c, Font.PLAIN, BASE_FONT_SIZE);
+            }
+        }
+
+        // 3) 最后兜底
+        fontSource = "兜底:Monospaced";
         return new Font(Font.MONOSPACED, Font.PLAIN, BASE_FONT_SIZE);
     }
 
@@ -247,12 +303,13 @@ public final class AnimationPreview extends JComponent {
                 if (typed < max) {
                     typed++;
                     if (typed >= max) {
+                        // 【打完停 2 秒】让用户看清完整句子，再开始删
                         phase = 1;
-                        setInterval(HOLD_MS);
+                        setInterval(HOLD_AFTER_TYPE_MS);
                     }
                 }
                 break;
-            case 1:                                  // 停顿后进入退格
+            case 1:                                  // 停顿结束 → 开始连续删
                 phase = 2;
                 setInterval(BACKSPACE_MS);
                 break;
@@ -260,7 +317,7 @@ public final class AnimationPreview extends JComponent {
                 if (typed > 0) typed--;
                 if (typed == 0) {
                     phase = 3;
-                    setInterval(TYPE_MS);
+                    setInterval(SWITCH_PAUSE_MS);
                 }
                 break;
             default:                                 // 切换语言后重新打字
@@ -280,23 +337,39 @@ public final class AnimationPreview extends JComponent {
     }
 
     /**
-     * 跨行：真实换行的方向。
+     * 跨行：<b>真实换行</b> —— 换行后回到上一行。
      *
-     * <p><b>原来是镜像的</b>：用户反馈「多行缎带镜像了，没有人这样换行」。
-     * 真实换行是「第一行行尾 → 第二行行首」，横向是【从右往左】回落。
-     * 现在第一行放 {@code int x = 0;}，第二行放 {@code return x;}，
-     * 光标从第一行末尾跳到第二行开头 —— 与真实编辑器一致。
+     * <p><b>用户要求原文</b>：「换行展示了个寂寞 int x = 0; 换行后应该在 i 下面
+     * 才能看出来缎带效果 而且是换行再推格到上一行 才算完美展示」。
+     *
+     * <p>所以演示序列是：
+     * <pre>
+     *   第1步  int x = 0;            ← 光标在第 1 行行尾
+     *   第2步  int x = 0;            ← 回车换行，光标跳到【第 2 行第 1 列】
+     *          |                    ←   （正对着 i 的正下方）
+     *   第3步  int x = 0;            ← 再按退格，光标【退回第 1 行行尾】
+     *          |
+     * </pre>
+     *
+     * <p>这样缎带在「行尾 ↔ 下行行首」之间来回拉，斜向的缎带形状最明显。
+     * 第 2 行不放文字（用户明说「第二行有没有字无所谓的」）。
      */
     private void advanceCross() {
-        row = 1 - row;
-        String[] lines = {"int x = 0;", "return x;"};
-        int targetLine = row;
-        String before = lines[targetLine];
-        // 光标落在该行【行尾】（换行后通常继续输入）
-        int tx = (int) (TEXT_X + metrics.stringWidth(before) + cursorW / 2);
-        double ty = contentTop() + lineH * (targetLine + 0.5);
-        centerX = tx;
-        centerY = ty;
+        // 三步循环：行尾 → 下行行首 → 回行尾
+        crossStep = (crossStep + 1) % 3;
+        if (crossStep == 0) {
+            // 第 1 行行尾
+            centerX = TEXT_X + metrics.stringWidth(CROSS_LINE0) + cursorW / 2;
+            centerY = contentTop() + lineH * 0.5;
+        } else if (crossStep == 1) {
+            // 换行：第 2 行第 1 列 —— 正对 i 的正下方
+            centerX = TEXT_X + cursorW / 2;
+            centerY = contentTop() + lineH * 1.5;
+        } else {
+            // 退格回上一行行尾
+            centerX = TEXT_X + metrics.stringWidth(CROSS_LINE0) + cursorW / 2;
+            centerY = contentTop() + lineH * 0.5;
+        }
         pushTarget();
     }
 
@@ -390,13 +463,10 @@ public final class AnimationPreview extends JComponent {
         g2.drawString(shown, TEXT_X, baselineFor(0));
     }
 
-    /** 跨行：画两行真实代码 */
+    /** 跨行：只画第一行（用户说第二行有没有字无所谓） */
     private void paintCross(Graphics2D g2) {
-        String[] lines = {"int x = 0;", "return x;"};
         g2.setColor(new Color(0xBCBEC4));
-        for (int i = 0; i < lines.length; i++) {
-            g2.drawString(lines[i], TEXT_X, baselineFor(i));
-        }
+        g2.drawString(CROSS_LINE0, TEXT_X, baselineFor(0));
     }
 
     private int baselineFor(int lineIndex) {
@@ -416,9 +486,14 @@ public final class AnimationPreview extends JComponent {
 
     @Override
     public Dimension getPreferredSize() {
-        // 0.9.40：定稿 B 版 520×200（三版对比里中等那档），
-        // 字号由 remeasure 按实际尺寸自适应（实测 37pt）。
+        // 默认给面板用 520×200；三版对比器会用 setPreferredSize 覆盖。
+        // 字号由 remeasure 按【实际尺寸】自适应，所以尺寸自由。
         return new Dimension(520, 200);
+    }
+
+    /** 探针：当前生效字号（验证自适应是否真的按尺寸变） */
+    public int probeFontSizeNow() {
+        return fontSize;
     }
 
     // ==================== 探针 / 独立展示器钩子 ====================
@@ -474,6 +549,7 @@ public final class AnimationPreview extends JComponent {
         return "fs=" + fontSize + " lineH=" + lineH + " typed=" + typed
                 + " phase=" + phase + " text=" + currentText()
                 + " metrics=" + (metrics != null) + " font=" + (codeFont != null)
+                + " 字体源=" + fontSource
                 + " w=" + getWidth() + " h=" + getHeight();
     }
 }
