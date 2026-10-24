@@ -217,6 +217,12 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 多光标不辉光（全局设置，来自 State，不随预设变化） */
     private boolean multiCursorNoGlow;
+
+    /** 光标宽度像素（0 = 跟随 IDEA）；来自 State，不随预设变化 */
+    private int cursorWidthPx;
+
+    /** 光标高度占行高比例（1.0 = 顶格）；来自 State，不随预设变化 */
+    private float cursorHeightRatio = 1.0f;
     private final NeovideConfig config;
     /**
      * 每个 {@code Caret} 一份拖尾状态（多光标）。
@@ -1211,7 +1217,12 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             // 多光标：视觉位置缓存下沉到每个 SpringTrail（isAt / markAt）
 
-            double height = editor.getLineHeight();
+            // 【T1/T2 光标尺寸】用户设置优先，未设时用 IDEA 默认
+            //
+            // height：行高 × 高度比例（1.0 = 顶格，用户要求「不能超过顶格」）
+            // width ：见下方 resolveCursorWidth（加 cursorWidthPx 分支）
+            double lineHeight = editor.getLineHeight();
+            double height = lineHeight * Math.max(0.3, Math.min(1.0, cursorHeightRatio));
 
             // 【P0 修复：光标宽度对齐】
             //
@@ -1263,6 +1274,10 @@ public class CaretAnimator implements Disposable, CaretListener {
             }
             double width = resolveCursorWidth(config.hideNativeCaret, realCursorWidth,
                     config.cursorWidth);
+            // 【T1】用户设了宽度（>0）就用它，上限 5px
+            if (cursorWidthPx > 0) {
+                width = Math.min(5.0, cursorWidthPx);
+            }
 
             // ==================== 多光标：逐 Caret 更新 ====================
             //
@@ -2051,8 +2066,20 @@ public class CaretAnimator implements Disposable, CaretListener {
                     .getService(com.github.yyyolo7a79.neovidecursor.settings
                             .NeovideCursorSettings.class)
                     .getState().multiCursorNoGlow;
+            cursorWidthPx = com.intellij.openapi.application.ApplicationManager
+                    .getApplication()
+                    .getService(com.github.yyyolo7a79.neovidecursor.settings
+                            .NeovideCursorSettings.class)
+                    .getState().cursorWidthPx;
+            cursorHeightRatio = com.intellij.openapi.application.ApplicationManager
+                    .getApplication()
+                    .getService(com.github.yyyolo7a79.neovidecursor.settings
+                            .NeovideCursorSettings.class)
+                    .getState().cursorHeightRatio;
         } catch (Throwable ignored) {
             multiCursorNoGlow = false;
+            cursorWidthPx = 0;
+            cursorHeightRatio = 1.0f;
         }
 
         afterimageTrail.clear();

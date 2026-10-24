@@ -865,6 +865,52 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
                         return kotlin.Unit.INSTANCE;
                     });
+
+                    // ---------- 光标尺寸（T1 / T2）----------
+                    g.row("光标宽度（0 = 跟随 IDEA）", row -> {
+                        Cell<JSlider> c = row.slider(0, 5, 1, 1);
+                        JSlider s = c.getComponent();
+                        s.setValue(pending.cursorWidthPx);
+                        javax.swing.JLabel lab = new javax.swing.JLabel(
+                                pending.cursorWidthPx == 0 ? "IDEA"
+                                        : pending.cursorWidthPx + " px");
+                        row.cell(lab);
+                        s.addChangeListener(e -> {
+                            if (syncingControls) {
+                                return;
+                            }
+                            pending.cursorWidthPx = s.getValue();
+                            lab.setText(s.getValue() == 0 ? "IDEA" : s.getValue() + " px");
+                            afterPendingEdited();
+                        });
+                        row.rowComment("<b>全局设置，不随预设变化</b>。"
+                                + "0 = 跟随 IDEA 原生宽度（约 5px）；1~5 = 固定像素。"
+                                + "最大 5px（IDEA 原光标宽度上限）。"
+                                + "<b>静止时也保持这个宽度。</b>", COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("光标高度（% 行高）", row -> {
+                        Cell<JSlider> c = row.slider(30, 100, 5, 10);
+                        JSlider s = c.getComponent();
+                        int init = Math.round(pending.cursorHeightRatio * 100);
+                        s.setValue(init);
+                        javax.swing.JLabel lab = new javax.swing.JLabel(init + " %");
+                        row.cell(lab);
+                        s.addChangeListener(e -> {
+                            if (syncingControls) {
+                                return;
+                            }
+                            pending.cursorHeightRatio = s.getValue() / 100f;
+                            lab.setText(s.getValue() + " %");
+                            afterPendingEdited();
+                        });
+                        row.rowComment("<b>全局设置，不随预设变化</b>。"
+                                + "100% = 顶格（占满行高，当前行为）；"
+                                + "30% = 只占行高的三成（居中）。"
+                                + "<b>上限就是顶格，不能超过。</b>", COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
 

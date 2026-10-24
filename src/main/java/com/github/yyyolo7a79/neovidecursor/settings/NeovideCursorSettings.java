@@ -636,6 +636,24 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      */
     public boolean multiCursorNoGlow = false;
 
+    /**
+     * 光标宽度（像素，0–5）。<b>0 = 跟随 IDEA 原生宽度</b>。
+     *
+     * <p><b>用户需求（2026-10-24）</b>：「光标自由大小…宽度最大 5px
+     * 应该是 idea 原光标宽度…记住是静止的时候也这么大」。
+     *
+     * <p><b>为什么不进预设</b>：它是设备级设置（和屏幕/字体相关），
+     * 不是观感风格 —— 与输入平滑同理。
+     */
+    public int cursorWidthPx = 0;
+
+    /**
+     * 光标高度占行高的比例（0.3–1.0）。<b>1.0 = 顶格（当前行为）</b>。
+     *
+     * <p><b>用户需求</b>：「最大长度不能超过我们目前的长度就是顶格」。
+     */
+    public float cursorHeightRatio = 1.0f;
+
         /** 2. 拖尾渲染模式 */
         public NeovideConfig.TrailMode trailMode = NeovideConfig.TrailMode.SPRING;
 
@@ -805,6 +823,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // （第一层原因是它不在 SettingsField.FIELDS 里，apply 时不拷贝。）
         diagLogging = from.diagLogging;
         multiCursorNoGlow = from.multiCursorNoGlow;
+        cursorWidthPx = from.cursorWidthPx;
+        cursorHeightRatio = from.cursorHeightRatio;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
