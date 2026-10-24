@@ -312,3 +312,74 @@ dist\jetbrains-neovide-cursor-0.9.4-settings.jar
 > 上一版「待安装 0.9.1-zeroopt」已被 0.9.2 / 0.9.3 / 0.9.4 依次取代，历史记录见上表。
 > ⚠️ 0.9.4 的「当前安装」状态以 `START-HERE.md` 与用户实际安装为准 —— **本文件不擅自更新它**，
 > 因为本批全程遵守「不装 jar、不重启 IDEA」，安装动作留给用户手动完成。
+
+---
+
+## 📌 补记：0.9.10 ～ 0.9.23（2026-10-24 14:20 事后补录）
+
+> **本表曾断在 0.9.9（10-22），导致 14 个版本无记录、记忆里把「已装 0.9.8」当真。**
+> 下面每一行都是**实测回填**：jar 文件名（带真实版本号）+ SHA256 前 8 位 + 文件时间戳 + 对应提交。
+> jar 时间戳与 `git log` 提交时间**精确到分钟吻合**，映射可靠。
+
+| 时间 | 版本 | 大小 | 哈希 | 提交 | 内容 |
+|---|---|---|---|---|---|
+| 10-22 15:11 | `0.9.9-subpixel` | 122,782 B | `AED74681` | `c202420` | 亚像素坐标（Polygon int → Path2D double），消除输入重绘抖动 |
+| 10-22 17:43 | `0.9.10-presets` | 125,038 B | `C5A07B0A` | `3893b65` | 自定义预设已安装记录 |
+| 10-23 21:21 | **`0.9.14`（已发布）** | 129,015 B | `F67BD071` | `5f751f3` | **tag v0.9.14**：README 重写 + 多光标调研 |
+| 10-24 00:15 | `0.9.15` | 129,300 B | `36EDB3FE` | `48a404f` | **P0 光标宽度对齐** —— 保留原生光标时读 IDEA 真实宽度 |
+| 10-24 01:13 | `0.9.16` | 134,722 B | `8A307785` | `0602852` | **多光标可用** —— CaretAnimator 接入 `Map<Caret, SpringTrail>` |
+| 10-24 10:58 | `0.9.17` | 135,557 B | `A9CE367C` | `3b8de23` | 块选区多光标 + 光标宽度改用官方 API + 修 2 缺陷 |
+| 10-24 12:20 | `0.9.18` | 136,665 B | `EF77E6E3` | `a1cbea2` | 块选区中文 + 相邻行分组消串扰 + 拖尾长度不一致 |
+| 10-24 12:38 | `0.9.19` | 137,524 B | `CE694F3C` | `4314707` | 块选区改为【一个整体矩形】（修拉伸不一致） |
+| 10-24 13:27 | `0.9.20` | 137,027 B | `B91D3AA0` | `534e5cf` | **revert**：恢复【每行一条独立线】—— 依据 VS Code 源码 |
+| 10-24 13:42 | `0.9.21` | 137,194 B | `EAEAF2DA` | `39af05d` | 块选区所有行共享同一 `charsMoved`（修加速度不均） |
+| 10-24 13:54 | **`0.9.22`（当前已装）** | 137,499 B | `8BD05DF6` | `b2875ef` | 选区扩展跟随 activity 端（lead）—— 修 Shift+→ 无动画 |
+| 10-24 14:04 | **`0.9.23`（最新构建）** | 137,402 B | `E2ED44CB` | `4a2042f` | **修正上轮修反**：单光标恢复跟随、块选区改为跟终点 |
+
+### 0.9.14 之后 0.9.15～0.9.18 之间的漏档
+`0.9.11 / 0.9.12 / 0.9.13` 在 `dist\` 与 git 里**均无对应 jar 或记录**，
+按 `RESUME-HERE.md` 的规矩「不要为了补齐而编造」，**此处留空**。
+
+---
+
+## ⚠️⚠️ 版本判定的三个陷阱（2026-10-24 实测，务必先读）
+
+1. **已装 jar 的文件名固定为 `jetbrains-neovide-cursor-0.9.8.jar`**
+   安装脚本写死此名，**实际内容是 0.9.22**（SHA256 `8BD05DF6…` / 137,499 B）。
+   **看到 0.9.8 绝不能当成版本号。**
+
+2. **`gradle.properties` 的 `pluginVersion=0.4.3` 是陈旧值**，与真实版本完全脱钩。
+   版本靠 `build\offline-build.ps1 -Version X` 传入，改它不会改版本。
+
+3. **判断版本只认两个来源**：
+   - `dist\neovide-cursor-<版本>.jar` 的文件名
+   - 解包读 jar 内 `META-INF/plugin.xml` 的 `<version>`
+   
+   文档一律不可信：本表曾断 14 版、`PROGRESS.md` 停在 10-22、
+   `docs\RESUME-HERE.md` 停在提交 `d289cb3`（落后 23 个提交）。
+
+### 标准核对命令（复制即用）
+
+```powershell
+# 1) dist 里所有 jar 的真实版本链
+Get-ChildItem D:\deepseekwork\neovim-cursor-pr\dist -Filter 'neovide-cursor-*.jar' |
+  Sort-Object Name | ForEach-Object {
+    "{0,-26} {1,8} B  {2}" -f $_.Name, $_.Length, (Get-FileHash $_.FullName -Algorithm SHA256).Hash.Substring(0,8)
+  }
+
+# 2) 已装 jar 到底是什么版本（解包读 plugin.xml）
+$inst = 'C:\Users\wangw\AppData\Roaming\JetBrains\IntelliJIdea2026.1\plugins\neovide-cursor-pawamamama\lib\jetbrains-neovide-cursor-0.9.8.jar'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$z = [System.IO.Compression.ZipFile]::OpenRead($inst)
+$z.Entries | Where-Object { $_.FullName -match 'plugin\.xml$' } | ForEach-Object {
+  $sr = New-Object System.IO.StreamReader($_.Open()); $t = $sr.ReadToEnd(); $sr.Close()
+  ($t -split "`n" | Select-String '<version>').Line.Trim()
+}
+$z.Dispose()
+```
+
+### 发布状态差（2026-10-24）
+- **GitHub 已发布**：`v0.9.14`（tag 已推 fork）
+- **用户机器已装**：`0.9.22`
+- **本地最新**：`0.9.23`
+- **→ 已装比已发布新 9 个版本，公开发布落后一整天的工作量。**
