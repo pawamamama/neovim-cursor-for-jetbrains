@@ -421,6 +421,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private boolean suppressDerive;
 
     // 非 DSL 绑定控件：DialogPanel 不追踪它们，必须在 reset/apply/isModified 里手工同步
+    /** 预览窗（行内输入删除）—— 参数变化时同步配置 */
+    private AnimationPreview inlinePreview;
+
+    /** 预览窗（跨行移动） */
+    private AnimationPreview crossPreview;
+
+    /** 预览专用配置副本（与 pending 同步，不碰全局 CONFIG） */
+    private NeovideConfig previewConfig;
+
     private ColorPanel tailColorPanel;
     private ColorPanel shadowColorPanel;
 
@@ -503,6 +512,68 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 每个分组的第一行都加 {@code topGap(MEDIUM)} —— 这是 JetBrains Layout 规范
      * 「用垂直间距把控件分组」的落地方式（{@code Panel} 接口没有 topGap，只有 {@code Row} 有）。
      */
+    /** 行内预览：懒创建 */
+    private javax.swing.JComponent inlinePreview() {
+        if (previewConfig == null) {
+            previewConfig = new NeovideConfig();
+        }
+        if (inlinePreview == null) {
+            inlinePreview = new AnimationPreview(previewConfig, AnimationPreview.Mode.INLINE);
+        }
+        return inlinePreview;
+    }
+
+    /** 跨行预览：懒创建 */
+    private javax.swing.JComponent crossPreview() {
+        if (previewConfig == null) {
+            previewConfig = new NeovideConfig();
+        }
+        if (crossPreview == null) {
+            crossPreview = new AnimationPreview(previewConfig, AnimationPreview.Mode.CROSS);
+        }
+        return crossPreview;
+    }
+
+    /**
+     * 把 pending 的动画参数同步进预览配置 —— 预览窗下一帧就会用新参数。
+     *
+     * <p><b>只同步影响动画的那几个</b>，不是全部：颜色/辉光走 CaretTrailPanel.refreshStyles()，
+     * 由 {@link #refreshPreviews()} 单独处理。
+     */
+    private void syncPreviewAnimation() {
+        if (previewConfig == null) {
+            return;
+        }
+        previewConfig.animationLength = pending.animationLength;
+        previewConfig.shortAnimationLength = pending.shortAnimationLength;
+        previewConfig.trailSize = pending.trailSize;
+        // typingSmoothness / stretchRatioK 在 NeovideCursorSettings 里（不在 NeovideConfig），
+        // 它们的作用就是派生 trailFactors —— 这里直接算好写进预览配置。
+        previewConfig.trailFactors = NeovideCursorSettings.deriveTrailFactors(
+                pending.stretchRatioK, pending.typingSmoothness);
+    }
+
+    /** 刷新两个预览窗（动画参数 + 颜色样式） */
+    private void refreshPreviews() {
+        if (previewConfig == null) {
+            return;
+        }
+        syncPreviewAnimation();
+        previewConfig.tailColor = pending.tailColor;
+        previewConfig.tailOpacity = pending.tailOpacity;
+        previewConfig.useShadow = pending.useShadow;
+        previewConfig.shadowColor = pending.shadowColor;
+        previewConfig.glowLayers = pending.glowLayers;
+        previewConfig.glowOpacity = pending.glowOpacity;
+        previewConfig.shadowBlurFactor = pending.shadowBlurFactor;
+        if (inlinePreview != null) {
+            inlinePreview.onConfigChanged();
+        }
+        if (crossPreview != null) {
+            crossPreview.onConfigChanged();
+        }
+    }
+
     /**
      * 读取本插件的真实版本号（jar 内 plugin.xml 的 {@code <version>}）。
      *
@@ -627,20 +698,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         return kotlin.Unit.INSTANCE;
                     });
 
-                    g.row("拖尾渲染模式", row -> {
-                        Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
-                                row.comboBox(MODE_ITEMS, null),
-                                new MutableProperty<String>() {
-                                    @Override public String get() { return modeText(pending.trailMode); }
-                                    @Override public void set(String v) { pending.trailMode = textToMode(v); }
-                                });
-                        com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
-                        trailModeCombo = box;
-                        // 下拉一改就刷新置灰；只改 enabled 状态，不碰 CONFIG
-                        box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
-                        return kotlin.Unit.INSTANCE;
-                    });
-
                     g.row("隐藏原生光标（覆盖层充当光标）", row -> {
                         bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
                                 .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
@@ -656,6 +713,43 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     // 契约 §2.2：W_COUPLING 挂在 #3/#4 下方的 rowComment
                     g.row("", row -> {
                         row.rowComment(W_COUPLING, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // ---------- A2. 预览：行内输入删除 ----------
+                //
+                // 用户反馈「现有设置不直观」。滑块写着 0.11s，但没人知道
+                // 0.11 和 0.14 看起来差多少。预览窗把参数变成可见的动画。
+                //
+                // 两个窗各自只演示【受它影响的参数】：
+                //   行内 → shortAnimationLength / typingSmoothness
+                //   跨行 → animationLength / stretchRatioK
+                panel.group("预览：行内输入删除", true, g -> {
+                    g.row("", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        row.cell(inlinePreview());
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    g.row("", row -> {
+                        row.comment("演示同一行内逐字符移动 —— 影响它的参数在下方「行内动作」里。",
+                                COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // ---------- A3. 预览：跨行移动 ----------
+                panel.group("预览：跨行移动", true, g -> {
+                    g.row("", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        row.cell(crossPreview());
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    g.row("", row -> {
+                        row.comment("演示上下换行 + 大跨度横向移动 —— 影响它的参数在下方「跨行动作」里。",
+                                COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
                     return kotlin.Unit.INSTANCE;
@@ -800,6 +894,35 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 // ---------- F. 高级（诊断）（折叠，默认折叠）----------
                 // 从 Tools 菜单挪进来（0.9.6 / M1）：菜单只留 3 项，诊断属于「偶尔用一次」的高级项。
                 // 注意它**不持久化** —— 所以也不参与 isModified()：勾选后点「应用」才生效，重启即失效。
+                // ---------- G. 实验性（默认折叠）----------
+                //
+                // 残影模式从「总开关组」拆到这里，并明确标注「官方不建议使用」。
+                // 理由：AfterimageTrail 是单条历史轨迹模型，多光标只跟主光标；
+                // 且掉帧时残影稀疏、观感与弹簧模式差异大，容易让人误以为是 bug。
+                panel.collapsibleGroup("实验性（官方不建议使用）", false, g -> {
+                    g.row("拖尾渲染模式", row -> {
+                        Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
+                                row.comboBox(MODE_ITEMS, null),
+                                new MutableProperty<String>() {
+                                    @Override public String get() { return modeText(pending.trailMode); }
+                                    @Override public void set(String v) { pending.trailMode = textToMode(v); }
+                                });
+                        com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
+                        trailModeCombo = box;
+                        box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    g.row("", row -> {
+                        row.rowComment("⚠ 残影模式（AFTERIMAGE）为实验性功能，<b>官方不建议日常使用</b>："
+                                + "它记录真实历史位置，掉帧时残影会变稀疏；"
+                                + "且当前<b>只跟随主光标</b>，多光标下只有主光标有残影。"
+                                + "除非你在低帧率环境明确需要它，否则请保持「弹簧（拉伸）」模式。",
+                                COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    return kotlin.Unit.INSTANCE;
+                });
+
                 panel.collapsibleGroup("高级（诊断）", false, g -> {
                     g.row("性能诊断（跳过重绘，只跑计算）", row -> {
                         row.topGap(TopGap.MEDIUM);
@@ -1106,6 +1229,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         } finally {
             syncingControls = false;
             suppressDerive = prevSuppress;      // ← 同一个 finally 里恢复，异常时也不会漏
+            // reset() / 切预设 / apply() 之后也要刷预览 ——
+            // syncingControls 已复位，refreshPreviews 里改控件不会造成回环。
+            refreshPreviews();
         }
     }
 
@@ -1351,6 +1477,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         if (syncingControls || suppressDerive) {
             return;
         }
+        // 【实时预览：必须在这两个早退之前】
+        // 后面 A/B 两条分支各自都有 return（预设同步 / 偏离判定），
+        // 若把刷新放在末尾会被跳过 —— 表现是「拖滑块预览不动」。
+        refreshPreviews();
         // A. 已在自定义预设上 → 持续同步快照
         if (!pending.animCustomName.isEmpty()) {
             if (CustomPresets

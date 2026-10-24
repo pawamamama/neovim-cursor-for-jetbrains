@@ -676,4 +676,36 @@ public class CaretTrailPanel extends JComponent {
             g2.fillRect(x, y, w, h);
         }
     }
+
+    // ==================== 设置页预览支持 ====================
+
+    /**
+     * 预览用：直接把自己画到给定 Graphics 上，不依赖自身的 bounds。
+     *
+     * <p><b>为什么需要</b>：面板正常挂在 editor 的 contentComponent 上，
+     * 靠自己的 paintComponent 绘制。设置页的预览窗是另一个容器，
+     * 需要借用同一套绘制逻辑（辉光层数、渐变、quad 路径）才能保证观感一致。
+     *
+     * <p>调用方负责：{@code beginQuads()} → {@code addQuad(...)} → 本方法。
+     *
+     * @param g2 预览窗的 Graphics2D（调用方负责 dispose）
+     * @param w  可用宽度
+     * @param h  可用高度
+     */
+    public void paintForPreview(Graphics2D g2, int w, int h) {
+        if (!hasQuad && !hasGhosts) {
+            return;
+        }
+        if (hasGhosts) {
+            paintGhosts(g2);
+        }
+        for (int i = 0; i < quadCount; i++) {
+            paintQuad(g2, i);
+        }
+    }
+
+    /** 预览用：读当前辉光强度（setGlowStrength 写入的就是它） */
+    public float getGlowStrengthForPreview() {
+        return glowStrength;
+    }
 }
