@@ -8,93 +8,69 @@ import org.jetbrains.annotations.NotNull;
 import javax.swing.JComponent;
 import javax.swing.Timer;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 
 /**
- * 设置页里的【动画预览窗】—— 用小画布演示真实物理。
+ * 设置页里的动画预览窗 —— 还原真实代码场景的观感。
  *
- * <h2>两种模式</h2>
+ * <h2>与真实编辑器 1:1 的比例</h2>
+ *
+ * <p><b>为什么必须 1:1</b>：第一版把光标放大到 3x18、辉光半径却用默认 12px，
+ * 结果辉光相对光标过大，看起来「一圈诡异的雾」。
+ * 用户反馈「字体小不对就是不舒服」「辉光很奇怪」，根因就是比例失真。
+ *
+ * <p>现在全部按 IDEA 默认编辑器度量：
  * <ul>
- *   <li>{@link Mode#INLINE} —— <b>单行输入输出</b>：逐字符打字，像真的在输入
- *       （对应 {@code shortAnimationLength} / {@code typingSmoothness} / {@code trailSize}）</li>
- *   <li>{@link Mode#CROSS} —— <b>多行缎带</b>：跨行移动，拖尾拉成长缎带
- *       （对应 {@code animationLength} / {@code stretchRatioK}）</li>
+ *   <li>字体 13pt 等宽</li>
+ *   <li>行高 = 字号 1.5 倍</li>
+ *   <li>光标宽 2px（IDEA 默认）</li>
+ *   <li>光标高 = 行高 80%</li>
+ *   <li><b>辉光半径必须调 panel.updateGlowRadius()</b>
+ *       —— 第一版漏了这步，glowWidth 停在默认 12px 而光标仅 18px 高</li>
  * </ul>
- *
- * <h2>三个关键设计决定</h2>
- *
- * <p><b>1. 复用真实物理</b>：用真的 {@link TrailCorner} + 真的 {@link CaretTrailPanel}。
- * 另写简化模拟的话，预览观感和实际不一致，就失去意义了。
- *
- * <p><b>2. 延迟初始化</b>：构造时 {@code getWidth()} 还是 0（组件未布局），
- * 在那里算中心点会得到 (0,0) —— 表现为「光标贴在左上角」。
- * 所以位置在首次 {@code paintComponent} 时按真实宽度初始化。
- *
- * <p><b>3. 按「字符格」移动，不是按像素</b>：单行模式模拟真实打字，
- * 光标每次前进一个字符宽，间隔约 120ms（接近人手打字速度）。
- * 跨行模式每次移动一行高度 + 适量横向位移。
  */
 final class AnimationPreview extends JComponent {
 
-    /** 演示模式 */
-    enum Mode {
-        /** 单行输入输出：逐字符打字 */
-        INLINE,
-        /** 多行缎带：跨行移动 */
-        CROSS
-    }
+    enum Mode { INLINE, CROSS }
 
     private final NeovideConfig config;
     private final Mode mode;
     private final CaretTrailPanel panel;
     private final TrailCorner[] corners;
 
-    /** 光标中心（预览坐标系） */
-    private double centerX;
-    private double centerY;
-    /** 是否已完成首次布局初始化 */
-    private boolean placed;
+    private static final int FONT_SIZE = 13;
+    private static final Font CODE_FONT = new Font(Font.MONOSPACED, Font.PLAIN, FONT_SIZE);
+    private static final float LINE_H = FONT_SIZE * 1.5f;
 
-    /** 光标尺寸（与真实 2px 光标同比放大，便于观察） */
-    private static final double CURSOR_W = 3.0;
-    private static final double CURSOR_H = 18.0;
+    private static final double CURSOR_W = 2.0;
+    private static final double CURSOR_H = LINE_H * 0.8;
+    private static final float CHAR_W = 8.0f;
+    private static final int TEXT_X = 12;
+    private static final int PAD = 10;
 
-    /** 行高 */
-    private static final double LINE_H = 24.0;
-
-    /** 单行模式的字符宽（用于逐字前进） */
-    private static final double CHAR_W = 9.0;
-
-    /** 物理推进间隔（毫秒）—— 与生产 8ms 一致 */
     private static final int FRAME_MS = 8;
-
-    /** 单行模式：打字间隔（毫秒）。接近人手速度，太快看不清动画。 */
-    private static final int TYPE_INTERVAL_MS = 130;
-
-    /** 跨行模式：移动间隔（毫秒）。太短会让拖尾一直满屏拉伸像发疯。 */
-    private static final int CROSS_INTERVAL_MS = 900;
+    private static final int TYPE_MS = 140;
+    private static final int BACKSPACE_MS = 90;
+    private static final int CROSS_MS = 1000;
 
     private Timer physicsTimer;
     private Timer actionTimer;
+    private int actionInterval;
 
-    /** 已打出的字符数（负数表示在退格） */
+    private double centerX;
+    private double centerY;
+    private boolean placed;
+    private boolean glowSized;
     private int typed;
-    /** 跨行模式当前行（0/1 交替） */
     private int row;
-    /** 跨行模式水平方向 */
-    private int dir = 1;
+    private boolean chinese;
 
-    /** 单行演示文本（英文） */
     private static final String TEXT_EN = "pawamamama";
-    /** 单行演示文本（中文——验证 CJK 字符宽度处理） */
     private static final String TEXT_CN = "\u8fd9\u662f\u4e00\u4e2a\u7f16\u8f91\u5668\u5149\u6807\u63d2\u4ef6";
-
-    private static final Font PREVIEW_FONT =
-            new Font(Font.MONOSPACED, Font.PLAIN, 13);
 
     AnimationPreview(@NotNull NeovideConfig config, @NotNull Mode mode) {
         this.config = config;
@@ -106,11 +82,12 @@ final class AnimationPreview extends JComponent {
             corners[i] = new TrailCorner(rel[i][0], rel[i][1], config);
         }
         setOpaque(true);
+        actionInterval = (mode == Mode.INLINE) ? TYPE_MS : CROSS_MS;
     }
 
-    /** 参数变了：重建样式 + 重绘 */
     void onConfigChanged() {
         panel.refreshStyles();
+        glowSized = false;
         repaint();
     }
 
@@ -121,8 +98,7 @@ final class AnimationPreview extends JComponent {
             physicsTimer = new Timer(FRAME_MS, e -> step());
         }
         if (actionTimer == null) {
-            int interval = (mode == Mode.INLINE) ? TYPE_INTERVAL_MS : CROSS_INTERVAL_MS;
-            actionTimer = new Timer(interval, e -> advance());
+            actionTimer = new Timer(actionInterval, e -> advance());
         }
         physicsTimer.start();
         actionTimer.start();
@@ -130,87 +106,74 @@ final class AnimationPreview extends JComponent {
 
     @Override
     public void removeNotify() {
-        if (physicsTimer != null) {
-            physicsTimer.stop();
-        }
-        if (actionTimer != null) {
-            actionTimer.stop();
-        }
+        if (physicsTimer != null) physicsTimer.stop();
+        if (actionTimer != null) actionTimer.stop();
         super.removeNotify();
     }
 
-    /**
-     * 首次布局后才算位置。
-     *
-     * <p>构造时 getWidth() 为 0，若在那里算 centerX 会得到 0 ——
-     * 表现为光标贴在左上角。
-     */
     private void placeIfNeeded() {
-        if (placed || getWidth() <= 0) {
-            return;
-        }
+        if (placed || getWidth() <= 0) return;
         placed = true;
-        if (mode == Mode.INLINE) {
-            centerX = 14;
-            centerY = LINE_H;
-        } else {
-            centerX = 40;
-            centerY = LINE_H;
-        }
+        centerX = PAD + CURSOR_W / 2;
+        centerY = LINE_H;
         for (TrailCorner c : corners) {
             c.snapTo(CURSOR_W, CURSOR_H, centerX, centerY);
         }
     }
 
-    /** 动作定时器：改变目标位置（模拟打字 / 跨行移动） */
     private void advance() {
-        if (!placed || getWidth() <= 0) {
-            return;
-        }
+        if (!placed || getWidth() <= 0) return;
+
         double targetX;
         double targetY;
 
         if (mode == Mode.INLINE) {
-            String text = visibleText();
+            String text = chinese ? TEXT_CN : TEXT_EN;
             int max = text.length();
-            // 逐字前进；到末尾停一拍再逐字退格（模拟输入→删除）
             if (typed < max) {
                 typed++;
+                setInterval(TYPE_MS);
             } else if (typed == max) {
-                typed = -1;          // 触发退格阶段
+                typed = -1;
+                setInterval(BACKSPACE_MS);
             } else if (typed > -max) {
                 typed--;
+                setInterval(BACKSPACE_MS);
             } else {
-                typed = 0;           // 循环
-                cycleChinese = !cycleChinese;   // 每轮切换中英文演示
+                typed = 0;
+                chinese = !chinese;
+                setInterval(TYPE_MS);
             }
-            int shown = (typed < 0) ? (max + typed) : typed;
-            targetX = 14 + shown * CHAR_W + CURSOR_W / 2;
+            int shown = (typed < 0) ? Math.max(0, max + typed) : typed;
+            targetX = TEXT_X + shown * CHAR_W + CURSOR_W / 2;
             targetY = LINE_H;
         } else {
-            // 跨行：左右移动 + 上下换行，模拟「跳来跳去」
             row = 1 - row;
-            double span = Math.max(60, getWidth() - 80);
-            targetX = 40 + span * (row == 0 ? 0.15 : 0.75);
-            targetY = LINE_H + row * LINE_H * 1.6;
+            double span = Math.max(60, getWidth() - PAD * 2 - 40);
+            targetX = PAD + 10 + span * (row == 0 ? 0.1 : 0.7);
+            targetY = LINE_H + row * LINE_H;
         }
 
-        double prevX = centerX;
-        double prevY = centerY;
         centerX = targetX;
         centerY = targetY;
 
-        // 用真实 jump：内部按位移选「短跳 / 跨行」分支，时长梯度与生产一致
-        int[] ranks = assignRanks(prevX, prevY, targetX, targetY);
+        int[] ranks = assignRanks(targetX, targetY);
         for (int i = 0; i < 4; i++) {
             corners[i].jump(CURSOR_W, CURSOR_H, targetX, targetY, ranks[i]);
         }
     }
 
-    /** 物理步进（每 8ms） */
+    private void setInterval(int ms) {
+        if (ms == actionInterval || actionTimer == null) return;
+        actionInterval = ms;
+        actionTimer.setDelay(ms);
+    }
+
     private void step() {
-        if (!placed) {
-            return;
+        if (!placed) return;
+        if (!glowSized) {
+            panel.updateGlowRadius(CURSOR_W, CURSOR_H);
+            glowSized = true;
         }
         double dt = FRAME_MS / 1000.0;
         double maxOffset = 0;
@@ -218,46 +181,29 @@ final class AnimationPreview extends JComponent {
             c.update(CURSOR_W, CURSOR_H, centerX, centerY, dt, false);
             maxOffset = Math.max(maxOffset, c.getOffsetMagnitude());
         }
-        // 辉光强度与生产一致：静止为 0，运动中随偏移增长
-        float glow = (float) Math.min(1.0, maxOffset / 10.0);
-        panel.setGlowStrength(glow);
+        panel.setGlowStrength((float) Math.min(1.0, maxOffset / 8.0));
         repaint();
     }
 
-    /** 当前要演示的文本：按 prefixed 语言交替（每轮切换英文/中文） */
-    private String visibleText() {
-        // 用 typed 的符号位不好区分轮次，这里按「跨行模式 vs 单行」简单取；
-        // 中文轮次由 typed 循环到负数时切——够用且不引入额外状态机。
-        return (cycleChinese) ? TEXT_CN : TEXT_EN;
-    }
-
-    /** 中英文轮换标志 */
-    private boolean cycleChinese;
-
-    /** 按「运动方向对齐度」给四角排名（与 SpringTrail.assignRanks 同逻辑） */
-    private int[] assignRanks(double px, double py, double cx, double cy) {
-        double[] alignment = new double[4];
+    private int[] assignRanks(double cx, double cy) {
+        double[] al = new double[4];
         for (int i = 0; i < 4; i++) {
-            alignment[i] = corners[i].calculateDirectionAlignment(CURSOR_W, CURSOR_H, cx, cy);
+            al[i] = corners[i].calculateDirectionAlignment(CURSOR_W, CURSOR_H, cx, cy);
         }
-        int[] ranks = new int[4];
+        int[] r = new int[4];
         for (int i = 0; i < 4; i++) {
-            int r = 0;
             for (int j = 0; j < 4; j++) {
-                if (alignment[j] < alignment[i]) {
-                    r++;
-                }
+                if (al[j] < al[i]) r[i]++;
             }
-            ranks[i] = r;
         }
-        return ranks;
+        return r;
     }
 
     @Override
     protected void paintComponent(Graphics g) {
         placeIfNeeded();
 
-        g.setColor(new Color(0x2B2B2B));
+        g.setColor(new Color(0x1E1F22));
         g.fillRect(0, 0, getWidth(), getHeight());
 
         Graphics2D g2 = (Graphics2D) g.create();
@@ -266,31 +212,35 @@ final class AnimationPreview extends JComponent {
                     RenderingHints.VALUE_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                     RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS,
+                    RenderingHints.VALUE_FRACTIONALMETRICS_OFF);
+            g2.setFont(CODE_FONT);
 
-            // 单行模式：画出已打出的文字（让预览像真的编辑器）
             if (mode == Mode.INLINE) {
-                String text = visibleText();
+                String text = chinese ? TEXT_CN : TEXT_EN;
                 int max = text.length();
                 int shown = (typed < 0) ? Math.max(0, max + typed) : Math.min(typed, max);
-                g2.setFont(PREVIEW_FONT);
-                g2.setColor(new Color(0xC8C8C8));
-                g2.drawString(text.substring(0, Math.max(0, shown)), 14, (int) LINE_H + 5);
+                String draw = text.substring(0, Math.max(0, shown));
+                int baseline = (int) (LINE_H + FONT_SIZE * 0.35);
+                g2.setColor(new Color(0xBCBEC4));
+                g2.drawString(draw, TEXT_X, baseline);
+                String rest = text.substring(Math.max(0, shown));
+                g2.setColor(new Color(0x4E5157));
+                g2.drawString(rest, TEXT_X + shown * CHAR_W, baseline);
             } else {
-                // 跨行模式：画两条基线，让「换行」看得见
-                g2.setColor(new Color(0x3A3A3A));
-                g2.drawLine(10, (int) LINE_H, getWidth() - 10, (int) LINE_H);
-                g2.drawLine(10, (int) (LINE_H + LINE_H * 1.6),
-                        getWidth() - 10, (int) (LINE_H + LINE_H * 1.6));
+                g2.setColor(new Color(0x2B2D30));
+                g2.drawLine(PAD, (int) LINE_H, getWidth() - PAD, (int) LINE_H);
+                g2.drawLine(PAD, (int) (LINE_H * 2), getWidth() - PAD, (int) (LINE_H * 2));
+                g2.setColor(new Color(0x4E5157));
+                g2.drawString("int x = 0;", TEXT_X, (int) (LINE_H + FONT_SIZE * 0.35));
+                g2.drawString("return x;", TEXT_X, (int) (LINE_H * 2 + FONT_SIZE * 0.35));
             }
 
-            // 用真实面板画四边形（复用填充/辉光逻辑）
             panel.beginQuads();
             panel.addQuad(
-                    new double[]{
-                            corners[0].getCurrentX(), corners[1].getCurrentX(),
+                    new double[]{corners[0].getCurrentX(), corners[1].getCurrentX(),
                             corners[2].getCurrentX(), corners[3].getCurrentX()},
-                    new double[]{
-                            corners[0].getCurrentY(), corners[1].getCurrentY(),
+                    new double[]{corners[0].getCurrentY(), corners[1].getCurrentY(),
                             corners[2].getCurrentY(), corners[3].getCurrentY()},
                     panel.getGlowStrengthForPreview());
             panel.paintForPreview(g2, getWidth(), getHeight());
@@ -300,7 +250,7 @@ final class AnimationPreview extends JComponent {
     }
 
     @Override
-    public java.awt.Dimension getPreferredSize() {
-        return new java.awt.Dimension(300, 72);
+    public Dimension getPreferredSize() {
+        return new Dimension((int) (TEXT_X * 2 + CHAR_W * 24), (int) (LINE_H * 2 + PAD * 2));
     }
 }

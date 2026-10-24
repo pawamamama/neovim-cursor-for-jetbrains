@@ -718,43 +718,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     return kotlin.Unit.INSTANCE;
                 });
 
-                // ---------- A2. 预览：行内输入删除 ----------
-                //
-                // 用户反馈「现有设置不直观」。滑块写着 0.11s，但没人知道
-                // 0.11 和 0.14 看起来差多少。预览窗把参数变成可见的动画。
-                //
-                // 两个窗各自只演示【受它影响的参数】：
-                //   行内 → shortAnimationLength / typingSmoothness
-                //   跨行 → animationLength / stretchRatioK
-                panel.group("预览：行内输入删除", true, g -> {
-                    g.row("", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        row.cell(inlinePreview());
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("", row -> {
-                        row.comment("演示同一行内逐字符移动 —— 影响它的参数在下方「行内动作」里。",
-                                COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // ---------- A3. 预览：跨行移动 ----------
-                panel.group("预览：跨行移动", true, g -> {
-                    g.row("", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        row.cell(crossPreview());
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("", row -> {
-                        row.comment("演示上下换行 + 大跨度横向移动 —— 影响它的参数在下方「跨行动作」里。",
-                                COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
-
                 // ---------- B. 淡出 ----------
                 panel.group("淡出", true, g -> {
                     g.row("辉光淡出（停止后柔和熄灭）", row -> {
@@ -842,11 +805,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 //
                 // 分组依据：**看预览窗**。用户不需要记参数名 ——
                 // 想调「打字时的感觉」就来这一组，想调「换行时的缎带」就去下一组。
-                panel.group("单行输入输出", true, g -> {
+                // ---------- D. 单行输入输出 ----------
+                //
+                // 【排版原则】预览窗 + 它影响的参数放在同一组。
+                // 用户不需要记参数名 —— 看着窗调，调的就是窗里发生的事。
+                panel.group("单行输入输出（打字 / 退格）", true, g -> {
                     g.row("", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        row.comment("只影响<b>同一行内</b>打字与退格时的拖尾。"
-                                + "换行、跨列跳转不受这里影响。", COMMENT, NO_LINK);
+                        row.cell(inlinePreview());
                         return kotlin.Unit.INSTANCE;
                     });
                     g.row("短动画时长（打字/退格）", row -> {
@@ -863,11 +829,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 });
 
                 // ---------- E. 多行缎带（只影响跨行/跳转）----------
-                panel.group("多行缎带", true, g -> {
+                panel.group("多行缎带（换行 / 跳转）", true, g -> {
                     g.row("", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        row.comment("只影响<b>换行、跨列跳转</b>时拖尾拉成的缎带。"
-                                + "行内打字不受这里影响。", COMMENT, NO_LINK);
+                        row.cell(crossPreview());
                         return kotlin.Unit.INSTANCE;
                     });
                     // 【顺序必须保持 6 → 7 → 8】
