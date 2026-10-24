@@ -503,6 +503,29 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 每个分组的第一行都加 {@code topGap(MEDIUM)} —— 这是 JetBrains Layout 规范
      * 「用垂直间距把控件分组」的落地方式（{@code Panel} 接口没有 topGap，只有 {@code Row} 有）。
      */
+    /**
+     * 读取本插件的真实版本号（jar 内 plugin.xml 的 {@code <version>}）。
+     *
+     * <p><b>为什么用运行时查询而不是写死常量</b>：写死的常量永远会和 jar 脱节 ——
+     * 本项目 0.9.10~0.9.23 期间因为没有显示版本，用户和我都多次误判「装的是哪一版」。
+     *
+     * <p>取不到时返回 {@code "(未知)"}，不影响面板加载。
+     */
+    private static String pluginVersion() {
+        try {
+            com.intellij.openapi.extensions.PluginId pid =
+                    com.intellij.openapi.extensions.PluginId.getId("com.pawamamama.neovidecursor");
+            com.intellij.ide.plugins.IdeaPluginDescriptor desc =
+                    com.intellij.ide.plugins.PluginManagerCore.getPlugin(pid);
+            if (desc != null && desc.getVersion() != null) {
+                return desc.getVersion();
+            }
+        } catch (Throwable ignored) {
+            // 插件还没注册完 / API 不可用：返回占位
+        }
+        return "(未知)";
+    }
+
     @Override
     public DialogPanel createPanel() {
         // 构建面板是【程序化装载】，不是用户编辑 —— 期间禁止自动派生自定义预设。
@@ -534,7 +557,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return BuilderKt.panel(panel -> {
 
                 panel.row("", row -> {
-                    row.comment("本页所有改动点「应用 / OK」后才生效；面板内不做实时预览。", COMMENT, NO_LINK);
+                    // 【版本号：用户要求直接可见】
+                    //
+                    // 为什么需要：插件 jar 文件名恒为 jetbrains-neovide-cursor-0.9.8.jar
+                    // （加载机制沿袭，改名有风险），导致「装的是哪一版」无法一眼看出，
+                    // 每次都得解包读 META-INF/plugin.xml。
+                    //
+                    // 来源：PluginManagerCore.getPlugin(PluginId.getId(...)).getVersion()
+                    // —— 这就是 jar 内 plugin.xml 的 <version>，运行时唯一真值。
+                    row.comment("Neovide Cursor v" + pluginVersion()
+                            + " ｜ 本页所有改动点「应用 / OK」后才生效；面板内不做实时预览。",
+                            COMMENT, NO_LINK);
                     return kotlin.Unit.INSTANCE;
                 });
 

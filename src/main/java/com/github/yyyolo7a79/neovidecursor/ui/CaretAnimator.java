@@ -113,6 +113,17 @@ public class CaretAnimator implements Disposable, CaretListener {
      * <p><b>历史</b>：曾试过 12ms(83fps) 以减少 EDT 投递，用户反馈「不够跟手」而回退。
      * 那次是往<b>上</b>调，与 5ms 那次同为"改目标帧间隔"的思路，两次都没解决根本问题。
      */
+    /**
+     * 选区跟随诊断开关。
+     *
+     * <p><b>为什么需要它</b>：选区跟随改了两轮（0.9.22 / 0.9.24）都没生效，
+     * 之前一直靠推理而不是实测。打开后会往 idea.log 打每次的
+     * {@code vp} / {@code lead} / 实际用了哪个，用真实数据定位。
+     *
+     * <p>默认 false（不产生日志）。
+     */
+    static final boolean DIAG_SELECTION = true;
+
     static final int ACTIVE_DELAY_MS = 8;
 
     /** 静止时的轮询间隔（低频看门狗） */
@@ -303,12 +314,24 @@ public class CaretAnimator implements Disposable, CaretListener {
         try {
             if (caret != null && caret.hasSelection()) {
                 VisualPosition lead = caret.getLeadSelectionPosition();
+                VisualPosition vp = caret.getVisualPosition();
+                if (DIAG_SELECTION) {
+                    com.intellij.openapi.diagnostic.Logger.getInstance(CaretAnimator.class)
+                            .info("neovide-cursor-diag: hasSelection=true  vp="
+                                    + (vp == null ? "null" : vp.line + ":" + vp.column)
+                                    + "  lead="
+                                    + (lead == null ? "null" : lead.line + ":" + lead.column)
+                                    + "  用=" + (lead != null ? "LEAD" : "CARET"));
+                }
                 if (lead != null) {
                     return lead;
                 }
             }
-        } catch (Throwable ignored) {
-            // 退回 caret 位置
+        } catch (Throwable t) {
+            if (DIAG_SELECTION) {
+                com.intellij.openapi.diagnostic.Logger.getInstance(CaretAnimator.class)
+                        .info("neovide-cursor-diag: followPositionOf 异常 " + t);
+            }
         }
         return caret != null ? caret.getVisualPosition()
                 : editor.getCaretModel().getVisualPosition();
