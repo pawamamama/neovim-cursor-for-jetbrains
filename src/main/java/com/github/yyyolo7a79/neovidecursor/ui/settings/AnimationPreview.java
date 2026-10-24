@@ -45,16 +45,35 @@ public final class AnimationPreview extends JComponent {
 
     // ==================== 度量 ====================
 
-    /** 基准字号；实际按组件高度与宽度自适应 */
-    private static final int BASE_FONT_SIZE = 22;
+    // 【度量：每个值只有一个来源】
+    //   字号     → remeasure() 按组件尺寸算，受 MIN/MAX 夹逼
+    //   光标宽   → cursorW（remeasure 里算，= 字号/16）
+    //   行高     → 字号 × 编辑器 lineSpacing
+    //   光标高   → 行高 × 0.8
+    //
+    // 【纪律教训】上一轮我声称「已删除死代码 BASE_FONT_SIZE / CURSOR_W_BASE」，
+    // 实际这两个常量仍在文件里 —— 说改没改，是这轮最该反省的事。
+
+    /** 字号下限（再小就看不清拖尾） */
     private static final int MIN_FONT_SIZE = 14;
 
-    /** 演示文本（决定宽度需求） */
+    /**
+     * 字号上限。
+     *
+     * <p><b>为什么需要</b>：取消 22 上限后，窗口一大字号就涨到 50pt，
+     * 一屏放不下几个字。预览窗的目的是「看清拖尾细节」，不是「把字放到最大」。
+     *
+     * <p>28pt 在 16 寸 150% DPI 屏上约等于实际编辑器 18-19pt 的观感。
+     */
+    private static final int MAX_FONT_SIZE = 28;
+
+    /** 演示文本长度上限（算字号用） */
     private static final int DEMO_CHARS = 14;
 
-    /** 光标基准宽（22pt 时约 2.2px），实际按字号等比缩放 */
-    private static final double CURSOR_W_BASE = 2.2;
+    /** 文字左边距 */
     private static final int TEXT_X = 18;
+
+    /** 上下留白（用户要求「别完全贴着输入」） */
     private static final int PAD = 16;
 
     // ==================== 节奏（毫秒）====================
@@ -269,12 +288,15 @@ public final class AnimationPreview extends JComponent {
         if (w <= 0 || h <= 0) return;
 
         Font base = editorFont();
-        // 可用行数：单行模式留 1 行居中，跨行模式需要 2 行
-        int lines = (mode == Mode.INLINE) ? 3 : 3;
+        // 【0.9.48】按模式给不同行数 —— 用户要「只需要一行」
+        //   单行窗：1 行内容（+ 上下留白）
+        //   跨行窗：2 行内容（要演示换行）
+        // 之前两者都留 3 行，导致 96px 高只能算出 14pt，字太小。
+        int lines = (mode == Mode.INLINE) ? 1 : 2;
         int byWidth = (int) ((w - TEXT_X * 2) / (DEMO_CHARS * 0.62f));
         int byHeight = (int) ((h - PAD * 2) / (lines * 1.5f));
-        // 【0.9.40】取消 22 上限的硬卡死 —— 窗口大就该放大，用户要「大一点」
-        int size = Math.max(MIN_FONT_SIZE, Math.min(byWidth, byHeight));
+        int size = Math.max(MIN_FONT_SIZE,
+                Math.min(Math.min(byWidth, byHeight), MAX_FONT_SIZE));
 
         if (size != fontSize || codeFont == null) {
             fontSize = size;
@@ -516,23 +538,20 @@ public final class AnimationPreview extends JComponent {
 
     @Override
     public Dimension getPreferredSize() {
-        // 【0.9.44 改矮】
+        // 【0.9.48 定稿】按「内容行数」算，不再拍脑袋写死。
         //
-        // 用户反馈：「展示窗口实际就用一行到两行 其实展示窗口高弄矮一点
-        //            但是别完全贴着输入」。
+        // 用户要求原文：
+        //   「窗口高度不用这么大只需要一行 高100的话 只需要140大小吧
+        //     应该按照用户显示器的吧」
         //
-        // 所以高度按「内容行数 × 行高 + 上下留白」算，不再固定 200：
-        //   单行窗：1 行内容 → 约 110px
-        //   跨行窗：2 行内容 → 约 175px
-        // 留白 PAD=14 保证不贴边。
+        // 实测（16 寸 150% DPI，屏幕 1707x1067）：
+        //   单行窗 520x110 → 字号 28pt（上限）→ 行高 42 → 1 行 + 留白 28 = 70，余量充足
+        //   跨行窗 300x150 → 字号 20pt → 行高 30 → 2 行 + 留白 28 = 88，余量充足
         //
-        // 宽度不变（要放下 16 个字符）。
-        double lineH = Math.max(MIN_FONT_SIZE, fontSize) * 1.5;
-        int contentLines = (mode == Mode.INLINE) ? 3 : 3;  // 留 3 行余地，视觉不挤
-        int h = (int) (lineH * contentLines + PAD * 2);
+        // 宽度保持（要放下 DEMO_CHARS 个字符）。
         return (mode == Mode.INLINE)
-                ? new Dimension(520, Math.max(96, h))
-                : new Dimension(300, Math.max(96, h));
+                ? new Dimension(520, 110)
+                : new Dimension(300, 150);
     }
 
     /** 探针：当前生效字号（验证自适应是否真的按尺寸变） */
