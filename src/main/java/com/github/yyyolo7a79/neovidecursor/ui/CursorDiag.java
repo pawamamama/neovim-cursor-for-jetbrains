@@ -3,68 +3,59 @@ package com.github.yyyolo7a79.neovidecursor.ui;
 import com.intellij.openapi.diagnostic.Logger;
 
 /**
- * 光标诊断日志 —— 出问题时用户能直接导出、我据此定位。
+ * 光标诊断日志 —— 带「不变量自检」，让日志本身就能判断对错。
  *
- * <p><b>为什么需要（2026-10-24 教训）</b>：
- * 「选区跟随」这个问题我改了三轮（0.9.22 / 0.9.24 / 0.9.27）才对，
- * 前两轮全靠推理，第三轮加了日志才拿到真相：
+ * <h2>设计思路：日志要有探针的覆盖性</h2>
+ *
+ * <p>第一版（0.9.28）只记录了「输入」和「部分输出」：
  * <pre>
- *   vp=29:17 → 29:23 → 29:38   （普通选区：vp 在动）
- *   lead=29:12 恒定
- *
- *   vp=29:4 恒定  lead=29:24   （块选区：lead 在动）
+ *   [caret] hasSel=true vp=29:4 lead=29:24 used=LEAD
+ *   [draw]  corner0X=368.0 cx=369.0 cy=1045.5
  * </pre>
- * <b>两种选区的活动端落在不同 API 上</b> —— 光靠读文档和推理永远看不出来。
+ * 结果排查时只能靠人眼比对数字 —— 看不出「哪一步断了」。
  *
- * <p><b>设计原则</b>：
- * <ul>
- *   <li><b>默认关闭</b>（不污染日志、不影响性能）</li>
- *   <li>开关走系统属性，<b>发布版也能开</b>：{@code -Dneovide.cursor.diag=true}</li>
- *   <li>限流：每 {@link #SAMPLE_EVERY_FRAMES} 帧最多一条，避免 4 分钟 15000 条</li>
- *   <li>输出格式稳定，便于 {@code Select-String} 提取</li>
- * </ul>
+ * <p>本版每条日志都附带<b>不变量检查结果</b>（OK / BAD 直接写出来），
+ * 不用事后推理。覆盖的 7 条：
+ * <table>
+ *   <tr><th>#</th><th>不变量</th><th>违反说明</th></tr>
+ *   <tr><td>I1</td><td>目标变化时角点应随之移动</td><td>拖尾冻结</td></tr>
+ *   <tr><td>I2</td><td>静止时角点应收敛（偏移→0）</td><td>永不收敛</td></tr>
+ *   <tr><td>I3</td><td>偏移不得超过合理上限</td><td>拖尾失控拉长</td></tr>
+ *   <tr><td>I4</td><td>块选区各行目标 x 应一致</td><td>斜度不一致</td></tr>
+ *   <tr><td>I5</td><td>活动拖尾数应等于 caret 数</td><td>某些光标没画</td></tr>
+ *   <tr><td>I6</td><td>块选区方向应与选中数组一致</td><td>选错数组</td></tr>
+ *   <tr><td>I7</td><td>普通光标跟随点应为 vp</td><td>跟随点错误</td></tr>
+ * </table>
  *
- * <p><b>用户怎么开</b>（不改代码、不用重打包）：
- * <ol>
- *   <li>Help → Edit Custom VM Options</li>
- *   <li>加一行 {@code -Dneovide.cursor.diag=true}</li>
- *   <li>重启 IDE</li>
- *   <li>复现问题后：Help → Show Log in Explorer，把 idea.log 给开发者</li>
- * </ol>
+ * <h2>开关</h2>
+ * <p>设置面板「诊断日志」复选框，或 {@code -Dneovide.cursor.diag=true}。
+ * 默认关闭，每 15 帧采样一次。
  */
 final class CursorDiag {
 
     private static final Logger LOG = Logger.getInstance("neovide-cursor-diag");
 
-    /** 系统属性名：开诊断 */
     static final String PROP_ENABLED = "neovide.cursor.diag";
-
-    /** 系统属性名：采样间隔（帧），默认 15 */
     static final String PROP_SAMPLE = "neovide.cursor.diag.sample";
 
-    /** 每 N 帧最多写一条 */
     private static final int SAMPLE_EVERY_FRAMES =
             parseInt(System.getProperty(PROP_SAMPLE), 15);
 
-    /**
-     * 当前是否启用。
-     *
-     * <p><b>两个来源，任一为真即开</b>：
-     * <ol>
-     *   <li><b>设置面板</b>的「诊断日志」复选框（推荐，用户可见可点）</li>
-     *   <li>系统属性 {@code -Dneovide.cursor.diag=true}（开发/自动化用）</li>
-     * </ol>
-     *
-     * <p>为什么不再用静态 final：设置项是运行时可改的，
-     * 勾上应当立刻生效，不必重启。
-     */
+    /** 拖尾偏移的合理上限（像素）。超过说明物理失控。 */
+    private static final double MAX_REASONABLE_OFFSET = 200.0;
+
+    /** 「已到位」阈值（像素），与 DampedSpring 的静止判据一致。 */
+    private static final double SETTLED_EPSILON = 0.5;
+
+    private CursorDiag() {
+    }
+
+    /** 当前是否启用：设置项或系统属性，任一为真。 */
     static boolean enabled() {
         if (Boolean.getBoolean(PROP_ENABLED)) {
             return true;
         }
         try {
-            // 设置服务是 application service（NeovideCursorSettings），不是 NeovideConfig。
-            // NeovideConfig 是 run-time 快照，只有 UI 字段，不含 diagLogging。
             return com.intellij.openapi.application.ApplicationManager
                     .getApplication()
                     .getService(com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings.class)
@@ -74,59 +65,102 @@ final class CursorDiag {
         }
     }
 
-    private CursorDiag() {
-    }
-
-    /** 该帧是否应该采样 */
     static boolean shouldSample(long frameSeq) {
         return enabled() && (frameSeq % SAMPLE_EVERY_FRAMES) == 0;
     }
 
     /**
-     * 记录一帧的「光标取值」。
+     * 单个光标的完整状态快照。
      *
-     * @param tag      场景标签（如 {@code "single"} / {@code "block"}）
-     * @param hasSel   是否有选区
-     * @param vp       getVisualPosition 的结果（line:column，null 写 "null"）
-     * @param lead     getLeadSelectionPosition 的结果
-     * @param used     实际用了哪个（"VP" / "LEAD"）
+     * <p>把「输入 / 中间量 / 输出 / 不变量结果」放在同一条里，
+     * 排查时不用跨多条日志对照。检查 I2（静止收敛）与 I3（偏移合理）。
      */
-    static void caretSample(String tag, boolean hasSel,
+    static void trailSnapshot(int idx, int total, String mode, int line,
+                              double cx, double cy, double corner0X, double corner0Y,
+                              double maxOffset, double targetW, double targetH,
+                              boolean initialized, double dtMs) {
+        if (!enabled()) {
+            return;
+        }
+        boolean offsetSane = maxOffset >= 0 && maxOffset <= MAX_REASONABLE_OFFSET;
+        boolean settled = maxOffset <= SETTLED_EPSILON;
+
+        LOG.info("[trail] " + idx + "/" + total
+                + " mode=" + mode
+                + " line=" + line
+                + " cx=" + f(cx) + " cy=" + f(cy)
+                + " c0=(" + f(corner0X) + "," + f(corner0Y) + ")"
+                + " off=" + f(maxOffset)
+                + " wh=(" + f(targetW) + "x" + f(targetH) + ")"
+                + " init=" + initialized
+                + " dt=" + f(dtMs) + "ms"
+                + " | I2状态=" + (settled ? "静止" : "动")
+                + " I3偏移合理=" + (offsetSane ? "OK" : "BAD(>" + f(MAX_REASONABLE_OFFSET) + ")"));
+    }
+
+    /**
+     * 帧级汇总 —— 检查 I1（不冻结）/ I4（块选区行对齐）/ I5（数量一致）。
+     *
+     * @param blockSpread 块选区各行目标 x 的最大差值；非块选区传 -1
+     */
+    static void frameSummary(long frameSeq, int caretCount, int trailCount,
+                             boolean targetMoved, boolean anyOffsetMoved,
+                             double blockSpread) {
+        if (!enabled()) {
+            return;
+        }
+        boolean countOk = (caretCount == trailCount);
+        // I1：目标动了但没有任何角点动 → 拖尾冻结
+        boolean i1Ok = !(targetMoved && !anyOffsetMoved);
+        String i4 = blockSpread < 0
+                ? "NA"
+                : (blockSpread <= 1.0 ? "OK" : "BAD(差" + f(blockSpread) + "px)");
+
+        LOG.info("[frame] #" + frameSeq
+                + " carets=" + caretCount + " trails=" + trailCount
+                + " targetMoved=" + targetMoved
+                + " offsetMoved=" + anyOffsetMoved
+                + " | I1不冻结=" + (i1Ok ? "OK" : "BAD")
+                + " I4行对齐=" + i4
+                + " I5数量=" + (countOk ? "OK" : "BAD"));
+    }
+
+    /**
+     * 块选区的方向判定（I6）。
+     *
+     * <p>用户报过「向右扩失效」——根因是两个数组各管一个方向。
+     * 这条把「方向 / 选中的数组 / offset」绑在一起，一眼看出选错没有。
+     */
+    static void blockPick(int caretOffset, int leadOffset, String which, int chosenOffset) {
+        if (!enabled()) {
+            return;
+        }
+        boolean rightward = caretOffset >= leadOffset;
+        boolean i6Ok = rightward ? "ENDS".equals(which) : "STARTS".equals(which);
+
+        LOG.info("[pick] caret=" + caretOffset + " lead=" + leadOffset
+                + " 方向=" + (rightward ? "向右扩" : "向左扩")
+                + " 选了=" + which
+                + " offset=" + chosenOffset
+                + " | I6方向匹配=" + (i6Ok ? "OK" : "BAD"));
+    }
+
+    /** 普通光标的跟随点选择（I7）。 */
+    static void caretFollow(String tag, boolean hasSelection,
                             String vp, String lead, String used) {
         if (!enabled()) {
             return;
         }
-        LOG.info("[caret] tag=" + tag
-                + " hasSel=" + hasSel
-                + " vp=" + vp
-                + " lead=" + lead
-                + " used=" + used);
+        boolean i7Ok = "VP".equals(used);
+        LOG.info("[caret] " + tag
+                + " hasSel=" + hasSelection
+                + " vp=" + vp + " lead=" + lead
+                + " used=" + used
+                + " | I7跟随点=" + (i7Ok ? "OK" : "BAD"));
     }
 
-    /**
-     * 记录一帧的「实际绘制坐标」—— 与 {@link #caretSample} 对照，
-     * 能看出「取值对了但没画出来」这类问题。
-     */
-    static void drawSample(String tag, int line, double corner0X,
-                           double targetCx, double targetCy, boolean initialized) {
-        if (!enabled()) {
-            return;
-        }
-        LOG.info("[draw] tag=" + tag
-                + " line=" + line
-                + " corner0X=" + fmt(corner0X)
-                + " cx=" + fmt(targetCx)
-                + " cy=" + fmt(targetCy)
-                + " init=" + initialized);
-    }
-
-    /**
-     * 记录块选区的原始数组（只在块选区模式下，限流）。
-     *
-     * <p>块选区最容易出错 —— 它是「N 行数组」而非单点，索引错位、起点/终点搞反
-     * 都表现为「某几行不动」。
-     */
-    static void blockSample(int count, String startsHead, String endsHead) {
+    /** 块选区数组原值（触发式）。 */
+    static void blockArrays(int count, String startsHead, String endsHead) {
         if (!enabled()) {
             return;
         }
@@ -135,23 +169,7 @@ final class CursorDiag {
                 + " ends=" + endsHead);
     }
 
-    /**
-     * 记录块选区的「方向判定 + 选中的 offset」。
-     *
-     * <p><b>为什么要单独记</b>：块选区有两个数组（starts / ends），
-     * 分别对应向左扩和向右扩。选错的表现是「某个方向完全没动画」，
-     * 而看 {@link #blockSample} 的数组原值无法判断到底选了哪个。
-     */
-    static void blockPick(boolean rightward, int chosenOffset, String which) {
-        if (!enabled()) {
-            return;
-        }
-        LOG.info("[pick] 方向=" + (rightward ? "向右扩" : "向左扩")
-                + " 选了=" + which
-                + " offset=" + chosenOffset);
-    }
-
-    private static String fmt(double v) {
+    private static String f(double v) {
         return String.format("%.1f", v);
     }
 

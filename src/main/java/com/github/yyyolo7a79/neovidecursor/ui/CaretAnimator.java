@@ -1429,13 +1429,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                         cvp = editor.getCaretModel().getVisualPosition();
                     }
                     if (CursorDiag.shouldSample(frameSeq) && i == 0) {
-                        CursorDiag.blockSample(blockStarts.length,
+                        CursorDiag.blockArrays(blockStarts.length,
                                 head(blockStarts), head(blockEnds));
                         Caret pc = editor.getCaretModel().getPrimaryCaret();
                         if (pc != null) {
-                            boolean rightward = pc.getOffset() >= pc.getLeadSelectionOffset();
-                            CursorDiag.blockPick(rightward, blockChosenOffset,
-                                    useEnd ? "ENDS" : "STARTS");
+                            CursorDiag.blockPick(pc.getOffset(), pc.getLeadSelectionOffset(),
+                                    useEnd ? "ENDS" : "STARTS", blockChosenOffset);
                         }
                     }
                     targetW = width;
@@ -1448,13 +1447,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                     cvp = caret.getVisualPosition();
                     caretOff = caret.getOffset();
                     if (CursorDiag.shouldSample(frameSeq)) {
-                        VisualPosition dVp = caret.getVisualPosition();
                         VisualPosition dLead = null;
                         try {
                             dLead = caret.getLeadSelectionPosition();
                         } catch (Throwable ignored) { }
-                        CursorDiag.caretSample("single", caret.hasSelection(),
-                                fmtVp(dVp), fmtVp(dLead), "VP");
+                        CursorDiag.caretFollow("single", caret.hasSelection(),
+                                fmtVp(cvp), fmtVp(dLead), "VP");
                     }
                     targetCx = 0;               // 普通光标分支不用这两个值
                     targetCy = 0;
@@ -1796,7 +1794,13 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
         panel.beginQuads();
-        // 【诊断】限流打印：每 30 帧一次，看目标位置 vs 实际画出位置
+        boolean diagFrame = CursorDiag.shouldSample(frameSeq);
+        int diagIdx = 0;
+        int diagTotal = activeTrails.size();
+        // 块选区各行目标 x 的最大差值（I4 用）
+        double diagMinX = Double.MAX_VALUE;
+        double diagMaxX = -Double.MAX_VALUE;
+
         for (SpringTrail trail : activeTrails) {
             // 同组共享组内最大偏移 → 相邻行呈现为一个整体，组间互不影响
             double offForGlow = groupMaxOffset[trail.groupId];
@@ -1809,6 +1813,35 @@ public class CaretAnimator implements Disposable, CaretListener {
                             trail.corners[0].getCurrentY(), trail.corners[1].getCurrentY(),
                             trail.corners[2].getCurrentY(), trail.corners[3].getCurrentY()},
                     trailGlow);
+
+            if (diagFrame) {
+                // I2 / I3：单光标的偏移合理性
+                CursorDiag.trailSnapshot(diagIdx, diagTotal,
+                        staticCaret ? "static" : (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE
+                                ? "afterimage" : "spring"),
+                        trail.currentLine,
+                        trail.centerX, trail.centerY,
+                        trail.corners[0].getCurrentX(), trail.corners[0].getCurrentY(),
+                        trail.maxOffset(), trail.width, trail.height,
+                        trail.isInitialized(), dt * 1000.0);
+            }
+            if (trail.centerX < diagMinX) {
+                diagMinX = trail.centerX;
+            }
+            if (trail.centerX > diagMaxX) {
+                diagMaxX = trail.centerX;
+            }
+            diagIdx++;
+        }
+
+        if (diagFrame) {
+            // I1 / I4 / I5：帧级
+            double spread = (diagTotal > 1 && diagMaxX > diagMinX)
+                    ? (diagMaxX - diagMinX) : -1;
+            // 块选区时中心 x 应当一致（同一列），spread 接近 0
+            CursorDiag.frameSummary(frameSeq,
+                    editor.getCaretModel().getAllCarets().size(), diagTotal,
+                    false, anyAnimating, spread);
         }
 
         computeTrailBounds(currentBounds);
