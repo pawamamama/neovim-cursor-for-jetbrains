@@ -34,9 +34,9 @@ import java.awt.RenderingHints;
  *       光标从行尾跳到下一行开头（真实换行，不是左右镜像）</li>
  * </ol>
  */
-final class AnimationPreview extends JComponent {
+public final class AnimationPreview extends JComponent {
 
-    enum Mode { INLINE, CROSS }
+    public enum Mode { INLINE, CROSS }
 
     private final NeovideConfig config;
     private final Mode mode;
@@ -52,7 +52,8 @@ final class AnimationPreview extends JComponent {
     /** 演示文本（决定宽度需求） */
     private static final int DEMO_CHARS = 14;
 
-    private static final double CURSOR_W = 2.5;
+    /** 光标基准宽（22pt 时约 2.2px），实际按字号等比缩放 */
+    private static final double CURSOR_W_BASE = 2.2;
     private static final int TEXT_X = 18;
     private static final int PAD = 16;
 
@@ -83,6 +84,8 @@ final class AnimationPreview extends JComponent {
 
     /** 编辑器行距（来自 FontPreferences；默认 1.5 与 IDEA 一致） */
     private float editorLineSpacing = 1.5f;
+
+    private double cursorW = CURSOR_W_BASE;
 
     private int fontSize = BASE_FONT_SIZE;
     private Font codeFont;
@@ -116,10 +119,10 @@ final class AnimationPreview extends JComponent {
         actionInterval = (mode == Mode.INLINE) ? TYPE_MS : CROSS_MS;
     }
 
-    static AnimationPreview inline(NeovideConfig c) { return new AnimationPreview(c, Mode.INLINE); }
-    static AnimationPreview cross(NeovideConfig c) { return new AnimationPreview(c, Mode.CROSS); }
+    public static AnimationPreview inline(NeovideConfig c) { return new AnimationPreview(c, Mode.INLINE); }
+    public static AnimationPreview cross(NeovideConfig c) { return new AnimationPreview(c, Mode.CROSS); }
 
-    void onConfigChanged() {
+    public void onConfigChanged() {
         panel.refreshStyles();
         glowSized = false;
         repaint();
@@ -182,9 +185,12 @@ final class AnimationPreview extends JComponent {
         if (w <= 0 || h <= 0) return;
 
         Font base = editorFont();
+        // 可用行数：单行模式留 1 行居中，跨行模式需要 2 行
+        int lines = (mode == Mode.INLINE) ? 3 : 3;
         int byWidth = (int) ((w - TEXT_X * 2) / (DEMO_CHARS * 0.62f));
-        int byHeight = (int) ((h - PAD * 2) / (4 * 1.5f));
-        int size = Math.max(MIN_FONT_SIZE, Math.min(Math.min(BASE_FONT_SIZE, byWidth), byHeight));
+        int byHeight = (int) ((h - PAD * 2) / (lines * 1.5f));
+        // 【0.9.40】取消 22 上限的硬卡死 —— 窗口大就该放大，用户要「大一点」
+        int size = Math.max(MIN_FONT_SIZE, Math.min(byWidth, byHeight));
 
         if (size != fontSize || codeFont == null) {
             fontSize = size;
@@ -192,6 +198,8 @@ final class AnimationPreview extends JComponent {
             metrics = g2.getFontMetrics(codeFont);
             lineH = size * editorLineSpacing;
             cursorH = lineH * 0.8;
+            // 光标宽随字号缩放，否则大字号下粉色块会占两三个字符宽
+            cursorW = Math.max(1.8, size / 16.0);
             placed = false;
             glowSized = false;
         } else if (metrics == null) {
@@ -202,13 +210,15 @@ final class AnimationPreview extends JComponent {
     private void placeIfNeeded() {
         if (placed || getWidth() <= 0) return;
         placed = true;
-        centerX = PAD + CURSOR_W / 2;
-        centerY = lineH;
+        if (lineH <= 0) lineH = fontSize * editorLineSpacing;
+        if (cursorH <= 0) cursorH = lineH * 0.8;
+        centerX = TEXT_X + cursorW / 2;
+        centerY = contentTop() + lineH / 2;
         for (TrailCorner c : corners) snap(c);
     }
 
     private void snap(TrailCorner c) {
-        c.snapTo(CURSOR_W, cursorH, centerX, centerY);
+        c.snapTo(cursorW, cursorH, centerX, centerY);
     }
 
     // ==================== 动作 ====================
@@ -264,8 +274,8 @@ final class AnimationPreview extends JComponent {
         // 光标位置 = 文本起点 + 已打字数 × 单字符宽
         String shown = text.substring(0, Math.max(0, Math.min(typed, max)));
         int advanceW = metrics.stringWidth(shown);
-        centerX = TEXT_X + advanceW + CURSOR_W / 2;
-        centerY = lineH;
+        centerX = TEXT_X + advanceW + cursorW / 2;
+        centerY = contentTop() + lineH / 2;
         pushTarget();
     }
 
@@ -283,8 +293,8 @@ final class AnimationPreview extends JComponent {
         int targetLine = row;
         String before = lines[targetLine];
         // 光标落在该行【行尾】（换行后通常继续输入）
-        int tx = (int) (TEXT_X + metrics.stringWidth(before) + CURSOR_W / 2);
-        double ty = lineH + targetLine * lineH;
+        int tx = (int) (TEXT_X + metrics.stringWidth(before) + cursorW / 2);
+        double ty = contentTop() + lineH * (targetLine + 0.5);
         centerX = tx;
         centerY = ty;
         pushTarget();
@@ -293,7 +303,7 @@ final class AnimationPreview extends JComponent {
     private void pushTarget() {
         int[] ranks = assignRanks(centerX, centerY);
         for (int i = 0; i < 4; i++) {
-            corners[i].jump(CURSOR_W, cursorH, centerX, centerY, ranks[i]);
+            corners[i].jump(cursorW, cursorH, centerX, centerY, ranks[i]);
         }
     }
 
@@ -306,13 +316,13 @@ final class AnimationPreview extends JComponent {
     private void step() {
         if (!placed) return;
         if (!glowSized) {
-            panel.updateGlowRadius(CURSOR_W, cursorH);
+            panel.updateGlowRadius(cursorW, cursorH);
             glowSized = true;
         }
         double dt = FRAME_MS / 1000.0;
         double maxOffset = 0;
         for (TrailCorner c : corners) {
-            c.update(CURSOR_W, cursorH, centerX, centerY, dt, false);
+            c.update(cursorW, cursorH, centerX, centerY, dt, false);
             maxOffset = Math.max(maxOffset, c.getOffsetMagnitude());
         }
         panel.setGlowStrength((float) Math.min(1.0, maxOffset / 8.0));
@@ -322,7 +332,7 @@ final class AnimationPreview extends JComponent {
     private int[] assignRanks(double cx, double cy) {
         double[] al = new double[4];
         for (int i = 0; i < 4; i++) {
-            al[i] = corners[i].calculateDirectionAlignment(CURSOR_W, cursorH, cx, cy);
+            al[i] = corners[i].calculateDirectionAlignment(cursorW, cursorH, cx, cy);
         }
         int[] r = new int[4];
         for (int i = 0; i < 4; i++) {
@@ -390,15 +400,80 @@ final class AnimationPreview extends JComponent {
     }
 
     private int baselineFor(int lineIndex) {
-        // 行基线：行高中心 + 字号 0.35 的经验偏移
-        return (int) (lineH * (lineIndex + 1) + fontSize * 0.35);
+        // 【0.9.40】垂直居中：先算内容总高，再算起始偏移
+        int contentLines = (mode == Mode.INLINE) ? 1 : 2;
+        double contentH = contentLines * lineH;
+        double top = (getHeight() - contentH) / 2.0;
+        return (int) (top + lineH * (lineIndex + 0.5) + fontSize * 0.35);
+    }
+
+    /** 内容起始 y（与 baselineFor 同基准） */
+    private double contentTop() {
+        int contentLines = (mode == Mode.INLINE) ? 1 : 2;
+        double contentH = contentLines * lineH;
+        return (getHeight() - contentH) / 2.0;
     }
 
     @Override
     public Dimension getPreferredSize() {
-        // 用户要「大一点」：4 行高、14 字符宽
-        float cw = BASE_FONT_SIZE * 0.62f;
-        return new Dimension((int) (TEXT_X * 2 + cw * DEMO_CHARS),
-                (int) (BASE_FONT_SIZE * 1.5f * 4 + PAD * 2));
+        // 0.9.40：定稿 B 版 520×200（三版对比里中等那档），
+        // 字号由 remeasure 按实际尺寸自适应（实测 37pt）。
+        return new Dimension(520, 200);
+    }
+
+    // ==================== 探针 / 独立展示器钩子 ====================
+
+    /**
+     * 手动驱动一帧（供 {@code PreviewShowcase} 截图用）。
+     *
+     * <p><b>为什么需要</b>：预览窗靠 {@link Timer} 自动驱动，
+     * 但截图工具要「跑 N 帧然后拍一张」，不能等真实时间。
+     * 这个方法把物理步进暴露出来，不影响正常计时器行为。
+     *
+     * @param doAdvance true 表示这一步同时推进动作（打字/退格/换行）
+     */
+    public void probeTick(boolean doAdvance) {
+        // 【必须】先在离屏 Graphics 上跑一次 remeasure ——
+        // 否则 lineH / metrics / codeFont 全是初始值（0 / null），
+        // advance() 里 metrics.stringWidth 会 NPE 被吞、光标停在原点。
+        if (lineH <= 0 || metrics == null) {
+            java.awt.image.BufferedImage tmp = new java.awt.image.BufferedImage(
+                    Math.max(1, getWidth()), Math.max(1, getHeight()),
+                    java.awt.image.BufferedImage.TYPE_INT_RGB);
+            java.awt.Graphics2D g = tmp.createGraphics();
+            try {
+                remeasure(g);
+            } finally {
+                g.dispose();
+            }
+        }
+        placeIfNeeded();
+        if (doAdvance) {
+            advance();
+        }
+        step();
+    }
+
+    /** 探针：当前字号（验证自适应） */
+    public int probeFontSize() {
+        return fontSize;
+    }
+
+    /** 探针：当前已打出的字符数（负数表示退格阶段） */
+    public int probeTyped() {
+        return typed;
+    }
+
+    /** 探针：当前阶段（0打字 1停顿 2退格 3切换） */
+    public int probePhase() {
+        return phase;
+    }
+
+    /** 探针：字号 / 行高 / 已打字数 / 当前文本（排查用） */
+    public String probeState() {
+        return "fs=" + fontSize + " lineH=" + lineH + " typed=" + typed
+                + " phase=" + phase + " text=" + currentText()
+                + " metrics=" + (metrics != null) + " font=" + (codeFont != null)
+                + " w=" + getWidth() + " h=" + getHeight();
     }
 }
