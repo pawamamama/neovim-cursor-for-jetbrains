@@ -121,6 +121,27 @@ public class CaretTrailPanel extends JComponent {
     /** 辉光最大外扩量：= shadowBlurFactor × 光标较长边，与原版 shadowBlur 语义一致 */
     private float glowWidth = 12f;
 
+    /**
+     * 本帧生效的辉光层数（-1 = 用 config 里的值）。
+     *
+     * <p>由 {@code CaretAnimator} 每帧设置 —— 用于「多光标不辉光」这个
+     * 全局开关：光标数 ≥ 2 时设为 0，drawQuadGlow 直接早退。
+     *
+     * <p><b>为什么不直接改 config.glowLayers</b>：那是用户的持久设置，
+     * 改了会污染 State。这里只影响当前帧的绘制。
+     */
+    private int effectiveGlowLayers = -1;
+
+    /** 设置本帧生效的辉光层数（-1 = 恢复用 config 值） */
+    public void setEffectiveGlowLayers(int layers) {
+        this.effectiveGlowLayers = layers;
+    }
+
+    /** 本帧实际使用的层数 */
+    private int currentGlowLayers() {
+        return effectiveGlowLayers >= 0 ? effectiveGlowLayers : config.glowLayers;
+    }
+
     /** √2 —— 角点偏移向量的模长上限，用于抑制锐角处的尖刺，见 computeOffsetDirections */
     private static final double SQRT_2 = Math.sqrt(2.0);
 
@@ -480,11 +501,11 @@ public class CaretTrailPanel extends JComponent {
      * 不透明主体盖住；而真正扩得够远的层，alpha 已衰减到 2% 以下。
      */
     private void drawQuadGlow(Graphics2D g2, Path2D.Double ignoredPath, float quadGlow) {
-        if (!config.useShadow || config.glowLayers <= 0 || glowWidth <= 0.5f) {
+        if (!config.useShadow || currentGlowLayers() <= 0 || glowWidth <= 0.5f) {
             return;
         }
 
-        int layers = config.glowLayers;
+        int layers = currentGlowLayers();
 
         // 峰值再乘上强度：光标静止时 glowStrength 为 0，此处直接返回，光晕完全不绘制
         //

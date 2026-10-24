@@ -709,6 +709,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         return kotlin.Unit.INSTANCE;
                     });
 
+                    // 【多光标不辉光】全局设置，不随预设变化
+                    g.row("多光标时关闭辉光（只保留拉伸）", row -> {
+                        bindCheck(row, () -> pending.multiCursorNoGlow,
+                                v -> pending.multiCursorNoGlow = v)
+                                .comment("<b>全局设置，不随预设变化</b>。"
+                                        + "光标 ≥ 2 个时把辉光层数强制归零，"
+                                        + "只保留拖尾拉伸形状 —— 减少多光标时的绘制开销。"
+                                        + "单光标不受影响。", COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
                     // 契约 §2.2：W_COUPLING 挂在 #3/#4 下方的 rowComment
                     g.row("", row -> {
                         row.rowComment(W_COUPLING, COMMENT, NO_LINK);

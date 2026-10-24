@@ -339,6 +339,11 @@ public final class SettingsField {
         // （CursorDiag 直接读 State）。
         out.add(bools("diagLogging", s -> s.diagLogging, (s, v) -> s.diagLogging = v,
                 null, null));
+
+        // 【多光标不辉光】同样是「只进 State、不进 CONFIG」的运行期开关 ——
+        // CONFIG 里没有对应字段（生效逻辑在 CaretAnimator 里读 State）。
+        out.add(bools("multiCursorNoGlow", s -> s.multiCursorNoGlow,
+                (s, v) -> s.multiCursorNoGlow = v, null, null));
         out.add(ints("cursorDisappearDelay", s -> s.cursorDisappearDelay, (s, v) -> s.cursorDisappearDelay = v,
                 c -> c.cursorDisappearDelay, (c, v) -> c.cursorDisappearDelay = v));
         out.add(floats("cursorFadeOutDuration", s -> s.cursorFadeOutDuration, (s, v) -> s.cursorFadeOutDuration = v,

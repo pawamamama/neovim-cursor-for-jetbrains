@@ -625,6 +625,17 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      */
     public boolean diagLogging = false;
 
+    /**
+     * 多光标时关闭辉光（全局开关，<b>不随预设变化</b>）。
+     *
+     * <p><b>为什么做成全局</b>：用户明确要求「全局生效的改预设不该动这个」。
+     * 它属于性能/设备级设置，不是观感风格。
+     *
+     * <p><b>语义</b>：光标数 ≥ 2 时把辉光层数强制归零，只保留拖尾拉伸形状。
+     * 单光标不受影响。
+     */
+    public boolean multiCursorNoGlow = false;
+
         /** 2. 拖尾渲染模式 */
         public NeovideConfig.TrailMode trailMode = NeovideConfig.TrailMode.SPRING;
 
@@ -793,6 +804,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 漏了它 → 面板打开时 pending.diagLogging 恒为 false → 复选框永远不勾。
         // （第一层原因是它不在 SettingsField.FIELDS 里，apply 时不拷贝。）
         diagLogging = from.diagLogging;
+        multiCursorNoGlow = from.multiCursorNoGlow;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */

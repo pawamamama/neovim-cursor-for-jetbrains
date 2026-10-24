@@ -214,6 +214,9 @@ public class CaretAnimator implements Disposable, CaretListener {
     private final Editor editor;
     private final JComponent content;
     private final CaretTrailPanel panel;
+
+    /** 多光标不辉光（全局设置，来自 State，不随预设变化） */
+    private boolean multiCursorNoGlow;
     private final NeovideConfig config;
     /**
      * 每个 {@code Caret} 一份拖尾状态（多光标）。
@@ -1801,6 +1804,23 @@ public class CaretAnimator implements Disposable, CaretListener {
         boolean fading = config.overlayFadeOut && fade > 0f && fade < 1f;
 
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
+        // 【多光标不辉光：全局开关】
+        //
+        // 用户要求：「做在总开关吧，这个算是性能优化了，记住是全局生效的，
+        //            改预设不该动这个」。
+        //
+        // 生效方式：光标数 ≥ 2 时把辉光层数临时设为 0。
+        // CaretTrailPanel.drawQuadGlow() 已有 `glowLayers <= 0` 的早退分支，
+        // 所以只需改这一个值，绘制侧零改动。
+        //
+        // 【注意】不改 config.glowLayers 本身 —— 那是用户设的持久值。
+        // 这里只影响「本帧的绘制」，关掉开关后立刻恢复。
+        int effectiveGlowLayers = config.glowLayers;
+        if (multiCursorNoGlow && activeTrails.size() >= 2) {
+            effectiveGlowLayers = 0;
+        }
+        panel.setEffectiveGlowLayers(effectiveGlowLayers);
+
         panel.beginQuads();
         boolean diagFrame = CursorDiag.shouldSample(frameSeq);
         int diagIdx = 0;
@@ -2015,6 +2035,17 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 渲染模式切换后调用：清空两种模型的内部状态，避免残留 */
     public void onModeChanged() {
+        // 【同步全局设置】多光标不辉光 —— 从 State 读，不随预设变化
+        try {
+            multiCursorNoGlow = com.intellij.openapi.application.ApplicationManager
+                    .getApplication()
+                    .getService(com.github.yyyolo7a79.neovidecursor.settings
+                            .NeovideCursorSettings.class)
+                    .getState().multiCursorNoGlow;
+        } catch (Throwable ignored) {
+            multiCursorNoGlow = false;
+        }
+
         afterimageTrail.clear();
         afterimageTrail.setLifetime(config.afterimageLifetime);
 
