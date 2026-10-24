@@ -786,6 +786,13 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             animPresetBase = from.animPresetBase;
             customAnimPresets = from.customAnimPresets;
             animCustomName = from.animCustomName;
+        // 【0.9.51 修复：copyFrom 漏了 diagLogging】
+        //
+        // 「勾选诊断日志 → 应用 → 消失」的第二层原因。
+        // copyFrom 是 State 深拷贝，pending = deepCopy(state) 走这里。
+        // 漏了它 → 面板打开时 pending.diagLogging 恒为 false → 复选框永远不勾。
+        // （第一层原因是它不在 SettingsField.FIELDS 里，apply 时不拷贝。）
+        diagLogging = from.diagLogging;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
