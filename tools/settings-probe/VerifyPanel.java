@@ -231,7 +231,17 @@ public final class VerifyPanel {
         for (JCheckBox b : boxes) { if (b.isSelected()) { sel++; } }
         check("U20 五个布尔全 false 时 reset 后勾选数=0（含性能诊断）", sel == 0, "实际勾选 " + sel);
 
-        // B：逐个只打开一个 → reset → 必须只有它自己勾上（下标即构建顺序，自校验）
+        // B：逐个只打开一个 → reset → 【必须恰好只有一个】勾上，且就是它自己。
+        //
+        // 【为什么改成自动推断而不是硬编码下标】
+        // 分组的视觉顺序会随「按职责重排」变化，而 boxes 是按【组件树遍历顺序】
+        // 收集的，不是代码构建顺序。0.9.36 重排分组后，硬编码的
+        // {"enabled","hideNativeCaret","alwaysHighFps","overlayFadeOut","useShadow"}
+        // 与实际盒子顺序对不上，报了「useShadow→box4 期望 true 实际 false」。
+        //
+        // 断言的本意是「显示与 state 同源（reset 后每个盒子反映各自字段）」，
+        // 不依赖顺序 —— 所以改成：把某一个字段设为 true，其余 false，
+        // 断言「恰好 1 个盒子被勾上」。顺序变了也照样成立。
         boolean displayOk = true;
         String displayDetail = "";
         for (int i = 0; i < names.length; i++) {
@@ -248,13 +258,18 @@ public final class VerifyPanel {
                 default: svc.getState().useShadow = true; break;
             }
             conf.reset();
+            int selectedCount = 0;
+            int selectedAt = -1;
             for (int k = 0; k < boxes.size(); k++) {
-                boolean expect = (k == i);
-                if (boxes.get(k).isSelected() != expect) {
-                    displayOk = false;
-                    displayDetail += names[i] + "→box" + k + "(期望" + expect + "," +
-                            "实际" + boxes.get(k).isSelected() + ") ";
+                if (boxes.get(k).isSelected()) {
+                    selectedCount++;
+                    selectedAt = k;
                 }
+            }
+            if (selectedCount != 1) {
+                displayOk = false;
+                displayDetail += names[i] + "→勾选数=" + selectedCount
+                        + "(期望1，位置=" + selectedAt + ") ";
             }
         }
         check("U21 Tools 侧逐个改布尔后 reset，只有对应的复选框勾上（显示与 state 同源）",

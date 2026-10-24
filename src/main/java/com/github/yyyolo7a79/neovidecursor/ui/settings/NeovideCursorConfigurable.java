@@ -718,89 +718,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     return kotlin.Unit.INSTANCE;
                 });
 
-                // ---------- B. 淡出 ----------
-                panel.group("淡出", true, g -> {
-                    g.row("辉光淡出（停止后柔和熄灭）", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> pending.overlayFadeOut, v -> {
-                            pending.overlayFadeOut = v;
-                            fadeOn.set(v);
-                        });
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("淡出前保持时长", row -> {
-                        addSlider(row, SPECS[0], fadeOn);
-                        row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("淡出时长", row -> {
-                        addSlider(row, SPECS[1], fadeOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // ---------- C. 颜色 ----------
-                panel.group("颜色", true, g -> {
-                    g.row("拖尾颜色", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        tailColorPanel = new ColorPanel();
-                        tailColorPanel.setSupportTransparency(false);
-                        // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
-                        // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
-                        tailColorPanel.addActionListener(e -> onColorPanelChanged());
-                        row.cell(tailColorPanel);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("拖尾不透明度", row -> {
-                        addSlider(row, SPECS[2], null);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // ---------- C2. 辉光 ----------
-                panel.group("辉光", true, g -> {
-                    g.row("启用辉光", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> pending.useShadow, v -> {
-                            pending.useShadow = v;
-                            shadowOn.set(v);
-                        });
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光颜色", row -> {
-                        shadowColorPanel = new ColorPanel();
-                        shadowColorPanel.setSupportTransparency(false);
-                        shadowColorPanel.addActionListener(e -> onColorPanelChanged());
-                        row.cell(shadowColorPanel).enabledIf(shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光峰值不透明度", row -> {
-                        addSlider(row, SPECS[3], shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光层数", row -> {
-                        addSlider(row, SPECS[4], shadowOn);
-                        row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
-                        addSlider(row, SPECS[5], shadowOn);
-                        row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
-
                 // ---------- D. 单行输入输出（只影响行内打字/退格）----------
                 //
                 // 分组依据：**看预览窗**。用户不需要记参数名 ——
@@ -871,6 +788,89 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     g.row("", row -> {
                         crossMoveHint = new JLabel();
                         row.cell(crossMoveHint);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // ---------- C. 颜色 ----------
+                panel.group("颜色", true, g -> {
+                    g.row("拖尾颜色", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        tailColorPanel = new ColorPanel();
+                        tailColorPanel.setSupportTransparency(false);
+                        // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
+                        // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
+                        tailColorPanel.addActionListener(e -> onColorPanelChanged());
+                        row.cell(tailColorPanel);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("拖尾不透明度", row -> {
+                        addSlider(row, SPECS[2], null);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // ---------- C2. 辉光 ----------
+                panel.group("辉光", true, g -> {
+                    g.row("启用辉光", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        bindCheck(row, () -> pending.useShadow, v -> {
+                            pending.useShadow = v;
+                            shadowOn.set(v);
+                        });
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光颜色", row -> {
+                        shadowColorPanel = new ColorPanel();
+                        shadowColorPanel.setSupportTransparency(false);
+                        shadowColorPanel.addActionListener(e -> onColorPanelChanged());
+                        row.cell(shadowColorPanel).enabledIf(shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光峰值不透明度", row -> {
+                        addSlider(row, SPECS[3], shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光层数", row -> {
+                        addSlider(row, SPECS[4], shadowOn);
+                        row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
+                        addSlider(row, SPECS[5], shadowOn);
+                        row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // ---------- B. 淡出 ----------
+                panel.group("淡出", true, g -> {
+                    g.row("辉光淡出（停止后柔和熄灭）", row -> {
+                        row.topGap(TopGap.MEDIUM);
+                        bindCheck(row, () -> pending.overlayFadeOut, v -> {
+                            pending.overlayFadeOut = v;
+                            fadeOn.set(v);
+                        });
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("淡出前保持时长", row -> {
+                        addSlider(row, SPECS[0], fadeOn);
+                        row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
+                    g.row("淡出时长", row -> {
+                        addSlider(row, SPECS[1], fadeOn);
                         return kotlin.Unit.INSTANCE;
                     });
                     return kotlin.Unit.INSTANCE;
