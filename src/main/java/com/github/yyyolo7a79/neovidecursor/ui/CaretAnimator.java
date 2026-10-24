@@ -122,7 +122,7 @@ public class CaretAnimator implements Disposable, CaretListener {
      *
      * <p>默认 false（不产生日志）。
      */
-    static final boolean DIAG_SELECTION = true;
+    static final boolean DIAG_SELECTION = false;
 
     static final int ACTIVE_DELAY_MS = 8;
 
@@ -1074,9 +1074,6 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 而 P0-5 契约要求「非快速路径帧每帧 getOffset 恰好 1 次」，
             // 多调一次主光标会让快速路径的判定基准错位。
             //
-            // 改为：用 caret 本身的视觉位置做快速路径判定（它便宜且够用），
-            // lead 的位置在下面的循环里按需取。
-            VisualPosition vp = editor.getCaretModel().getVisualPosition();
 
             // 【快速路径：恢复为顶层早退】
             //
@@ -1090,21 +1087,20 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 判断依据是主光标的缓存 + 光标数量 —— 数量变化（新增/移除/合并）
             // 会让 changed 为 true，不会漏掉。个别非主光标微妙移动的场景，
             // 由 caret 事件（caretPositionChanged / Added / Removed）置 forceResync 兜住。
-            // 【关键修正：快速路径的判定基准必须与实际更新点一致】
+            // 【实测修正：getVisualPosition() 才是活动端】
             //
-            // 用户反馈：「单行还是没有（跟随）」。
+            // 2026-10-24 用 20193 条诊断日志证实：
+            //   vp=29:17 → 29:23 → 29:38   （在变）← getVisualPosition()
+            //   lead=29:12 恒定              （不动）← getLeadSelectionPosition()
             //
-            // 根因：快速路径用 vp = getVisualPosition()（caret 位置，Shift+→ 时不动），
-            // 而实际更新用 followPositionOf()（lead，在动）。
-            // → 按 Shift+→ 时 caret 不动 → 快速路径命中 → return false
-            // → 永远走不到 lead 的更新。
+            // 也就是说：**caret 自己跟着选区活动端走，lead 是固定锚点**。
+            // 我前两轮（0.9.22 / 0.9.24）把它理解反了，改成跟 lead 反而冻结了拖尾
+            // —— 这正是「单行没有跟随」的真正原因。
             //
-            // 修正：快速路径也用 lead 判定。多花一次 hasSelection()，
-            // 但那是 cheap 调用（不是 visualPositionToXY）。
-            VisualPosition followVp = followPositionOf(
-                    editor.getCaretModel().getPrimaryCaret());
+            // 这里恢复为 getVisualPosition()（与 0.9.21 一致）。
+            VisualPosition vp = editor.getCaretModel().getVisualPosition();
             if (!forceResync && cameraTrail != null && cameraTrail.isInitialized()
-                    && cameraTrail.isAt(followVp.line, followVp.column,
+                    && cameraTrail.isAt(vp.line, vp.column,
                             editor.getDocument().getModificationStamp())) {
                 // 【多光标补充】主光标没变，但光标集合可能变了（Alt+拖拽新增、
                 // 平台合并、Alt+点击移除）。这些情况由 caretAdded/Removed 事件
@@ -1416,12 +1412,11 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 尺寸是单个光标）。这里取该行选区起点的像素坐标，
                     // 尺寸用单字符 (width, height) —— 不合并成整块。
                     //
-                    // 【自检修正】块选区也要跟随选区活动端：用 blockEnds[i] 而不是
-                    // blockStarts[i]。用户原来点的是「覆盖右边的字符」——
-                    // 起点是固定的，移动的是终点。
-                    caretOff = (blockEnds != null && i < blockEnds.length)
-                            ? blockEnds[i]
-                            : blockStarts[i];
+                    // 【实测修正】块选区跟 blockStarts[i]。
+                    //
+                    // 依据：普通选区实测 vp 是活动端。块选区与之一致 ——
+                    // caret 落在起始列那侧，随 Shift+方向键移动的是该列。
+                    caretOff = blockStarts[i];
                     try {
                         blockLine = editor.getDocument().getLineNumber(blockStarts[i]);
                         cvp = editor.offsetToVisualPosition(caretOff);
@@ -1434,8 +1429,8 @@ public class CaretAnimator implements Disposable, CaretListener {
                     targetCy = 0;
                 } else {
                     Caret caret = carets.get(i);
-                    // 有选区跟 lead（活动端），否则跟 caret —— 见 leadOrCaretPosition 说明
-                    cvp = followPositionOf(caret);
+                    // 【实测修正】getVisualPosition() 就是活动端（见上方说明）
+                    cvp = caret.getVisualPosition();
                     caretOff = caret.getOffset();
                     targetCx = 0;               // 普通光标分支不用这两个值
                     targetCy = 0;
