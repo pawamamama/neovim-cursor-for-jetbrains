@@ -1826,6 +1826,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 切任何预设 k 都保持用户上次拖出来的值 → 三个预设手感实际完全相同。
         // 用户原话：「切换预设手感动效没回来」「怎么切换都覆盖不了」。
         s.stretchRatioK = p.stretchRatioK();
+        com.github.yyyolo7a79.neovidecursor.ui.CursorDiag.presetApplied(
+                p.name(), s.stretchRatioK, s.animationLength, s.shortAnimationLength);
     }
 
     /** 把 6 个值写回 State（glowLayers 是整数：四舍五入，不截断）。 */

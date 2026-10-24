@@ -708,6 +708,8 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void caretAdded(@NotNull CaretEvent event) {
         forceResync = true;
         wakeUp();
+        CursorDiag.caretCountChanged(editor.getCaretModel().getAllCarets().size() - 1,
+                editor.getCaretModel().getAllCarets().size(), "added");
     }
 
     /**
@@ -720,6 +722,8 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void caretRemoved(@NotNull CaretEvent event) {
         forceResync = true;
         wakeUp();
+        CursorDiag.caretCountChanged(editor.getCaretModel().getAllCarets().size() + 1,
+                editor.getCaretModel().getAllCarets().size(), "removed/merged");
     }
 
     @Override

@@ -31,9 +31,67 @@ import com.intellij.openapi.diagnostic.Logger;
  * <p>设置面板「诊断日志」复选框，或 {@code -Dneovide.cursor.diag=true}。
  * 默认关闭，每 15 帧采样一次。
  */
-final class CursorDiag {
+public final class CursorDiag {
 
     private static final Logger LOG = Logger.getInstance("neovide-cursor-diag");
+
+    /**
+     * 诊断日志的独立文件路径。
+     *
+     * <p><b>为什么不用 idea.log</b>：混在 IDEA 主日志里，
+     * 我需要用户复制粘贴才能看到 —— 慢且容易漏。
+     * 写到独立文件后，我直接读盘即可。
+     *
+     * <p>位置：{@code <config>/neovide-cursor-diag.log}
+     * 也就是 {@code %APPDATA%JetBrainsIntelliJIdea2026.1
+eovide-cursor-diag.log}
+     */
+    static java.nio.file.Path diagFile() {
+        try {
+            com.intellij.openapi.application.PathManager pm = null;
+            java.lang.reflect.Method m = com.intellij.openapi.application.PathManager.class
+                    .getMethod("getConfigPath");
+            Object v = m.invoke(null);
+            if (v instanceof String) {
+                return java.nio.file.Paths.get((String) v, "neovide-cursor-diag.log");
+            }
+        } catch (Throwable ignored) {
+        }
+        return java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"),
+                "neovide-cursor-diag.log");
+    }
+
+    /** 当前日志文件句柄（懒开，append 模式） */
+    private static java.io.PrintWriter fileWriter;
+    private static boolean fileTried;
+
+    private static void writeFile(String line) {
+        if (!fileTried) {
+            fileTried = true;
+            try {
+                java.nio.file.Path f = diagFile();
+                java.nio.file.Files.createDirectories(f.getParent());
+                // 【每次启动清空】避免历史日志混入，每次排查都是干净的
+                fileWriter = new java.io.PrintWriter(
+                        java.nio.file.Files.newBufferedWriter(f,
+                                java.nio.charset.StandardCharsets.UTF_8,
+                                java.nio.file.StandardOpenOption.CREATE,
+                                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING));
+            } catch (Throwable t) {
+                emit("neovide-cursor: 无法写独立诊断文件 " + t);
+            }
+        }
+        if (fileWriter != null) {
+            fileWriter.println(line);
+            fileWriter.flush();       // 立即落盘，崩溃也能看到
+        }
+    }
+
+    /** 统一出口：同时写 idea.log 和独立文件 */
+    private static void emit(String line) {
+        LOG.info(line);
+        writeFile(line);
+    }
 
     static final String PROP_ENABLED = "neovide.cursor.diag";
     static final String PROP_SAMPLE = "neovide.cursor.diag.sample";
@@ -51,7 +109,7 @@ final class CursorDiag {
     }
 
     /** 当前是否启用：设置项或系统属性，任一为真。 */
-    static boolean enabled() {
+    public static boolean enabled() {
         if (Boolean.getBoolean(PROP_ENABLED)) {
             return true;
         }
@@ -85,7 +143,7 @@ final class CursorDiag {
         boolean offsetSane = maxOffset >= 0 && maxOffset <= MAX_REASONABLE_OFFSET;
         boolean settled = maxOffset <= SETTLED_EPSILON;
 
-        LOG.info("[trail] " + idx + "/" + total
+        emit("[trail] " + idx + "/" + total
                 + " mode=" + mode
                 + " line=" + line
                 + " cx=" + f(cx) + " cy=" + f(cy)
@@ -135,7 +193,7 @@ final class CursorDiag {
             }
         }
 
-        LOG.info("[frame] #" + frameSeq
+        emit("[frame] #" + frameSeq
                 + " carets=" + caretCount + " trails=" + trailCount
                 + " layers=" + glowLayersNow
                 + fpsText
@@ -159,7 +217,7 @@ final class CursorDiag {
         boolean rightward = caretOffset >= leadOffset;
         boolean i6Ok = rightward ? "ENDS".equals(which) : "STARTS".equals(which);
 
-        LOG.info("[pick] caret=" + caretOffset + " lead=" + leadOffset
+        emit("[pick] caret=" + caretOffset + " lead=" + leadOffset
                 + " 方向=" + (rightward ? "向右扩" : "向左扩")
                 + " 选了=" + which
                 + " offset=" + chosenOffset
@@ -173,7 +231,7 @@ final class CursorDiag {
             return;
         }
         boolean i7Ok = "VP".equals(used);
-        LOG.info("[caret] " + tag
+        emit("[caret] " + tag
                 + " hasSel=" + hasSelection
                 + " vp=" + vp + " lead=" + lead
                 + " used=" + used
@@ -185,7 +243,7 @@ final class CursorDiag {
         if (!enabled()) {
             return;
         }
-        LOG.info("[block] count=" + count
+        emit("[block] count=" + count
                 + " starts=" + startsHead
                 + " ends=" + endsHead);
     }
@@ -248,7 +306,7 @@ final class CursorDiag {
         long elapsed = now - fpsWindowStart;
         if (elapsed >= FPS_WINDOW_NANOS) {
             double fps = fpsFrameCount * 1e9 / elapsed;
-            LOG.info(String.format(
+            emit(String.format(
                     "[fps] %.1f 帧/秒  光标=%d  拖尾=%d  辉光层=%d",
                     fps, trailCount, trailCount, glowLayers));
             fpsWindowStart = now;
@@ -260,5 +318,59 @@ final class CursorDiag {
     static void fpsReset() {
         fpsWindowStart = 0;
         fpsFrameCount = 0;
+    }
+
+    // ==================== 覆盖性补充 ====================
+
+    /**
+     * 光标数变化（多光标增删/合并）—— 这是排查「光标乱套」的第一现场。
+     *
+     * <p>以前只在 idea.log 里靠 frameSummary 的 carets=N 间接推断，
+     * 但看不到「从几个变成几个、什么时候变的」。
+     */
+    public static void caretCountChanged(int before, int after, String reason) {
+        if (!enabled()) {
+            return;
+        }
+        emit("[carets] " + before + " → " + after + "  (" + reason + ")");
+    }
+
+    /**
+     * 设置变更 —— 排查「改了没生效」时，先确认值到底有没有变。
+     *
+     * @param key   字段名
+     * @param from  旧值
+     * @param to    新值
+     */
+    public static void configChanged(String key, Object from, Object to) {
+        if (!enabled()) {
+            return;
+        }
+        emit("[config] " + key + ": " + from + " → " + to);
+    }
+
+    /**
+     * 预设切换 —— 排查「切预设手感没变」的直接证据。
+     */
+    public static void presetApplied(String presetName, float stretchRatioK,
+                              float animationLength, float shortAnimationLength) {
+        if (!enabled()) {
+            return;
+        }
+        emit(String.format("[preset] %s  k=%.1f anim=%.2f short=%.2f",
+                presetName, stretchRatioK, animationLength, shortAnimationLength));
+    }
+
+    /**
+     * 异常兜底 —— 任何被 catch 吞掉的异常都要留痕。
+     *
+     * <p>纪律：异常不许静默。诊断开启时至少写一行。
+     */
+    public static void swallowed(String where, Throwable t) {
+        if (!enabled()) {
+            return;
+        }
+        emit("[error] " + where + ": " + t.getClass().getSimpleName()
+                + (t.getMessage() == null ? "" : " — " + t.getMessage()));
     }
 }
