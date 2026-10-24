@@ -60,20 +60,5 @@ $code = $LASTEXITCODE
 
 Write-Host ''
 Write-Host "输出存档：$log"
-if ($code -ne 0) {
-    # 【2026-10-23 多光标改造期间的已知破损 —— 不是产品缺陷】
-    #
-    # refreshTarget 从「单光标字段」改为「Map<Caret, SpringTrail>」后，
-    # 本探针需要适配 60+ 处反射访问。已适配大部分（30 项 → 23 项通过），
-    # 剩余 6 项卡在基线建立顺序上：
-    #   A2  forceResync 优先放行
-    #   A5/A5b 连续中间态上界放行
-    #   A9b/A9c/A9d 快速路径零昂贵调用
-    #
-    # 判定依据：这 6 项在改造【之前】全部通过，改造【之后】方法体逻辑未变
-    # （IME 几何判据一字未改），失败源于探针的 mock 基线建立顺序与新结构不匹配。
-    # 因此设为警告而非失败，并在此明确记录 —— 不伪装成通过。
-    Write-Warning "IME 探针 6 项因多光标改造未适配完成（见本脚本注释），不计入失败"
-    exit 0
-}
+if ($code -ne 0) { throw "F1-c 判据验证失败（exit $code）" }
 Step 'ALL OK（29 项边界全通过）'

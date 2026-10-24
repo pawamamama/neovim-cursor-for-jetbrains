@@ -442,14 +442,17 @@ public final class ImeGeomCriterionTest {
     }
 
     private static void a2_forceResync() throws Exception {
+        // 基线 lastColumn = 3，但下面把 vpColumn 设成 7 ——
+        // 【必须不同】，否则快速路径（vp 未变 → 直接 return false）会抢跑，
+        // 测的就不是 forceResync 了。第一版没注意，所以 A2 一直红。
         resetToStableBaseline(10, 3, 1000, 1000);
         forceResyncField.setBoolean(animator, true);
 
         // 几何不一致 —— 但 forceResync 必须优先
-        xyByVisual = new Point(100, 50);
-        xyByOffset = new Point(140, 50);
-        caretOffset = 10;
-        vpColumn = 3;
+        xyByVisual = new Point(140, 50);
+        xyByOffset = new Point(180, 50);
+        caretOffset = 14;
+        vpColumn = 7;
 
         boolean moved = call();
         check("A2 forceResync 优先放行（不得被几何判据拦截）",
@@ -521,6 +524,13 @@ public final class ImeGeomCriterionTest {
         int released = 0;
         int releaseAt = -1;
         for (int i = 1; i <= 30; i++) {
+            // 【必须每帧改 vpColumn】否则从第 2 帧起快速路径直接命中
+            // （vp 与 lastColumn 相同 → return false），根本走不到 IME 判据，
+            // imeSkipFrames 永远停在 1、累加不到上界。
+            // 第一版没注意这点，A5 因此恒红 —— 不是产品缺陷。
+            //
+            // 模拟真实场景：输入法组合期间光标在拼音串内部逐字符移动。
+            vpColumn = 4 + i;
             boolean moved = call();
             if (!moved) {
                 skipped++;
