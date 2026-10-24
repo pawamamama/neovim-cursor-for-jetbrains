@@ -80,7 +80,7 @@ https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/04
 | 能力 | 上游 | **本版** |
 |---|---|---|
 | 拖尾 / 辉光 / 残影 | ✅ | ✅ |
-| 多光标 | ✅ | ❌ 见[已知缺陷](#已知缺陷) |
+| 多光标 | ✅ | ✅ **0.9.32 起支持** |
 | 保留原生光标 | ✅ | ⚠️ 默认关闭（见缺陷 2） |
 | **设置面板** | ❌ 改代码 | ✅ **11 个滑块 + 7 个复选框** |
 | **持久化** | ❌ | ✅ 存进 IDE 配置 |
@@ -158,8 +158,8 @@ isShortJump = sameLine && charsMoved <= typingMaxChars(3);
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 `
-  -Version 0.9.14 `
-  -OutName neovide-cursor-0.9.14.jar `
+  -Version 0.9.32 `
+  -OutName neovide-cursor-0.9.32.jar `
   -BaseJar "<path-to-any-idea-plugin-jar>"
 ```
 
@@ -224,10 +224,10 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 `
 
 > 如实记录，不粉饰。
 
-### 1. 多光标不支持
+### 1. 残影模式仍是单光标
 
-上游有（`Map<Caret, SpringTrail>`），本版只画主光标。
-**Alt + 拖拽列选时，只有主光标有拖尾。**
+拖尾（弹簧）模式已完整支持多光标；**残影模式只跟主光标**。
+`AfterimageTrail` 是「单条历史轨迹」模型，多光标需要每光标一条轨迹 + 各自淘汰。
 
 ### 2. 保留原生光标时可能"两个光标"
 

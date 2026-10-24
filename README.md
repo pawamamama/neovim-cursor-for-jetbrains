@@ -57,7 +57,7 @@ Built on [yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyy
 | Capability | Upstream | **This edition** |
 |---|---|---|
 | Trail / glow / afterimage | ✅ | ✅ |
-| Multi-cursor | ✅ | ❌ see [Known Issues](#known-issues) |
+| Multi-cursor | ✅ | ✅ **supported since 0.9.32** |
 | Keep native caret | ✅ | ⚠️ off by default (issue 2) |
 | **Settings panel** | ❌ edit code | ✅ **11 sliders + 7 checkboxes** |
 | **Persistence** | ❌ | ✅ saved into IDE config |
@@ -136,8 +136,8 @@ Computed by the pure function `deriveTrailFactors(k, smooth)`.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 `
-  -Version 0.9.14 `
-  -OutName neovide-cursor-0.9.14.jar `
+  -Version 0.9.32 `
+  -OutName neovide-cursor-0.9.32.jar `
   -BaseJar "<path-to-any-idea-plugin-jar>"
 ```
 
@@ -202,10 +202,9 @@ Want to keep a configuration? Click "New preset" and give it a name.
 
 > Documented honestly, no sugar-coating.
 
-### 1. No multi-cursor support
+### 1. Afterimage mode is still single-cursor
 
-Upstream has it (`Map<Caret, SpringTrail>`); this edition only draws the primary caret.
-**With Alt+drag column selection, only the primary caret gets a trail.**
+The spring (trail) mode fully supports multiple cursors; **afterimage mode only follows the primary caret**.
 
 ### 2. Native caret mode can look like "two carets"
 
