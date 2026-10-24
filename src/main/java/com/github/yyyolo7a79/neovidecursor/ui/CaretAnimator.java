@@ -260,6 +260,17 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private SpringTrail cameraTrail;
 
+    /**
+     * 块选区的固定 key。
+     *
+     * <p>块选区恒定只有 1 个拖尾（一个整体矩形），因此用常量 key ——
+     * 选区扩大/缩小时 key 不变，同一个拖尾继续拉伸，
+     * 这是「一整个斜阶梯」观感的物理前提。
+     *
+     * <p>取一个不可能与 {@code Caret} 对象碰撞的字符串常量。
+     */
+    private static final Object BLOCK_SELECTION_KEY = new Object();
+
     /** 多光标上限：防止「全选文件」时创建上万条拖尾 */
     private static final int MAX_TRAILS = 64;
 
@@ -1199,8 +1210,19 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             boolean useBlock = blockStarts != null && blockStarts.length > 1;
 
+            // 【块选区 = 1 个矩形，不是 N 个竖条】
+            //
+            // 用户反馈：「相邻行合并我说是多行统一一个矩形你明白吗，
+            // 而且 6 行的话前三个走的慢后三个走得快，拉伸的时候列不一致
+            // 也不像原版 vscode 那样是一整个斜阶梯」
+            //
+            // 第一版把块选区展开成 N 个 SpringTrail，每行一个 —— 每行的
+            // 四角弹簧状态各不相同，于是速度不一致、列偏移不一致。
+            //
+            // 现在：块选区只产生【1 个】SpringTrail，四角 = 整个选区的包围盒。
+            // 拖动时整块一起被拉成平行四边形，与 VS Code 一致。
             int count = useBlock
-                    ? Math.min(blockStarts.length, MAX_TRAILS)
+                    ? 1
                     : Math.min(carets.size(), MAX_TRAILS);
             boolean changed = count != activeTrails.size();
 
@@ -1220,19 +1242,18 @@ public class CaretAnimator implements Disposable, CaretListener {
                 //
                 // 正确做法：用「行号」当 key —— 行号在行内编辑时不变，
                 // 只在真正增删行时才变，那才是「光标换了位置」。
-                Object key;
-                if (useBlock) {
-                    int lineNo = -1;
-                    try {
-                        lineNo = editor.getDocument().getLineNumber(blockStarts[i]);
-                    } catch (Throwable ignored) { }
-                    // 行号取不到时退回 offset（至少不会全长一样）
-                    key = (lineNo >= 0)
-                            ? Integer.valueOf(-1000000 - lineNo)   // 负数区间，避免与 Caret 冲突
-                            : Integer.valueOf(blockStarts[i]);
-                } else {
-                    key = carets.get(i);
-                }
+                // 【块选区用固定 key】
+                //
+                // 审查发现的缺陷：第一版用「选区首行行号」当 key。
+                // 但用户 Alt+向上拖拽扩大选区时，**首行会变** → key 变 →
+                // 被当成新光标 → 重建 SpringTrail → 拖尾跳变。
+                //
+                // 既然块选区恒定只有 1 个拖尾（一个整体矩形），
+                // 就该用**固定常量 key** —— 选区怎么变都是同一个拖尾在拉伸，
+                // 这正是「一整个斜阶梯」的物理前提。
+                Object key = useBlock
+                        ? BLOCK_SELECTION_KEY
+                        : carets.get(i);
                 SpringTrail trail = trails.get(key);
                 if (trail == null) {
                     trail = new SpringTrail(config);
@@ -1263,22 +1284,51 @@ public class CaretAnimator implements Disposable, CaretListener {
                 trail.lastSeenFrame = frameSeq;
                 activeTrails.add(trail);
 
-                // 块选区用 offset 定位（每行一个），普通光标用 Caret
-                VisualPosition cvp;
+                // 块选区：用【整个选区的包围盒】定位（1 个矩形）
+                // 普通光标：用 Caret
                 int caretOff;
+                VisualPosition cvp;
+                double targetW = width;
+                double targetH = height;
+                double targetCx;
+                double targetCy;
+                int blockLine = -1;
+
                 if (useBlock) {
-                    caretOff = blockStarts[i];
+                    // 取选区首尾两行的像素位置，算出包围盒
+                    caretOff = blockStarts[0];
+                    int lastOff = blockStarts[blockStarts.length - 1];
                     try {
+                        Point firstPt = editor.offsetToXY(caretOff);
+                        Point lastPt = editor.offsetToXY(lastOff);
+                        blockLine = editor.getDocument().getLineNumber(caretOff);
+
+                        double charW = Math.max(1.0, com.intellij.openapi.editor.ex.util.EditorUtil
+                                .getPlainSpaceWidth(editor));
+                        double[] box = blockSelectionBounds(blockStarts, blockEnds,
+                                charW, height);
+                        if (box != null) {
+                            // box = [minX, minY, maxX, maxY]（相对坐标）
+                            targetW = Math.max(1.0, box[2] - box[0]);
+                            targetH = Math.max(1.0, box[3] - box[1]);
+                        }
+                        // 中心 = 首行起点 与 末行起点 的中点再向右半宽
+                        targetCx = firstPt.x + targetW / 2.0;
+                        targetCy = (firstPt.y + lastPt.y) / 2.0 + height / 2.0;
                         cvp = editor.offsetToVisualPosition(caretOff);
                     } catch (Throwable t) {
                         cvp = editor.getCaretModel().getVisualPosition();
+                        targetCx = cvp != null ? 0 : 0;
+                        targetCy = 0;
                     }
                 } else {
                     Caret caret = carets.get(i);
                     cvp = caret.getVisualPosition();
                     caretOff = caret.getOffset();
+                    targetCx = 0;               // 普通光标分支不用这两个值
+                    targetCy = 0;
                 }
-                trail.currentLine = cvp.line;
+                trail.currentLine = (useBlock && blockLine >= 0) ? blockLine : cvp.line;
 
                 // 快速路径：视觉位置 + 文档修改戳都没变就跳过坐标换算。
                 // resync / forceResync 时强制重算全部光标。
@@ -1291,8 +1341,28 @@ public class CaretAnimator implements Disposable, CaretListener {
                     trail.markAt(cvp.line, cvp.column, stamp);
                     int charsMoved = trail.updateCharsMoved(caretOff);
                     trail.applyCharsMoved(charsMoved);
-                    if (trail.setTarget(cp.x + width / 2.0, cp.y + height / 2.0,
-                            width, height)) {
+
+                    // 【块选区用包围盒，普通光标用单字符尺寸】
+                    //
+                    // 第一版这里对两者都用 (cp.x + width/2, cp.y + height/2, width, height)，
+                    // 即"单个字符宽的竖条"。块选区因此退化成 N 个竖条（甚至只有 1 条）。
+                    // 现在块选区改用 targetW/targetH/targetCx/targetCy（整个选区矩形）。
+                    double cx;
+                    double cy;
+                    double w;
+                    double h;
+                    if (useBlock) {
+                        cx = targetCx;
+                        cy = targetCy;
+                        w = targetW;
+                        h = targetH;
+                    } else {
+                        cx = cp.x + width / 2.0;
+                        cy = cp.y + height / 2.0;
+                        w = width;
+                        h = height;
+                    }
+                    if (trail.setTarget(cx, cy, w, h)) {
                         changed = true;
                     }
                 } else {
@@ -2025,5 +2095,56 @@ public class CaretAnimator implements Disposable, CaretListener {
             return 1f;
         }
         return s;
+    }
+
+    /**
+     * 计算块选区的【整体包围盒】—— 块选区必须是**一个**矩形，不是每行一个小竖条。
+     *
+     * <p><b>用户反馈（2026-10-24 第三轮）</b>：
+     * 「相邻行合并我说是多行统一一个矩形你明白吗，而且 6 行的话前三个走的慢
+     * 后三个走得快，就是拉伸的时候列不一致也不像原版 vscode 那样是一整个斜阶梯」
+     *
+     * <p><b>第一版错在哪</b>：把块选区展开成 N 个独立 {@code SpringTrail}。
+     * 每行的四角弹簧状态各不相同，于是：
+     * <ul>
+     *   <li>拉伸时各行速度不一致（前三个慢、后三个快）</li>
+     *   <li>列的偏移不一致 → 不是整齐的斜阶梯</li>
+     *   <li>视觉上是 N 个竖条，不是一个矩形</li>
+     * </ul>
+     *
+     * <p><b>正确做法</b>：块选区是**一个矩形区域**，用<b>一个</b> SpringTrail。
+     * 四角 = 该区域的包围盒四角。拖动时整个矩形一起被拉伸成平行四边形，
+     * 与 VS Code 原版一致。
+     *
+     * @param starts     每行选区起点的 offset
+     * @param ends       每行选区终点的 offset
+     * @param charWidth  字符宽（像素）
+     * @param lineHeight 行高（像素）
+     * @return {@code [minX, minY, maxX, maxY]}；输入为空返回 null
+     */
+    public static double[] blockSelectionBounds(int[] starts, int[] ends,
+                                                double charWidth, double lineHeight) {
+        if (starts == null || starts.length == 0) {
+            return null;
+        }
+
+        // 选区的列跨度：用「最长一行的跨度」当宽度。
+        // 块选区的列宽度对每一行相同（这正是"块"的含义），
+        // 取最大值可覆盖边界情况（末行可能不足）。
+        int maxSpan = 1;
+        for (int i = 0; i < starts.length; i++) {
+            int e = (ends != null && i < ends.length) ? ends[i] : starts[i] + 1;
+            int span = Math.max(1, e - starts[i]);
+            if (span > maxSpan) {
+                maxSpan = span;
+            }
+        }
+
+        double x = 0.0;                       // 列位置由调用方用 offsetToXY 提供
+        double y = 0.0;
+        double width = maxSpan * charWidth;
+        double height = starts.length * lineHeight;
+
+        return new double[]{x, y, x + width, y + height};
     }
 }
