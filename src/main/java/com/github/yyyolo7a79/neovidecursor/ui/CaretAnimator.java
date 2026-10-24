@@ -1206,16 +1206,56 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             activeTrails.clear();
             for (int i = 0; i < count; i++) {
-                // 块选区时用 offset 构造伪 Caret key（普通光标直接用真 Caret）
-                // 块选区用 Integer（HashMap 下按值判等，不受装箱缓存范围影响）
-                Object key = useBlock ? Integer.valueOf(blockStarts[i]) : carets.get(i);
+                // 【块选区的 key 必须用「行号」，不能用 offset】
+                //
+                // 用户实测（2026-10-24）：「多光标不支持中文，表现为最后一行输出、
+                // 其他不动，按 tab 时候感觉光标要重定位」。
+                //
+                // 根因：第一版用 blockStarts[i]（offset）当 key。输入中文后
+                // 每一行的 offset 都会变（多了一个字符），key 随之变化 →
+                // 被当成「新光标」→ 每帧重建 SpringTrail →
+                //   · 旧拖尾被丢弃（其他行"不动"）
+                //   · 新拖尾走 startFrom（"重定位"的观感）
+                //   · 只有最后一行（offset 恰好没变或重建后位置对）看起来正常
+                //
+                // 正确做法：用「行号」当 key —— 行号在行内编辑时不变，
+                // 只在真正增删行时才变，那才是「光标换了位置」。
+                Object key;
+                if (useBlock) {
+                    int lineNo = -1;
+                    try {
+                        lineNo = editor.getDocument().getLineNumber(blockStarts[i]);
+                    } catch (Throwable ignored) { }
+                    // 行号取不到时退回 offset（至少不会全长一样）
+                    key = (lineNo >= 0)
+                            ? Integer.valueOf(-1000000 - lineNo)   // 负数区间，避免与 Caret 冲突
+                            : Integer.valueOf(blockStarts[i]);
+                } else {
+                    key = carets.get(i);
+                }
                 SpringTrail trail = trails.get(key);
                 if (trail == null) {
                     trail = new SpringTrail(config);
-                    // 从最近的已初始化光标起飞（不是遍历顺序的前一个）
-                    SpringTrail source = nearestInitializedTrail(trails);
-                    if (source != null) {
-                        trail.startFrom(source);
+                    // 【块选区不做出场动画，直接各自吸附】
+                    //
+                    // 用户反馈：「第一行拖尾长，最后一行短」。
+                    //
+                    // 根因：块选区第一版让所有新光标都 startFrom(最近的光标)，
+                    // 而 startFrom 是「复制源的当前形状」—— 源在 (x0,y0)、
+                    // 新光标在 (x0,y1)，复制过来的四角相对自己目标点是错的，
+                    // 于是各行的初始拖尾长度不一致（第一行先建、状态最新，
+                    // 后面几个复制到的是"陈旧形状"）。
+                    //
+                    // 正确做法：块选区的每行光标是【同时出现】的，
+                    // 不该有先来后到。让它们各自吸附到目标位置即可。
+                    //
+                    // 普通多光标（Alt+点击新增）仍保留 startFrom ——
+                    // 那种场景用户是"逐个添加"的，从邻居滑出符合直觉。
+                    if (!useBlock) {
+                        SpringTrail source = nearestInitializedTrail(trails);
+                        if (source != null) {
+                            trail.startFrom(source);
+                        }
                     }
                     trails.put(key, trail);
                     changed = true;
@@ -1238,6 +1278,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     cvp = caret.getVisualPosition();
                     caretOff = caret.getOffset();
                 }
+                trail.currentLine = cvp.line;
 
                 // 快速路径：视觉位置 + 文档修改戳都没变就跳过坐标换算。
                 // resync / forceResync 时强制重算全部光标。
@@ -1283,6 +1324,22 @@ public class CaretAnimator implements Disposable, CaretListener {
             if (activeTrails.isEmpty()) {
                 logSlowRefresh(startedNanos, false);
                 return false;
+            }
+
+            // 【视觉分组：相邻行归为一组】
+            //
+            // 用户需求：「假如 123 行是在一起的，5 行独立一个，这样可以避免串扰」。
+            //
+            // 同组内共用一个辉光强度（取组内最大），组间互不影响。
+            // 这样相邻行的辉光不会被"拆成几个独立光晕"，而是呈现为一个整体。
+            int n = activeTrails.size();
+            int[] lines = new int[n];
+            for (int i = 0; i < n; i++) {
+                lines[i] = activeTrails.get(i).currentLine;
+            }
+            int[] groups = groupAdjacentLines(lines);
+            for (int i = 0; i < n; i++) {
+                activeTrails.get(i).groupId = groups[i];
             }
 
             // 辉光半径与重绘余量随光标尺寸同步更新
@@ -1438,7 +1495,7 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
     private boolean tickSpring(double dt, long now) {
-        // 多光标：逐光标推进物理，各自算各自的辉光强度
+        // 多光标：逐光标推进物理
         boolean anyAnimating = false;
         double maxOffset = 0;
         for (SpringTrail trail : activeTrails) {
@@ -1447,6 +1504,29 @@ public class CaretAnimator implements Disposable, CaretListener {
             }
             if (trail.maxOffset() > maxOffset) {
                 maxOffset = trail.maxOffset();
+            }
+        }
+
+        // 【按组取最大偏移】—— 消除串扰
+        //
+        // 用户反馈：「多光标下输入输出快速按感觉有的撕裂」。
+        //
+        // 根因：第一版直接用全局 maxOffset 驱动所有光标，于是
+        // 「一个光标在动」会拉长「所有光标」的辉光淡出状态，
+        // 相邻行之间互相干扰。
+        //
+        // 现在：同组内共享组内最大值（相邻行看起来是一个整体），
+        // 不同组各算各的（第 5 行不受 1/2/3 行影响）。
+        int maxGroup = -1;
+        for (SpringTrail trail : activeTrails) {
+            if (trail.groupId > maxGroup) {
+                maxGroup = trail.groupId;
+            }
+        }
+        double[] groupMaxOffset = new double[maxGroup + 1];
+        for (SpringTrail trail : activeTrails) {
+            if (trail.maxOffset() > groupMaxOffset[trail.groupId]) {
+                groupMaxOffset[trail.groupId] = trail.maxOffset();
             }
         }
 
@@ -1496,7 +1576,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
-            float trailGlow = glowStrengthFor(trail, glowStrength, effectiveGlow, fading);
+            // 同组共享组内最大偏移 → 相邻行呈现为一个整体，组间互不影响
+            double offForGlow = groupMaxOffset[trail.groupId];
+            float trailGlow = glowStrengthForValue(offForGlow, effectiveGlow, fading);
             panel.addQuad(
                     new double[]{
                             trail.corners[0].getCurrentX(), trail.corners[1].getCurrentX(),
@@ -1735,6 +1817,8 @@ public class CaretAnimator implements Disposable, CaretListener {
             return effectiveGlow;
         }
         double off = trail.maxOffset();
+        // 注意：调用方已按组传入 trail 自己的偏移；
+        // 若需要组内共享，见 tickSpring 里的 groupMaxOffset 用法。
         float s = (float) ((off - GLOW_FADE_START) / (GLOW_FADE_END - GLOW_FADE_START));
         if (s < 0f) {
             return 0f;
@@ -1882,5 +1966,64 @@ public class CaretAnimator implements Disposable, CaretListener {
             }
         }
         return out;
+    }
+
+    /**
+     * 把「行号数组」分组：相邻行（差 ≤ 1）归为一组。
+     *
+     * <p><b>用户需求</b>：「相邻行感觉绘制成一个大光标可以做吗？但是假如 123 行
+     * 是在一起的，5 行独立一个，这样可以避免串扰」。
+     *
+     * <p>返回与输入等长的数组，元素是组号（从 0 开始）。
+     * 组号按最小行号排序分配，保证「行号小的组组号小」。
+     *
+     * @param lines 每行光标的行号；空数组返回空数组
+     * @return 每项对应的组号
+     */
+    public static int[] groupAdjacentLines(int[] lines) {
+        int n = lines.length;
+        int[] out = new int[n];
+        if (n == 0) {
+            return out;
+        }
+        Integer[] idx = new Integer[n];
+        for (int i = 0; i < n; i++) {
+            idx[i] = i;
+        }
+        java.util.Arrays.sort(idx, (x, y) -> Integer.compare(lines[x], lines[y]));
+
+        int group = -1;
+        int prevLine = Integer.MIN_VALUE;
+        for (int k = 0; k < n; k++) {
+            int i = idx[k];
+            int line = lines[i];
+            if (prevLine == Integer.MIN_VALUE || line - prevLine > 1) {
+                group++;
+            }
+            out[i] = group;
+            prevLine = line;
+        }
+        return out;
+    }
+
+    /**
+     * 由「偏移量」直接算辉光强度（不含 fading 时用 effectiveGlow）。
+     *
+     * <p>与 {@link #glowStrengthFor} 的区别：那个读 trail 自己的 maxOffset，
+     * 这个由调用方显式传入 —— 多光标分组后需要传「组内最大值」，
+     * 让同组光标呈现为同一个整体亮度。
+     */
+    private float glowStrengthForValue(double offset, float effectiveGlow, boolean fading) {
+        if (fading) {
+            return effectiveGlow;
+        }
+        float s = (float) ((offset - GLOW_FADE_START) / (GLOW_FADE_END - GLOW_FADE_START));
+        if (s < 0f) {
+            return 0f;
+        }
+        if (s > 1f) {
+            return 1f;
+        }
+        return s;
     }
 }

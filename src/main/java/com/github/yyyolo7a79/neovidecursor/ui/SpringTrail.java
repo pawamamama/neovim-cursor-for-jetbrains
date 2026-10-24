@@ -84,6 +84,19 @@ final class SpringTrail {
      */
     long lastSeenFrame = -1L;
 
+    /**
+     * 视觉分组号：相邻行（行号连续）的光标归入同一组。
+     *
+     * <p><b>为什么需要分组</b>：多光标时每个光标独立发光，相邻行的辉光会重叠成
+     * 一团、互相串扰。分组后同组共用一个辉光强度（取组内最大值），
+     * 组与组之间仍互不影响 —— 于是「1/2/3 行在一起」看起来是一个整体，
+     * 「5 行独立」是另一个整体。
+     */
+    int groupId = 0;
+
+    /** 本光标当前所在行号（用于分组判定） */
+    int currentLine = -1;
+
     SpringTrail(NeovideConfig config) {
         corners = new TrailCorner[CORNER_RELATIVE.length];
         for (int i = 0; i < CORNER_RELATIVE.length; i++) {
