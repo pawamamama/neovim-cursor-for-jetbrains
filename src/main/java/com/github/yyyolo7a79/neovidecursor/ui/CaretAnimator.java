@@ -315,7 +315,8 @@ public class CaretAnimator implements Disposable, CaretListener {
             if (caret != null && caret.hasSelection()) {
                 VisualPosition lead = caret.getLeadSelectionPosition();
                 VisualPosition vp = caret.getVisualPosition();
-                if (DIAG_SELECTION) {
+                // 限流：每 30 帧一次（原本 4 分钟打了 15457 条，把日志撑爆了）
+                if (DIAG_SELECTION && (frameSeq % 30) == 0) {
                     com.intellij.openapi.diagnostic.Logger.getInstance(CaretAnimator.class)
                             .info("neovide-cursor-diag: hasSelection=true  vp="
                                     + (vp == null ? "null" : vp.line + ":" + vp.column)
@@ -1776,6 +1777,8 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
         panel.beginQuads();
+        // 【诊断】限流打印：每 30 帧一次，看目标位置 vs 实际画出位置
+        boolean diagNow = DIAG_SELECTION && (frameSeq % 30) == 0;
         for (SpringTrail trail : activeTrails) {
             // 同组共享组内最大偏移 → 相邻行呈现为一个整体，组间互不影响
             double offForGlow = groupMaxOffset[trail.groupId];
@@ -1788,6 +1791,15 @@ public class CaretAnimator implements Disposable, CaretListener {
                             trail.corners[0].getCurrentY(), trail.corners[1].getCurrentY(),
                             trail.corners[2].getCurrentY(), trail.corners[3].getCurrentY()},
                     trailGlow);
+            if (diagNow) {
+                com.intellij.openapi.diagnostic.Logger.getInstance(CaretAnimator.class)
+                        .info("neovide-cursor-diag2: 画 corner0X=" + String.format("%.1f", trail.corners[0].getCurrentX())
+                                + " 目标cx=" + String.format("%.1f", trail.centerX)
+                                + " 目标cy=" + String.format("%.1f", trail.centerY)
+                                + " 线=" + trail.currentLine
+                                + " 组=" + trail.groupId
+                                + " 已初始化=" + trail.isInitialized());
+            }
         }
 
         computeTrailBounds(currentBounds);
