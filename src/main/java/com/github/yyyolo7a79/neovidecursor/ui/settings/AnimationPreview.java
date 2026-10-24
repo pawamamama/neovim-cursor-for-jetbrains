@@ -115,8 +115,8 @@ public final class AnimationPreview extends JComponent {
     private int phase;
     /** 中英轮换 */
     private boolean chinese;
-    /** 跨行演示步骤（0=行尾 1=下行行首 2=回行尾） */
-    private int crossStep = -1;
+    /** 跨行演示步骤：0=第1行行尾，1=第2行行首（两步往返） */
+    private int crossStep = 0;
 
     /**
      * 演示串。
@@ -188,7 +188,35 @@ public final class AnimationPreview extends JComponent {
      * <p>现在加两级兜底：IDEA 取不到时，去注册表里找系统等宽字体，
      * 避免盲退到 Java 默认 monospaced（那个在大字号下很难看）。
      */
+    /**
+     * 字体缓存。
+     *
+     * <p><b>【自检发现的性能 bug】</b>：remeasure 每帧都调 editorFont()，
+     * 而兜底分支会执行 {@code GraphicsEnvironment.getAvailableFontFamilyNames()}
+     * —— 那要枚举系统全部字体，实测每帧几十毫秒，直接把 EDT 拖死。
+     *
+     * <p>字体只可能在「IDEA 换了主题字体」时变，不需要每帧重算。
+     * 缓存起来，只在 fontSize 变化时 deriveFont 一次。
+     */
+    private Font cachedBaseFont;
+    private String cachedFontSource;
+
     private Font editorFont() {
+        if (cachedBaseFont != null) {
+            return cachedBaseFont;
+        }
+        cachedBaseFont = loadEditorFont();
+        fontSource = cachedFontSource;
+        return cachedBaseFont;
+    }
+
+    /** 参数变化时清缓存（换主题/换字体后要重新取） */
+    public void invalidateFontCache() {
+        cachedBaseFont = null;
+        cachedFontSource = null;
+    }
+
+    private Font loadEditorFont() {
         // 1) IDEA 编辑器字体（最准）
         try {
             com.intellij.openapi.editor.colors.FontPreferences pref =
@@ -201,12 +229,12 @@ public final class AnimationPreview extends JComponent {
                     if (sp > 0.8f && sp < 3.0f) {
                         editorLineSpacing = sp;
                     }
-                    fontSource = "IDEA:" + family;
+                    cachedFontSource = "IDEA:" + family;
                     return new Font(family, Font.PLAIN, Math.max(MIN_FONT_SIZE, fontSize));
                 }
             }
         } catch (Throwable t) {
-            fontSource = "IDEA 取不到(" + t.getClass().getSimpleName() + ")";
+            cachedFontSource = "IDEA 取不到(" + t.getClass().getSimpleName() + ")";
         }
 
         // 2) 系统等宽字体按优先级挑（JetBrains Mono > Cascadia > Consolas > ...）
@@ -219,13 +247,13 @@ public final class AnimationPreview extends JComponent {
                         .getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
         for (String c : candidates) {
             if (available.contains(c)) {
-                fontSource = "系统:" + c;
+                cachedFontSource = "系统:" + c;
                 return new Font(c, Font.PLAIN, Math.max(MIN_FONT_SIZE, fontSize));
             }
         }
 
         // 3) 最后兜底
-        fontSource = "兜底:Monospaced";
+        cachedFontSource = "兜底:Monospaced";
         return new Font(Font.MONOSPACED, Font.PLAIN, Math.max(MIN_FONT_SIZE, fontSize));
     }
 
@@ -355,18 +383,20 @@ public final class AnimationPreview extends JComponent {
      * 第 2 行不放文字（用户明说「第二行有没有字无所谓的」）。
      */
     private void advanceCross() {
-        // 三步循环：行尾 → 下行行首 → 回行尾
-        crossStep = (crossStep + 1) % 3;
-        if (crossStep == 0) {
-            // 第 1 行行尾
-            centerX = TEXT_X + metrics.stringWidth(CROSS_LINE0) + cursorW / 2;
-            centerY = contentTop() + lineH * 0.5;
-        } else if (crossStep == 1) {
+        // 【自检发现的 bug】原实现用 %3，但 case 0 和 case 2 都是「行尾」，
+        // 所以实际序列是 行尾 → 下行 → 行尾 → 行尾 → 下行 → 行尾…
+        // 换行只在两次里发生一次，看上去像「跳一下又停住」。
+        //
+        // 现在改成【两步往返】：行尾 ⇄ 下行行首。
+        // 这样每次 advance 都产生一次真实的跨行移动，缎带一直有东西可看。
+        crossStep = 1 - crossStep;
+
+        if (crossStep == 1) {
             // 换行：第 2 行第 1 列 —— 正对 i 的正下方
             centerX = TEXT_X + cursorW / 2;
             centerY = contentTop() + lineH * 1.5;
         } else {
-            // 退格回上一行行尾
+            // 退格回第 1 行行尾
             centerX = TEXT_X + metrics.stringWidth(CROSS_LINE0) + cursorW / 2;
             centerY = contentTop() + lineH * 0.5;
         }

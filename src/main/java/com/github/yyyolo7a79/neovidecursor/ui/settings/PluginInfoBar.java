@@ -102,8 +102,9 @@ final class PluginInfoBar {
     private static void doCheck(String currentVersion, JButton check) {
         String latest = null;
         String error = null;
+        HttpURLConnection conn = null;
         try {
-            HttpURLConnection conn = (HttpURLConnection) new URL(API_LATEST).openConnection();
+            conn = (HttpURLConnection) new URL(API_LATEST).openConnection();
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(4000);
             conn.setReadTimeout(4000);
@@ -112,11 +113,20 @@ final class PluginInfoBar {
 
             int code = conn.getResponseCode();
             if (code == 200) {
-                byte[] buf = conn.getInputStream().readAllBytes();
+                // 【自检发现】原来 getInputStream().readAllBytes() 没关闭流，
+                // 每点一次「检查更新」泄漏一个连接。用 try-with-resources 兜住。
+                byte[] buf;
+                try (java.io.InputStream in = conn.getInputStream()) {
+                    buf = in.readAllBytes();
+                }
                 String body = new String(buf, java.nio.charset.StandardCharsets.UTF_8);
                 Matcher m = Pattern.compile("\"tag_name\"\\s*:\\s*\"([^\"]+)\"").matcher(body);
                 if (m.find()) {
                     latest = m.group(1);
+                } else {
+                    // 【自检发现】原来这里不设 error，
+                    // 导致 tooltip 显示「检查失败：null」。给个明确原因。
+                    error = "响应里没有 tag_name（API 格式可能变了）";
                 }
             } else if (code == 404) {
                 error = "仓库暂无 Release";
@@ -124,7 +134,11 @@ final class PluginInfoBar {
                 error = "HTTP " + code;
             }
         } catch (Throwable t) {
-            error = t.getClass().getSimpleName();
+            error = t.getClass().getSimpleName() + ": " + t.getMessage();
+        } finally {
+            if (conn != null) {
+                conn.disconnect();
+            }
         }
 
         final String latestTag = latest;
