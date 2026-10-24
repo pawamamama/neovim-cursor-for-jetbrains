@@ -108,6 +108,56 @@ commit message 必须含这三段。不许只写「fix bug」。
 
 ---
 
+## 四-B、状态字段的三层拷贝（2026-10-24 血泪教训）
+
+**问题**：诊断日志勾选后，一点应用就消失。查了两轮才修完。
+
+**这个 bug 的教训值得单独成节，因为它暴露了一个系统性陷阱：**
+
+### 加一个 State 字段，必须同时改 3 处
+
+| # | 位置 | 漏了会怎样 |
+|---|---|---|
+| 1 | `State` 字段声明 | 编译不过（最容易发现） |
+| 2 | `SettingsField.FIELDS` 表项 | **`apply()` 遍历表时不拷贝 → 一应用就回滚** |
+| 3 | `State.copyFrom()` | **`pending = deepCopy(state)` 时丢值 → 复选框永远不勾** |
+
+**第 2、3 层都是「静默失败」——不报错、不抛异常，只是值不见了。**
+
+我第一次只修了第 2 层，用户说「不能」，才发现还有第 3 层。
+
+### 正确的检查命令（加字段后必跑）
+
+```powershell
+# 检查 State 所有字段是否都在 copyFrom 里
+cd D:\deepseekwork\neovim-cursor-pr
+$f = "src\main\java\...\NeovideCursorSettings.java"
+$src = Get-Content $f -Raw
+$fields = (Select-String -Path $f -Pattern '^    public (boolean|int|float|String) ([a-zA-Z]+) =' |
+    ForEach-Object { $_.Matches[0].Groups[2].Value })
+foreach($n in $fields){
+    if($src -notmatch ("$n = from\.$n")){ Write-Host ("❌ copyFrom 缺: " + $n) }
+}
+```
+
+**没有输出 = 全部字段都在。**
+
+### 同理：SettingsField.FIELDS 也要核对
+
+```powershell
+# State 有但 FIELDS 没有的字段 = apply 永远不拷贝
+```
+
+### 判断一个新字段该怎么接
+
+| 字段类型 | 要改哪些地方 |
+|---|---|
+| 只进 State（如 `diagLogging`） | State + FIELDS（CONFIG 两参传 `null`）+ copyFrom |
+| 同时进 CONFIG（大多数观感参数） | 上面 3 处 + CONFIG 字段 + FIELDS 的 config 映射 |
+| 派生量（如 `trailFactors`） | **不进 FIELDS**，在 `syncStateToConfig()` 里单独派生 |
+
+---
+
 ## 五、当前待办（按优先级）
 
 | # | 事项 | 状态 |
@@ -118,6 +168,7 @@ commit message 必须含这三段。不许只写「fix bug」。
 | 4 | 残影模式多光标 | 待做 |
 | 5 | GitHub 发布追平（当前线上 v0.9.33，本地 0.9.48） | 待做 |
 | 6 | **预览光标大小/长度可配** —— 用户 2026-10-24 记下，以后做 | 待做 |
+| 7 | 多光标辉光降级（F1 降级 / F2 不辉光） | 等 fps 基线实测 |
 
 ---
 
