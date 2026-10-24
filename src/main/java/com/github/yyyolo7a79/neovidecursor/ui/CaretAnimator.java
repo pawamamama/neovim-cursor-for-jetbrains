@@ -294,6 +294,48 @@ public class CaretAnimator implements Disposable, CaretListener {
         return moved;
     }
 
+    /**
+     * 当前应跟随的视觉位置：有选区跟 lead（活动端），否则跟 caret。
+     *
+     * <p>见 {@code refreshTarget()} 里的详细说明：这是「Shift+方向键选区扩展时
+     * 拖尾不跟手」的修复。
+     */
+    private VisualPosition leadOrCaretPosition() {
+        try {
+            CaretModel cm = editor.getCaretModel();
+            Caret primary = cm.getPrimaryCaret();
+            if (primary != null && primary.hasSelection()) {
+                VisualPosition lead = primary.getLeadSelectionPosition();
+                if (lead != null) {
+                    return lead;
+                }
+            }
+        } catch (Throwable ignored) {
+            // 取不到就用 caret 位置，不影响功能
+        }
+        return editor.getCaretModel().getVisualPosition();
+    }
+
+    /**
+     * 给定 Caret 返回应跟随的位置（有选区跟 lead，否则跟 caret）。
+     *
+     * <p>多光标场景下每个 caret 各自判断。
+     */
+    private VisualPosition followPositionOf(Caret caret) {
+        try {
+            if (caret != null && caret.hasSelection()) {
+                VisualPosition lead = caret.getLeadSelectionPosition();
+                if (lead != null) {
+                    return lead;
+                }
+            }
+        } catch (Throwable ignored) {
+            // 退回 caret 位置
+        }
+        return caret != null ? caret.getVisualPosition()
+                : editor.getCaretModel().getVisualPosition();
+    }
+
     /** 多光标上限：防止「全选文件」时创建上万条拖尾 */
     private static final int MAX_TRAILS = 64;
 
@@ -1013,7 +1055,20 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private boolean refreshTarget() {
         try {
-            VisualPosition vp = editor.getCaretModel().getVisualPosition();
+            // 【跟随点：有选区时用选区活动端（lead），否则用 caret 本身】
+            //
+            // 用户反馈（2026-10-24）：「ctrl+shift 左方向键覆盖右边的字符和继续按右边
+            // 回来有动画效果，但如果开头就按右边就完全没有动画 —— 光标不会随着
+            // 选择覆盖，而是留在原地」。
+            //
+            // 根因：我们用 getVisualPosition()，那是 caret 本身的位置。
+            // 按 Shift+→ 扩展选区时，caret 停在选区【起点】不动，
+            // 移动的是 getLeadSelectionPosition()（选区活动端）。
+            // 所以「行首按 Shift+→」时 caret 不动 → 拖尾不动 → 没动画；
+            // 而「按 Shift+←」时 caret 侧会动，于是看起来有动画 —— 正好对上描述。
+            //
+            // 修正：有选区时跟 lead，无选区时跟 caret。
+            VisualPosition vp = leadOrCaretPosition();
 
             // 【快速路径：恢复为顶层早退】
             //
@@ -1352,7 +1407,8 @@ public class CaretAnimator implements Disposable, CaretListener {
                     targetCy = 0;
                 } else {
                     Caret caret = carets.get(i);
-                    cvp = caret.getVisualPosition();
+                    // 有选区跟 lead（活动端），否则跟 caret —— 见 leadOrCaretPosition 说明
+                    cvp = followPositionOf(caret);
                     caretOff = caret.getOffset();
                     targetCx = 0;               // 普通光标分支不用这两个值
                     targetCy = 0;
