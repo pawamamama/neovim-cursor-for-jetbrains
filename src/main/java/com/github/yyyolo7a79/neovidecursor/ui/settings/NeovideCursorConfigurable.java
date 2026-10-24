@@ -816,11 +816,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         paintDiagCheck.addItemListener(e ->
                                 paintDiag = paintDiagCheck.isSelected());
                         diagCell.comment(W_PAINT_DIAG, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
 
-                        // 诊断日志开关（放在最后一个复选框位置，避免打乱既有索引）
+                    // 诊断日志开关 —— 必须【独立一行】。
+                    //
+                    // 曾经把它塞进上面「性能诊断」那一行，结果两行 label 不匹配：
+                    // 行标题写着「性能诊断（跳过重绘，只跑计算）」，下面却有两个复选框，
+                    // 用户看到「诊断那里怎么两个框框」。
+                    g.row("诊断日志（记录光标状态，供开发者排查）", row -> {
+                        row.bottomGap(BottomGap.SMALL);
                         bindCheck(row, () -> pending.diagLogging, v -> pending.diagLogging = v)
-                                .comment("诊断日志（排查多光标/块选区问题时勾选，复现后把 idea.log 发给开发者；"
-                                                + "长期开着会撑大日志）", COMMENT, NO_LINK);
+                                .comment("勾选后每 15 帧往 idea.log 写一条光标状态（caret / block / draw）。"
+                                                + "复现问题后把 idea.log 发给开发者；长期开着会撑大日志。",
+                                        COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
                     return kotlin.Unit.INSTANCE;
