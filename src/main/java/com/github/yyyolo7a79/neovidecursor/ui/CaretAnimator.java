@@ -271,6 +271,29 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private static final Object BLOCK_SELECTION_KEY = new Object();
 
+    /** 块选区的上一帧偏移（用于所有行共享同一个 charsMoved） */
+    private int lastBlockOffset = -1;
+
+    /**
+     * 块选区的字符移动量 —— 所有行共享同一个值。
+     *
+     * <p><b>为什么必须共享</b>：{@code TrailCorner.jump()} 会按 charsMoved 分成
+     * 「短跳」与「跨行」两个分支，两者时长差 2 倍以上。若各行独立计算，
+     * 会出现「有的行短跳、有的行跨行」→ 加速度不均匀。
+     *
+     * <p>块选区在语义上是一次整体移动，所有行移动的字符数必然相同。
+     */
+    private int updateBlockCharsMoved(int caretOffset) {
+        int moved = -1;
+        if (caretOffset >= 0) {
+            if (lastBlockOffset >= 0) {
+                moved = Math.abs(caretOffset - lastBlockOffset);
+            }
+            lastBlockOffset = caretOffset;
+        }
+        return moved;
+    }
+
     /** 多光标上限：防止「全选文件」时创建上万条拖尾 */
     private static final int MAX_TRAILS = 64;
 
@@ -1345,7 +1368,27 @@ public class CaretAnimator implements Disposable, CaretListener {
                 if (needsUpdate) {
                     Point cp = editor.visualPositionToXY(cvp);
                     trail.markAt(cvp.line, cvp.column, stamp);
-                    int charsMoved = trail.updateCharsMoved(caretOff);
+
+                    // 【块选区：所有行必须共享同一个 charsMoved】
+                    //
+                    // 用户反馈（2026-10-24）：「加速度还是不均匀」。
+                    //
+                    // 根因：每行用各自的 caretOff 算 charsMoved。而
+                    // TrailCorner.jump() 会按 charsMoved 分成两个分支：
+                    //   isShortJump = charsMoved <= typingMaxChars(3)  → 短跳
+                    //   否则 → 跨行三档（时长为 animationLength 的 0/0.5/1 倍）
+                    //
+                    // 两档时长差 2 倍以上。若某几行算出 1 个字符、另几行算出 4 个，
+                    // 就会一半走短跳、一半走跨行 —— 加速度自然不一致。
+                    //
+                    // 块选区在语义上是【一次整体移动】，所有行移动的字符数必然相同。
+                    // 因此统一用主行（第 0 行）的移动量。
+                    int charsMoved;
+                    if (useBlock) {
+                        charsMoved = updateBlockCharsMoved(caretOff);
+                    } else {
+                        charsMoved = trail.updateCharsMoved(caretOff);
+                    }
                     trail.applyCharsMoved(charsMoved);
 
                     // 【每个光标都是单字符尺寸的线】（与 VS Code 一致）
