@@ -329,6 +329,16 @@ public final class SettingsField {
                 c -> c.alwaysHighFps, (c, v) -> c.alwaysHighFps = v));
         out.add(bools("overlayFadeOut", s -> s.overlayFadeOut, (s, v) -> s.overlayFadeOut = v,
                 c -> c.overlayFadeOut, (c, v) -> c.overlayFadeOut = v));
+
+        // 【0.9.50 修复 bug：诊断日志勾选后应用即消失】
+        //
+        // 原因：diagLogging 虽然定义在 State 里，但不在本表 → apply() 遍历本表时
+        // 根本不会把它从 pending 拷到 target → 一应用就回滚成旧值。
+        //
+        // CONFIG 两个映射传 null：它不需要进 NeovideConfig
+        // （CursorDiag 直接读 State）。
+        out.add(bools("diagLogging", s -> s.diagLogging, (s, v) -> s.diagLogging = v,
+                null, null));
         out.add(ints("cursorDisappearDelay", s -> s.cursorDisappearDelay, (s, v) -> s.cursorDisappearDelay = v,
                 c -> c.cursorDisappearDelay, (c, v) -> c.cursorDisappearDelay = v));
         out.add(floats("cursorFadeOutDuration", s -> s.cursorFadeOutDuration, (s, v) -> s.cursorFadeOutDuration = v,
