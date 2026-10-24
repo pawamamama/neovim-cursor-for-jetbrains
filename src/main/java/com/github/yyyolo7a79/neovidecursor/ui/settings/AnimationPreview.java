@@ -486,9 +486,17 @@ public final class AnimationPreview extends JComponent {
 
     @Override
     public Dimension getPreferredSize() {
-        // 默认给面板用 520×200；三版对比器会用 setPreferredSize 覆盖。
-        // 字号由 remeasure 按【实际尺寸】自适应，所以尺寸自由。
-        return new Dimension(520, 200);
+        // 【0.9.43 定稿 B 版】
+        //
+        // 依据：三版对比后用户选 B（520×200）。
+        //   单行窗 520×200 → 字号自适应到 37pt（14 个字符放得下）
+        //   跨行窗 260×200 → 字号自适应到 25pt（只需放 "int x = 0;"）
+        //
+        // 跨行窗给半宽：它只演示换行方向，不需要横向空间，
+        // 省下的宽度留给右侧的说明文字。
+        return (mode == Mode.INLINE)
+                ? new Dimension(520, 200)
+                : new Dimension(300, 200);
     }
 
     /** 探针：当前生效字号（验证自适应是否真的按尺寸变） */

@@ -612,19 +612,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
             return BuilderKt.panel(panel -> {
 
+                // ---------- 0. 顶行：左边版本+提示，右边插件信息 ----------
+                //
+                // 【用户要求】「顶行右边有点空 建议这边打个广告 简单介绍一下插件
+                //  然后弄个github跳转 检查更新」
+                //
+                // 用 BorderLayout：WEST 放版本说明，EAST 放 PluginInfoBar。
+                // 这样右侧空白被利用起来，且不挤压左侧的说明文字。
                 panel.row("", row -> {
-                    // 【版本号：用户要求直接可见】
-                    //
-                    // 为什么需要：插件 jar 文件名恒为 jetbrains-neovide-cursor-0.9.8.jar
-                    // （加载机制沿袭，改名有风险），导致「装的是哪一版」无法一眼看出，
-                    // 每次都得解包读 META-INF/plugin.xml。
-                    //
-                    // 来源：PluginManagerCore.getPlugin(PluginId.getId(...)).getVersion()
-                    // —— 这就是 jar 内 plugin.xml 的 <version>，运行时唯一真值。
-                    row.comment("Neovide Cursor v" + pluginVersion()
-                            + " ｜ <b>下方预览窗按当前参数实时渲染，拖动滑块/改颜色会立刻变化</b>；"
-                            + "但真正作用于编辑器仍需点「应用 / OK」。",
-                            COMMENT, NO_LINK);
+                    javax.swing.JPanel bar = new javax.swing.JPanel(
+                            new java.awt.BorderLayout(12, 0));
+                    bar.setOpaque(false);
+
+                    javax.swing.JLabel ver = new javax.swing.JLabel(
+                            "<html>Neovide Cursor v" + pluginVersion()
+                                    + " ｜ 下方预览窗实时渲染，"
+                                    + "拖动滑块/改颜色会立刻变化；"
+                                    + "作用于编辑器仍需点「应用 / OK」</html>");
+                    ver.setForeground(new Color(0x8A8A8A));
+                    ver.setFont(ver.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
+                    bar.add(ver, java.awt.BorderLayout.WEST);
+
+                    bar.add(PluginInfoBar.create(pluginVersion()),
+                            java.awt.BorderLayout.EAST);
+
+                    row.cell(bar);
                     return kotlin.Unit.INSTANCE;
                 });
 
