@@ -610,6 +610,21 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         /** 1. 总开关（与运行期 {@code CONFIG.enabled} 统一后唯一的那一个布尔） */
         public boolean enabled = true;
 
+    /**
+     * 光标诊断日志开关（默认关闭）。
+     *
+     * <p>开启后每 15 帧往 idea.log 打一条 {@code [caret] / [draw] / [block]} 记录，
+     * 用于定位「多光标不跟手」「块选区行为异常」这类问题。
+     *
+     * <p><b>为什么做成设置项而不是 JVM 参数</b>：
+     * {@code -Dneovide.cursor.diag=true} 需要用户改 idea64.exe.vmoptions 再重启，
+     * 对普通用户门槛太高。放在设置面板里勾一下就行。
+     *
+     * <p>性能影响：每 15 帧一次字符串拼接 + 一行日志，可忽略。
+     * 长期开着会撑大 idea.log，排查完建议关掉。
+     */
+    public boolean diagLogging = false;
+
         /** 2. 拖尾渲染模式 */
         public NeovideConfig.TrailMode trailMode = NeovideConfig.TrailMode.SPRING;
 

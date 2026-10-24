@@ -96,8 +96,9 @@ public final class VerifyPanel {
         // 0.9.6 / M1：性能诊断从 Tools 菜单挪进面板「高级（诊断）」折叠组 → 5 变 6。
         // 断言随之更新，语义不变：复选框总数必须等于「面板上的布尔开关」个数
         // （性能诊断是唯一不持久化的那个，见 NeovideCursorConfigurable#paintDiag）。
-        check("U8 6 个复选框（enabled / hideNativeCaret / alwaysHighFps / overlayFadeOut / useShadow / 性能诊断）",
-                checks == 6, "实际 " + checks);
+        // 0.9.28：新增「诊断日志」复选框（CursorDiag 开关）→ 6 变 7。
+        check("U8 7 个复选框（enabled / hideNativeCaret / alwaysHighFps / overlayFadeOut / useShadow / 性能诊断 / 诊断日志）",
+                checks == 7, "实际 " + checks);
         // 0.9.5 的 t3 新增两个预设下拉（动画 / 颜色），加上 trailMode = 3 个。
         check("U9 3 个下拉（trailMode + 动画预设 + 颜色预设）", combos == 3, "实际 " + combos);
         check("U10 2 个 ColorPanel（tailColor / shadowColor）", colors == 2, "实际 " + colors);
@@ -215,7 +216,7 @@ public final class VerifyPanel {
         for (JComponent c : all) {
             if (c instanceof JCheckBox) { boxes.add((JCheckBox) c); }
         }
-        check("U19 复选框数量=6（新增的性能诊断在末位，顺序=构建顺序）", boxes.size() == 6, "实际 " + boxes.size());
+        check("U19 复选框数量=7（性能诊断 + 诊断日志在末位，顺序=构建顺序）", boxes.size() == 7, "实际 " + boxes.size());
 
         String[] names = {"enabled", "hideNativeCaret", "alwaysHighFps", "overlayFadeOut", "useShadow"};
 

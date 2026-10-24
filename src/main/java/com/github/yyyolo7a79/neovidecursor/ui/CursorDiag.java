@@ -47,19 +47,39 @@ final class CursorDiag {
             parseInt(System.getProperty(PROP_SAMPLE), 15);
 
     /**
-     * 是否启用。
+     * 当前是否启用。
      *
-     * <p>用 {@code Boolean.getBoolean} 读系统属性 —— 静态 final，只读一次，
-     * 每帧调用没有开销。
+     * <p><b>两个来源，任一为真即开</b>：
+     * <ol>
+     *   <li><b>设置面板</b>的「诊断日志」复选框（推荐，用户可见可点）</li>
+     *   <li>系统属性 {@code -Dneovide.cursor.diag=true}（开发/自动化用）</li>
+     * </ol>
+     *
+     * <p>为什么不再用静态 final：设置项是运行时可改的，
+     * 勾上应当立刻生效，不必重启。
      */
-    static final boolean ENABLED = Boolean.getBoolean(PROP_ENABLED);
+    static boolean enabled() {
+        if (Boolean.getBoolean(PROP_ENABLED)) {
+            return true;
+        }
+        try {
+            // 设置服务是 application service（NeovideCursorSettings），不是 NeovideConfig。
+            // NeovideConfig 是 run-time 快照，只有 UI 字段，不含 diagLogging。
+            return com.intellij.openapi.application.ApplicationManager
+                    .getApplication()
+                    .getService(com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings.class)
+                    .getState().diagLogging;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     private CursorDiag() {
     }
 
     /** 该帧是否应该采样 */
     static boolean shouldSample(long frameSeq) {
-        return ENABLED && (frameSeq % SAMPLE_EVERY_FRAMES) == 0;
+        return enabled() && (frameSeq % SAMPLE_EVERY_FRAMES) == 0;
     }
 
     /**
@@ -73,7 +93,7 @@ final class CursorDiag {
      */
     static void caretSample(String tag, boolean hasSel,
                             String vp, String lead, String used) {
-        if (!ENABLED) {
+        if (!enabled()) {
             return;
         }
         LOG.info("[caret] tag=" + tag
@@ -89,7 +109,7 @@ final class CursorDiag {
      */
     static void drawSample(String tag, int line, double corner0X,
                            double targetCx, double targetCy, boolean initialized) {
-        if (!ENABLED) {
+        if (!enabled()) {
             return;
         }
         LOG.info("[draw] tag=" + tag
@@ -107,7 +127,7 @@ final class CursorDiag {
      * 都表现为「某几行不动」。
      */
     static void blockSample(int count, String startsHead, String endsHead) {
-        if (!ENABLED) {
+        if (!enabled()) {
             return;
         }
         LOG.info("[block] count=" + count
