@@ -101,9 +101,9 @@ public final class AnimationPreview extends JComponent {
     /** 编辑器行距（来自 FontPreferences；默认 1.5 与 IDEA 一致） */
     private float editorLineSpacing = 1.5f;
 
-    private double cursorW = CURSOR_W_BASE;
+    private double cursorW = 2.0;   // 未测量前的占位，remeasure 会算
 
-    private int fontSize = BASE_FONT_SIZE;
+    private int fontSize = 0;   // 0 = 未测量，remeasure 会填
     private Font codeFont;
     private FontMetrics metrics;
     private float lineH;
@@ -202,7 +202,7 @@ public final class AnimationPreview extends JComponent {
                         editorLineSpacing = sp;
                     }
                     fontSource = "IDEA:" + family;
-                    return new Font(family, Font.PLAIN, BASE_FONT_SIZE);
+                    return new Font(family, Font.PLAIN, Math.max(MIN_FONT_SIZE, fontSize));
                 }
             }
         } catch (Throwable t) {
@@ -220,13 +220,13 @@ public final class AnimationPreview extends JComponent {
         for (String c : candidates) {
             if (available.contains(c)) {
                 fontSource = "系统:" + c;
-                return new Font(c, Font.PLAIN, BASE_FONT_SIZE);
+                return new Font(c, Font.PLAIN, Math.max(MIN_FONT_SIZE, fontSize));
             }
         }
 
         // 3) 最后兜底
         fontSource = "兜底:Monospaced";
-        return new Font(Font.MONOSPACED, Font.PLAIN, BASE_FONT_SIZE);
+        return new Font(Font.MONOSPACED, Font.PLAIN, Math.max(MIN_FONT_SIZE, fontSize));
     }
 
     /**
@@ -486,17 +486,23 @@ public final class AnimationPreview extends JComponent {
 
     @Override
     public Dimension getPreferredSize() {
-        // 【0.9.43 定稿 B 版】
+        // 【0.9.44 改矮】
         //
-        // 依据：三版对比后用户选 B（520×200）。
-        //   单行窗 520×200 → 字号自适应到 37pt（14 个字符放得下）
-        //   跨行窗 260×200 → 字号自适应到 25pt（只需放 "int x = 0;"）
+        // 用户反馈：「展示窗口实际就用一行到两行 其实展示窗口高弄矮一点
+        //            但是别完全贴着输入」。
         //
-        // 跨行窗给半宽：它只演示换行方向，不需要横向空间，
-        // 省下的宽度留给右侧的说明文字。
+        // 所以高度按「内容行数 × 行高 + 上下留白」算，不再固定 200：
+        //   单行窗：1 行内容 → 约 110px
+        //   跨行窗：2 行内容 → 约 175px
+        // 留白 PAD=14 保证不贴边。
+        //
+        // 宽度不变（要放下 16 个字符）。
+        double lineH = Math.max(MIN_FONT_SIZE, fontSize) * 1.5;
+        int contentLines = (mode == Mode.INLINE) ? 3 : 3;  // 留 3 行余地，视觉不挤
+        int h = (int) (lineH * contentLines + PAD * 2);
         return (mode == Mode.INLINE)
-                ? new Dimension(520, 200)
-                : new Dimension(300, 200);
+                ? new Dimension(520, Math.max(96, h))
+                : new Dimension(300, Math.max(96, h));
     }
 
     /** 探针：当前生效字号（验证自适应是否真的按尺寸变） */

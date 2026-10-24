@@ -2437,6 +2437,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return out;
     }
 
+    /**
+     * 探针：某个滑块在 pending 里的【精确刻度值】（未吸附）。
+     *
+     * <p>供探针核对「控件显示值 vs 数据真值」时使用 ——
+     * 必须走面板自己的 {@code spec.readTick}，否则口径会不一致
+     * （例如 shadowBlurFactor 的 readTick 是 sharpnessOf 转换）。
+     */
+    public int sliderExactTickForProbe(int index) {
+        SliderSpec s = bindings.get(index).spec;
+        return s.readTick.applyAsInt(pending);
+    }
+
     /** 探针/调试用：某个滑块的刻度表规格（min/max/step）。 */
     public int[] sliderRangeForProbe(int index) {
         SliderSpec s = bindings.get(index).spec;

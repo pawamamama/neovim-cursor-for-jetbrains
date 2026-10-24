@@ -88,6 +88,7 @@ public final class Probe4Bugs {
         defect1(sliders, labels, conf);
         defect2(sliders);
         defect3(conf);
+        defect5_presetSync(conf);
 
         System.out.println();
         System.out.printf("=== 结果：通过 %d，失败 %d ===%n", pass, fail);
@@ -569,5 +570,97 @@ public final class Probe4Bugs {
             fail++;
             System.out.println("  FAIL  " + name + "   " + detail);
         }
+    }
+
+    // ---------------------------------------------------------------- 缺陷 5
+    /**
+     * 【用户反馈 2026-10-24】「切换预设参数条还是上一个没更新」。
+     *
+     * <p>本缺陷的判据：切换预设后，每个滑块的【视觉值】必须等于
+     * pending 里对应字段的【真值】。不一致 = 控件没回灌 = 用户看到旧参数。
+     *
+     * <p>顺带覆盖「直接用发现光标乱套了」的一半根因：
+     * 如果面板显示的值与实际生效的值不一致，用户就会觉得光标行为「乱套」。
+     */
+    private static void defect5_presetSync(NeovideCursorConfigurable conf) {
+        System.out.println();
+        System.out.println("--- 缺陷 5：切换预设后参数条必须跟着变 ---");
+
+        java.util.List<JSlider> sliders = conf.slidersForProbe();
+        java.util.List<String> keys = conf.sliderKeysForProbe();
+
+        // 【只有 3 个内置预设】基础(0) / 缎带(1) / 纯平滑输入(2)
+        // 差异最大的是 animationLength：基础 10、缎带 28
+        conf.pickAnimPresetForProbe(0);
+        int p0 = pendingTick(conf, conf.pendingForProbe(), "animationLength");
+        int s0 = sliderOf(sliders, keys, "animationLength").getValue();
+
+        conf.pickAnimPresetForProbe(1);
+        int p1 = pendingTick(conf, conf.pendingForProbe(), "animationLength");
+        int s1 = sliderOf(sliders, keys, "animationLength").getValue();
+
+        // D5-1：两个预设的值确实不同（否则本测试无意义）
+        check("D5-1 预设0(基础) 与 预设1(缎带) 的 animationLength 不同",
+                p0 != p1, "基础=" + p0 + " 缎带=" + p1);
+
+        // D5-2：切完后滑块值 == pending 真值
+        check("D5-2 切预设后滑块值 == pending 真值",
+                s1 == p1, "滑块=" + s1 + " pending=" + p1);
+
+        // D5-3：全部滑块逐个核对
+        int mismatch = 0;
+        StringBuilder detail = new StringBuilder();
+        NeovideCursorSettings.State p = conf.pendingForProbe();
+        for (int i = 0; i < sliders.size(); i++) {
+            String k = keys.get(i);
+            int expect = pendingTick(conf, p, k);
+            int actual = sliders.get(i).getValue();
+            if (expect != actual) {
+                mismatch++;
+                detail.append(k).append("(期望").append(expect)
+                        .append(",实际").append(actual).append(") ");
+            }
+        }
+        check("D5-3 全部 " + sliders.size() + " 个滑块都与 pending 一致",
+                mismatch == 0, mismatch == 0 ? "全部一致" : detail.toString());
+    }
+
+    private static JSlider sliderOf(java.util.List<JSlider> sliders,
+                                   java.util.List<String> keys, String key) {
+        for (int i = 0; i < keys.size(); i++) {
+            if (key.equals(keys.get(i))) {
+                return sliders.get(i);
+            }
+        }
+        throw new IllegalArgumentException(key);
+    }
+
+    /**
+     * pending 字段 → 滑块应有的【吸附后】刻度值。
+     *
+     * <p><b>【必须复用面板自己的 SPECS.readTick】</b>：
+     * 我一开始自己写映射，结果 shadowBlurFactor 对不上 ——
+     * 面板的 readTick 是 {@code sharpnessOf(blur)}（0.6 → 锐度 73 这种转换），
+     * 我直接 Math.round(blur) 得 1，差十倍以上。
+     *
+     * <p>同理 cursorDisappearDelay 要经过 snapToTick 吸附（333 → 350）。
+     * 自己实现第二套口径 = 探针自己骗自己。
+     */
+    private static int pendingTick(NeovideCursorConfigurable conf,
+                                   NeovideCursorSettings.State p, String key) {
+        int i = conf.sliderKeysForProbe().indexOf(key);
+        if (i < 0) {
+            return -999;
+        }
+        int[] range = conf.sliderRangeForProbe(i);
+        int exact = conf.sliderExactTickForProbe(i);
+        return snapToTick(exact, range[0], range[1], range[2]);
+    }
+
+    /** 与面板 snapToTick 同算法 */
+    private static int snapToTick(int v, int min, int max, int step) {
+        int clamped = Math.max(min, Math.min(max, v));
+        int snapped = min + Math.round((clamped - min) / (float) step) * step;
+        return Math.max(min, Math.min(max, snapped));
     }
 }

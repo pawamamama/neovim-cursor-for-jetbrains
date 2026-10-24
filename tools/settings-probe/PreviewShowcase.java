@@ -10,9 +10,13 @@ import java.io.File;
 /** 预览窗展示器 —— 三版尺寸对比 + 独立窗口（不启动 IDEA 也能看）。 */
 public final class PreviewShowcase {
 
-    /** 三版候选：宽 × 高 */
-    private static final int[][] VARIANTS = {{440, 120}, {520, 200}, {640, 260}};
-    private static final String[] NAMES = {"A-紧凑", "B-中等", "C-大"};
+    /**
+     * 展示模式。
+     *
+     * <p><b>0.9.44 改</b>：不再用固定尺寸传参 —— 那样看不出「面板实际长什么样」。
+     * 现在直接用组件自己的 {@code getPreferredSize()}，与设置页里完全一致。
+     */
+    private static final String[] NAMES = {"单行输入输出", "多行缎带"};
 
     public static void main(String[] args) throws Exception {
         System.out.println("[1] main 开始 headless="
@@ -40,12 +44,11 @@ public final class PreviewShowcase {
         JPanel root = new JPanel();
         root.setLayout(new BoxLayout(root, BoxLayout.Y_AXIS));
         root.setBackground(new Color(0x2B2D30));
-        for (int v = 0; v < VARIANTS.length; v++) {
-            int w = VARIANTS[v][0], h = VARIANTS[v][1];
-            AnimationPreview a = AnimationPreview.inline(new NeovideConfig());
-            AnimationPreview b = AnimationPreview.cross(new NeovideConfig());
-            root.add(section(NAMES[v] + "  " + w + "x" + h, a, b, w, h));
-        }
+        // 两个独立区块，各自用 preferredSize（与设置页一致）
+        root.add(section("单行输入输出（打字 / 退格）",
+                AnimationPreview.inline(new NeovideConfig()), 520));
+        root.add(section("多行缎带（换行 / 跳转）",
+                AnimationPreview.cross(new NeovideConfig()), 300));
         f.setContentPane(root);
         f.pack();
         f.setLocationRelativeTo(null);
@@ -80,61 +83,53 @@ public final class PreviewShowcase {
         }
     }
 
-    private static JPanel section(String title, AnimationPreview a, AnimationPreview b, int w, int h) {
+    private static JPanel section(String title, AnimationPreview a, int w) {
+        java.awt.Dimension ps = a.getPreferredSize();   // ← 用组件自己算的
         JPanel p = new JPanel(new BorderLayout());
         p.setBackground(new Color(0x2B2D30));
         p.setBorder(BorderFactory.createEmptyBorder(10, 14, 14, 14));
-        JLabel lbl = new JLabel(title + "   (单行窗 2 倍宽 = 跨行窗)");
+        JLabel lbl = new JLabel(title + "   " + ps.width + "×" + ps.height
+                + "   字号自适应");
         lbl.setForeground(new Color(0xD0D0D0));
         lbl.setBorder(BorderFactory.createEmptyBorder(0, 0, 6, 0));
         p.add(lbl, BorderLayout.NORTH);
-        // 【修复 3：组件被压成 1x1】
-        //
-        // GridBagLayout + fill=NONE 时组件不展开，实测每个 Preview 只有 1x1 → 全空。
-        // FlowLayout 又会压扁高度。
-        //
-        // 改用【绝对定位】—— 这是唯一能精确控制「每个组件拿多少像素」的方式。
-        // 布局管理器的各种约束在这里全是干扰。
-        int rowW = w + w / 2 + 10;
-        JPanel row = new JPanel(null);          // null layout = 绝对定位
-        row.setOpaque(false);
-        row.setPreferredSize(new Dimension(rowW, h));
-        row.setMinimumSize(new Dimension(rowW, h));
 
-        a.setBounds(0, 0, w, h);
-        b.setBounds(w + 10, 0, w / 2, h);
-        row.add(a);
-        row.add(b);
-
-        JPanel wrap = new JPanel(new BorderLayout());
-        wrap.setOpaque(false);
-        wrap.add(row, BorderLayout.CENTER);
-        wrap.setPreferredSize(new Dimension(rowW, h));
-        wrap.setMinimumSize(new Dimension(rowW, h));
-        p.add(wrap, BorderLayout.CENTER);
-        p.setPreferredSize(new Dimension(rowW + 28, h + 40));
+        a.setPreferredSize(ps);
+        a.setMinimumSize(ps);
+        JPanel holder = new JPanel(null);
+        holder.setOpaque(false);
+        holder.setPreferredSize(ps);
+        a.setBounds(0, 0, ps.width, ps.height);
+        holder.add(a);
+        p.add(holder, BorderLayout.CENTER);
+        p.setPreferredSize(new Dimension(ps.width + 28, ps.height + 40));
         return p;
     }
-
+    /** 不开窗，直接渲染两个预览窗（用它们自己的 preferredSize） */
     private static void snapshot() throws Exception {
         File dir = new File("build/preview-snap");
         dir.mkdirs();
-        for (int v = 0; v < VARIANTS.length; v++) {
-            int w = VARIANTS[v][0], h = VARIANTS[v][1];
-            AnimationPreview inl = AnimationPreview.inline(new NeovideConfig());
-            inl.setSize(w, h);
-            // 打到 12 个字符（打完但还没删的时刻）
-            for (int i = 0; i < 150; i++) inl.probeTick(i % 19 == 0);
-            System.out.println("  v" + v + " (" + w + "x" + h + ") " + inl.probeState());
-            save(inl, new File(dir, "v" + v + "-inline.png"));
-            AnimationPreview crs = AnimationPreview.cross(new NeovideConfig());
-            crs.setSize(w, h);
-            for (int i = 0; i < 30; i++) crs.probeTick(i % 12 == 0);
-            save(crs, new File(dir, "v" + v + "-cross.png"));
+
+        AnimationPreview inl = AnimationPreview.inline(new NeovideConfig());
+        java.awt.Dimension di = inl.getPreferredSize();
+        inl.setSize(di.width, di.height);
+        for (int i = 0; i < 150; i++) {
+            inl.probeTick(i % 19 == 0);
         }
+        System.out.println("  单行 " + di.width + "x" + di.height + "  " + inl.probeState());
+        save(inl, new File(dir, "single.png"));
+
+        AnimationPreview crs = AnimationPreview.cross(new NeovideConfig());
+        java.awt.Dimension dc = crs.getPreferredSize();
+        crs.setSize(dc.width, dc.height);
+        for (int i = 0; i < 60; i++) {
+            crs.probeTick(i % 12 == 0);
+        }
+        System.out.println("  跨行 " + dc.width + "x" + dc.height + "  " + crs.probeState());
+        save(crs, new File(dir, "cross.png"));
+
         System.out.println("snapshots -> " + dir.getAbsolutePath());
     }
-
     private static void save(AnimationPreview comp, File out) throws Exception {
         BufferedImage img = new BufferedImage(comp.getWidth(), comp.getHeight(),
                 BufferedImage.TYPE_INT_RGB);
