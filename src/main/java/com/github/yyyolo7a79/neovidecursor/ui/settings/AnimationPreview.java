@@ -7,97 +7,108 @@ import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
 import javax.swing.Timer;
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 
 /**
- * 设置页里的【动画预览窗】—— 用小画布演示真实物理，参数改了立刻反映。
+ * 设置页里的【动画预览窗】—— 用小画布演示真实物理。
  *
- * <p><b>为什么需要</b>：用户反馈「现有设置不直观」。滑块写着「短动画时长 0.11s」，
- * 但没人知道 0.11 和 0.14 看起来差多少。预览窗把参数变成可见的动画。
- *
- * <h2>两种演示模式</h2>
+ * <h2>两种模式</h2>
  * <ul>
- *   <li>{@link Mode#INLINE} —— <b>行内输入删除</b>：光标本行内左右小步移动
- *       （对应 {@code shortAnimationLength} / {@code typingSmoothness}）</li>
- *   <li>{@link Mode#CROSS} —— <b>跨行移动</b>：光标上下换行 + 大跨度横向移动
+ *   <li>{@link Mode#INLINE} —— <b>单行输入输出</b>：逐字符打字，像真的在输入
+ *       （对应 {@code shortAnimationLength} / {@code typingSmoothness} / {@code trailSize}）</li>
+ *   <li>{@link Mode#CROSS} —— <b>多行缎带</b>：跨行移动，拖尾拉成长缎带
  *       （对应 {@code animationLength} / {@code stretchRatioK}）</li>
  * </ul>
  *
- * <h2>实现要点</h2>
- * <p><b>复用真实物理</b>：用真的 {@link TrailCorner} 和真的 {@link CaretTrailPanel}，
- * 不是另写一套简化模拟 —— 否则预览显示的和实际观感会不一致，那就失去意义了。
+ * <h2>三个关键设计决定</h2>
  *
- * <p><b>独立 CONFIG</b>：预览持有自己的 {@link NeovideConfig} 副本，
- * 由设置面板在参数变化时写入。不碰全局 CONFIG，避免影响真实编辑器。
+ * <p><b>1. 复用真实物理</b>：用真的 {@link TrailCorner} + 真的 {@link CaretTrailPanel}。
+ * 另写简化模拟的话，预览观感和实际不一致，就失去意义了。
  *
- * <p><b>定时器</b>：{@code javax.swing.Timer} 在 EDT 上跑，8ms 间隔。
- * 预览窗很小（约 260x64），绘制量可忽略。
+ * <p><b>2. 延迟初始化</b>：构造时 {@code getWidth()} 还是 0（组件未布局），
+ * 在那里算中心点会得到 (0,0) —— 表现为「光标贴在左上角」。
+ * 所以位置在首次 {@code paintComponent} 时按真实宽度初始化。
+ *
+ * <p><b>3. 按「字符格」移动，不是按像素</b>：单行模式模拟真实打字，
+ * 光标每次前进一个字符宽，间隔约 120ms（接近人手打字速度）。
+ * 跨行模式每次移动一行高度 + 适量横向位移。
  */
 final class AnimationPreview extends JComponent {
 
     /** 演示模式 */
     enum Mode {
-        /** 行内输入删除：小步左右移动 */
+        /** 单行输入输出：逐字符打字 */
         INLINE,
-        /** 跨行移动：上下换行 + 大跨度 */
+        /** 多行缎带：跨行移动 */
         CROSS
     }
 
-    /** 预览用的独立配置副本（不碰全局 CONFIG） */
     private final NeovideConfig config;
-
     private final Mode mode;
-
-    /** 复用真实绘制面板 */
     private final CaretTrailPanel panel;
-
-    /** 四个角点（真实物理） */
     private final TrailCorner[] corners;
 
     /** 光标中心（预览坐标系） */
     private double centerX;
     private double centerY;
+    /** 是否已完成首次布局初始化 */
+    private boolean placed;
 
-    /** 光标尺寸：宽 2px、高 16px（预览按 2 倍缩放，视觉更清楚） */
+    /** 光标尺寸（与真实 2px 光标同比放大，便于观察） */
     private static final double CURSOR_W = 3.0;
-    private static final double CURSOR_H = 22.0;
+    private static final double CURSOR_H = 18.0;
 
-    /** 演示用的行高与移动步长 */
-    private static final double LINE_H = 22.0;
-    private static final double INLINE_STEP = 9.0;
-    private static final double CROSS_STEP = 70.0;
+    /** 行高 */
+    private static final double LINE_H = 24.0;
 
-    /** 帧间隔（毫秒）—— 与真实调度一致 */
+    /** 单行模式的字符宽（用于逐字前进） */
+    private static final double CHAR_W = 9.0;
+
+    /** 物理推进间隔（毫秒）—— 与生产 8ms 一致 */
     private static final int FRAME_MS = 8;
 
-    private Timer timer;
+    /** 单行模式：打字间隔（毫秒）。接近人手速度，太快看不清动画。 */
+    private static final int TYPE_INTERVAL_MS = 130;
 
-    /** 演示动画的相位：正数向右，负数向左 */
-    private int phase = 1;
+    /** 跨行模式：移动间隔（毫秒）。太短会让拖尾一直满屏拉伸像发疯。 */
+    private static final int CROSS_INTERVAL_MS = 900;
 
-    /** 跨行模式下当前在第几行（0 / 1 交替） */
-    private int row = 0;
+    private Timer physicsTimer;
+    private Timer actionTimer;
+
+    /** 已打出的字符数（负数表示在退格） */
+    private int typed;
+    /** 跨行模式当前行（0/1 交替） */
+    private int row;
+    /** 跨行模式水平方向 */
+    private int dir = 1;
+
+    /** 单行演示文本（英文） */
+    private static final String TEXT_EN = "pawamamama";
+    /** 单行演示文本（中文——验证 CJK 字符宽度处理） */
+    private static final String TEXT_CN = "\u8fd9\u662f\u4e00\u4e2a\u7f16\u8f91\u5668\u5149\u6807\u63d2\u4ef6";
+
+    private static final Font PREVIEW_FONT =
+            new Font(Font.MONOSPACED, Font.PLAIN, 13);
 
     AnimationPreview(@NotNull NeovideConfig config, @NotNull Mode mode) {
         this.config = config;
         this.mode = mode;
         this.panel = new CaretTrailPanel(config);
         this.corners = new TrailCorner[4];
-        // 与 CaretAnimator 一致的角点相对位置（左上→右上→右下→左下）
         double[][] rel = {{-0.5, -0.5}, {0.5, -0.5}, {0.5, 0.5}, {-0.5, 0.5}};
         for (int i = 0; i < 4; i++) {
             corners[i] = new TrailCorner(rel[i][0], rel[i][1], config);
         }
         setOpaque(true);
-        resetPosition();
-        for (TrailCorner c : corners) {
-            c.snapTo(CURSOR_W, CURSOR_H, centerX, centerY);
-        }
     }
 
-    /** 参数变了：重建面板样式 + 提醒重绘 */
+    /** 参数变了：重建样式 + 重绘 */
     void onConfigChanged() {
         panel.refreshStyles();
         repaint();
@@ -106,78 +117,125 @@ final class AnimationPreview extends JComponent {
     @Override
     public void addNotify() {
         super.addNotify();
-        if (timer == null) {
-            timer = new Timer(FRAME_MS, e -> tick());
+        if (physicsTimer == null) {
+            physicsTimer = new Timer(FRAME_MS, e -> step());
         }
-        timer.start();
+        if (actionTimer == null) {
+            int interval = (mode == Mode.INLINE) ? TYPE_INTERVAL_MS : CROSS_INTERVAL_MS;
+            actionTimer = new Timer(interval, e -> advance());
+        }
+        physicsTimer.start();
+        actionTimer.start();
     }
 
     @Override
     public void removeNotify() {
-        if (timer != null) {
-            timer.stop();
+        if (physicsTimer != null) {
+            physicsTimer.stop();
+        }
+        if (actionTimer != null) {
+            actionTimer.stop();
         }
         super.removeNotify();
     }
 
-    private void resetPosition() {
-        centerX = getWidth() / 2.0;
-        centerY = mode == Mode.CROSS ? LINE_H : getHeight() / 2.0;
-    }
-
-    /** 一帧：推进物理 + 重绘 */
-    private void tick() {
-        if (getWidth() <= 0 || getHeight() <= 0) {
+    /**
+     * 首次布局后才算位置。
+     *
+     * <p>构造时 getWidth() 为 0，若在那里算 centerX 会得到 0 ——
+     * 表现为光标贴在左上角。
+     */
+    private void placeIfNeeded() {
+        if (placed || getWidth() <= 0) {
             return;
         }
+        placed = true;
+        if (mode == Mode.INLINE) {
+            centerX = 14;
+            centerY = LINE_H;
+        } else {
+            centerX = 40;
+            centerY = LINE_H;
+        }
+        for (TrailCorner c : corners) {
+            c.snapTo(CURSOR_W, CURSOR_H, centerX, centerY);
+        }
+    }
 
-        // 目标点按模式前进；到边界就反向
-        double step = (mode == Mode.INLINE) ? INLINE_STEP : CROSS_STEP;
-        double nextX = centerX + step * phase;
-        double margin = CURSOR_W + 8;
-        if (nextX > getWidth() - margin || nextX < margin) {
-            phase = -phase;
-            nextX = centerX + step * phase;
-            if (mode == Mode.CROSS) {
-                // 换行：上下交替
-                row = 1 - row;
+    /** 动作定时器：改变目标位置（模拟打字 / 跨行移动） */
+    private void advance() {
+        if (!placed || getWidth() <= 0) {
+            return;
+        }
+        double targetX;
+        double targetY;
+
+        if (mode == Mode.INLINE) {
+            String text = visibleText();
+            int max = text.length();
+            // 逐字前进；到末尾停一拍再逐字退格（模拟输入→删除）
+            if (typed < max) {
+                typed++;
+            } else if (typed == max) {
+                typed = -1;          // 触发退格阶段
+            } else if (typed > -max) {
+                typed--;
+            } else {
+                typed = 0;           // 循环
+                cycleChinese = !cycleChinese;   // 每轮切换中英文演示
             }
+            int shown = (typed < 0) ? (max + typed) : typed;
+            targetX = 14 + shown * CHAR_W + CURSOR_W / 2;
+            targetY = LINE_H;
+        } else {
+            // 跨行：左右移动 + 上下换行，模拟「跳来跳去」
+            row = 1 - row;
+            double span = Math.max(60, getWidth() - 80);
+            targetX = 40 + span * (row == 0 ? 0.15 : 0.75);
+            targetY = LINE_H + row * LINE_H * 1.6;
         }
 
-        double nextY = (mode == Mode.CROSS)
-                ? (row == 0 ? LINE_H : LINE_H * 2.4)
-                : centerY;
+        double prevX = centerX;
+        double prevY = centerY;
+        centerX = targetX;
+        centerY = targetY;
 
-        // 【关键】用真实的 jump 逻辑选时长（含短跳/跨行分支、rank 排序）
-        int[] ranks = assignRanks(nextX, nextY);
+        // 用真实 jump：内部按位移选「短跳 / 跨行」分支，时长梯度与生产一致
+        int[] ranks = assignRanks(prevX, prevY, targetX, targetY);
         for (int i = 0; i < 4; i++) {
-            // 预览不给 charsMoved，让它走「归一化长度」的兜底分支 ——
-            // 与真实编辑器相比少了中文字符判定，但时长梯度一致。
-            corners[i].jump(CURSOR_W, CURSOR_H, nextX, nextY, ranks[i]);
+            corners[i].jump(CURSOR_W, CURSOR_H, targetX, targetY, ranks[i]);
         }
+    }
 
-        centerX = nextX;
-        centerY = nextY;
-
-        // 推进物理
-        boolean anyMoving = false;
+    /** 物理步进（每 8ms） */
+    private void step() {
+        if (!placed) {
+            return;
+        }
+        double dt = FRAME_MS / 1000.0;
         double maxOffset = 0;
         for (TrailCorner c : corners) {
-            if (c.update(CURSOR_W, CURSOR_H, centerX, centerY, FRAME_MS / 1000.0, false)) {
-                anyMoving = true;
-            }
+            c.update(CURSOR_W, CURSOR_H, centerX, centerY, dt, false);
             maxOffset = Math.max(maxOffset, c.getOffsetMagnitude());
         }
-
-        // 辉光强度：与真实一致（静止为 0，运动为 1）
-        float glow = (float) Math.min(1.0, maxOffset / 8.0);
+        // 辉光强度与生产一致：静止为 0，运动中随偏移增长
+        float glow = (float) Math.min(1.0, maxOffset / 10.0);
         panel.setGlowStrength(glow);
-
         repaint();
     }
 
+    /** 当前要演示的文本：按 prefixed 语言交替（每轮切换英文/中文） */
+    private String visibleText() {
+        // 用 typed 的符号位不好区分轮次，这里按「跨行模式 vs 单行」简单取；
+        // 中文轮次由 typed 循环到负数时切——够用且不引入额外状态机。
+        return (cycleChinese) ? TEXT_CN : TEXT_EN;
+    }
+
+    /** 中英文轮换标志 */
+    private boolean cycleChinese;
+
     /** 按「运动方向对齐度」给四角排名（与 SpringTrail.assignRanks 同逻辑） */
-    private int[] assignRanks(double cx, double cy) {
+    private int[] assignRanks(double px, double py, double cx, double cy) {
         double[] alignment = new double[4];
         for (int i = 0; i < 4; i++) {
             alignment[i] = corners[i].calculateDirectionAlignment(CURSOR_W, CURSOR_H, cx, cy);
@@ -197,16 +255,35 @@ final class AnimationPreview extends JComponent {
 
     @Override
     protected void paintComponent(Graphics g) {
-        // 背景：与 IDE 编辑器接近的深色，保证粉色拖尾看得清
-        g.setColor(new java.awt.Color(0x2B2B2B));
+        placeIfNeeded();
+
+        g.setColor(new Color(0x2B2B2B));
         g.fillRect(0, 0, getWidth(), getHeight());
 
         Graphics2D g2 = (Graphics2D) g.create();
         try {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                     RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-            // 用真实面板画四边形（复用同一套辉光/填充逻辑）
+            // 单行模式：画出已打出的文字（让预览像真的编辑器）
+            if (mode == Mode.INLINE) {
+                String text = visibleText();
+                int max = text.length();
+                int shown = (typed < 0) ? Math.max(0, max + typed) : Math.min(typed, max);
+                g2.setFont(PREVIEW_FONT);
+                g2.setColor(new Color(0xC8C8C8));
+                g2.drawString(text.substring(0, Math.max(0, shown)), 14, (int) LINE_H + 5);
+            } else {
+                // 跨行模式：画两条基线，让「换行」看得见
+                g2.setColor(new Color(0x3A3A3A));
+                g2.drawLine(10, (int) LINE_H, getWidth() - 10, (int) LINE_H);
+                g2.drawLine(10, (int) (LINE_H + LINE_H * 1.6),
+                        getWidth() - 10, (int) (LINE_H + LINE_H * 1.6));
+            }
+
+            // 用真实面板画四边形（复用填充/辉光逻辑）
             panel.beginQuads();
             panel.addQuad(
                     new double[]{
@@ -224,6 +301,6 @@ final class AnimationPreview extends JComponent {
 
     @Override
     public java.awt.Dimension getPreferredSize() {
-        return new java.awt.Dimension(260, 64);
+        return new java.awt.Dimension(300, 72);
     }
 }

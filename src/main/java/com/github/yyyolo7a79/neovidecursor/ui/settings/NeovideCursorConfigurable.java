@@ -779,8 +779,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     return kotlin.Unit.INSTANCE;
                 });
 
-                // ---------- C. 颜色与辉光 ----------
-                panel.group("颜色与辉光", true, g -> {
+                // ---------- C. 颜色 ----------
+                panel.group("颜色", true, g -> {
                     g.row("拖尾颜色", row -> {
                         row.topGap(TopGap.MEDIUM);
                         tailColorPanel = new ColorPanel();
@@ -797,7 +797,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         return kotlin.Unit.INSTANCE;
                     });
 
+                    return kotlin.Unit.INSTANCE;
+                });
+
+                // ---------- C2. 辉光 ----------
+                panel.group("辉光", true, g -> {
                     g.row("启用辉光", row -> {
+                        row.topGap(TopGap.MEDIUM);
                         bindCheck(row, () -> pending.useShadow, v -> {
                             pending.useShadow = v;
                             shadowOn.set(v);
@@ -832,57 +838,71 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     return kotlin.Unit.INSTANCE;
                 });
 
-                // ---------- D. 拖尾手感（折叠，默认展开）----------
-                panel.collapsibleGroup("拖尾手感", true, g -> {
-                    g.row("拖尾密度", row -> {
+                // ---------- D. 单行输入输出（只影响行内打字/退格）----------
+                //
+                // 分组依据：**看预览窗**。用户不需要记参数名 ——
+                // 想调「打字时的感觉」就来这一组，想调「换行时的缎带」就去下一组。
+                panel.group("单行输入输出", true, g -> {
+                    g.row("", row -> {
                         row.topGap(TopGap.MEDIUM);
-                        addSlider(row, SPECS[6], springMode);
+                        row.comment("只影响<b>同一行内</b>打字与退格时的拖尾。"
+                                + "换行、跨列跳转不受这里影响。", COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
-
-                    g.row("拖尾拉伸强度", row -> {
-                        addSlider(row, SPECS[7], springMode);
-                        row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                    g.row("短动画时长（打字/退格）", row -> {
+                        addSlider(row, SPECS[9], null);
+                        row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    g.row("输入平滑（拖尾形状）", row -> {
+                        addSlider(row, SPECS[10], null);
+                        row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
                     return kotlin.Unit.INSTANCE;
                 });
 
-                // ---------- E. 动画时序（折叠，默认折叠 = 高级）----------
-                panel.collapsibleGroup("动画时序", false, g -> {
-                    g.row("跨行动画时长", row -> {
+                // ---------- E. 多行缎带（只影响跨行/跳转）----------
+                panel.group("多行缎带", true, g -> {
+                    g.row("", row -> {
                         row.topGap(TopGap.MEDIUM);
+                        row.comment("只影响<b>换行、跨列跳转</b>时拖尾拉成的缎带。"
+                                + "行内打字不受这里影响。", COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    // 【顺序必须保持 6 → 7 → 8】
+                    //
+                    // 探针 Probe4Bugs 的 SLIDER_NAMES / SLIDER_TARGET / tickOf()
+                    // 都按【索引】硬编码。我一度为了分组语义把顺序改成 8→7→6，
+                    // 结果 B1-1 报「7/11 跟随」—— 拖动 sliders[6] 时校验的是
+                    // tickOf(6)=trailSize，而那个滑块实际是 animationLength。
+                    //
+                    // 语义上没坏，但索引契约被破坏。恢复原序。
+                    g.row("拖尾密度（整体）", row -> {
+                        addSlider(row, SPECS[6], springMode);
+                        row.rowComment("影响所有动作的拖尾长度，不只跨行。", COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    g.row("缎带拉伸强度", row -> {
+                        addSlider(row, SPECS[7], springMode);
+                        row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    g.row("跨行动画时长", row -> {
                         addSlider(row, SPECS[8], null);
                         row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
-
-                    g.row("短动画时长", row -> {
-                        addSlider(row, SPECS[9], null);
-                        row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    // M4：输入平滑。放在短动画时长正下方 —— 它是那个值的「形状」而不是「长度」。
-                    g.row("输入平滑（只影响单行打字/退格）", row -> {
-                        addSlider(row, SPECS[10], null);
-                        row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    // 契约 §7.3 第三行：恒显示的耦合提示（逐字）
+                    // 契约 §7.3 / §7.4：耦合提示保留在这里（它们讲的就是跨行与短跳的关系）
                     g.row("", row -> {
                         row.rowComment(W_ANIM_COUPLING, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
-
-                    // 契约 §7.4：两条【必须】动态计算的耦合提示（禁止写死数字）
                     g.row("", row -> {
                         singleMoveHint = new JLabel();
                         row.cell(singleMoveHint);
                         return kotlin.Unit.INSTANCE;
                     });
-
                     g.row("", row -> {
                         crossMoveHint = new JLabel();
                         row.cell(crossMoveHint);
@@ -1063,7 +1083,34 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             labelCell.enabledIf(enabledIf);
         }
 
-        bindings.add(b);
+        // 【按 SPECS 索引插入，而不是简单 append】
+        //
+        // 视觉顺序（按职责分组）与索引顺序（探针契约）是两件事：
+        //   · 视觉：单行组在前（9,10），多行组在后（6,7,8）
+        //   · 索引：0..5, 6, 7, 8, 9, 10
+        //
+        // 探针 Probe4Bugs / VerifyPanel 的 SLIDER_NAMES / SLIDER_TARGET /
+        // tickOf(index) 全按索引硬编码，slidersForProbe() 也按 bindings 顺序返回。
+        // 若直接 append，索引就错位了 —— 表现为「拖动滑块 6，校验的是 tickOf(6)」。
+        int specIndex = indexOfSpec(spec);
+        int insertAt = bindings.size();
+        for (int i = 0; i < bindings.size(); i++) {
+            if (indexOfSpec(bindings.get(i).spec) > specIndex) {
+                insertAt = i;
+                break;
+            }
+        }
+        bindings.add(insertAt, b);
+    }
+
+    /** SPECS 数组里某 spec 的下标；找不到返回 Integer.MAX_VALUE（排最后） */
+    private static int indexOfSpec(SliderSpec spec) {
+        for (int i = 0; i < SPECS.length; i++) {
+            if (SPECS[i] == spec) {
+                return i;
+            }
+        }
+        return Integer.MAX_VALUE;
     }
 
     /**

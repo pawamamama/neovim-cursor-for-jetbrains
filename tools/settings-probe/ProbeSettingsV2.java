@@ -123,26 +123,34 @@ public final class ProbeSettingsV2 {
             }
         }
         String blob = text.toString();
-        check("L7 存在折叠组标题「拖尾手感」", blob.contains("拖尾手感"), blob.contains("拖尾手感") ? "ok" : "缺失");
-        check("L8 存在折叠组标题「动画时序」", blob.contains("动画时序"), blob.contains("动画时序") ? "ok" : "缺失");
+        // 0.9.34：按「职责」重组，原「拖尾手感」拆进「单行输入输出」和「多行缎带」。
+        check("L7 存在分组标题「单行输入输出」", blob.contains("单行输入输出"),
+                blob.contains("单行输入输出") ? "ok" : "缺失");
+        check("L8 存在分组标题「多行缎带」", blob.contains("多行缎带"),
+                blob.contains("多行缎带") ? "ok" : "缺失");
         check("L9 分组标题「总开关」存在", blob.contains("总开关"), blob.contains("总开关") ? "ok" : "缺失");
         check("L10 分组标题「淡出」存在", blob.contains("淡出"), blob.contains("淡出") ? "ok" : "缺失");
-        check("L11 分组标题「颜色与辉光」存在", blob.contains("颜色与辉光"),
-                blob.contains("颜色与辉光") ? "ok" : "缺失");
+        // 0.9.34：拆成「颜色」和「辉光」两组（职责分离：颜色是配色，辉光是效果）。
+        // 用更具体的组合词避免误匹配：「拖尾颜色」「辉光颜色」都含单字，不可靠。
+        boolean hasColorGroup = blob.contains("颜色") && blob.contains("拖尾不透明度");
+        boolean hasGlowGroup = blob.contains("辉光") && blob.contains("辉光层数");
+        check("L11 分组「颜色」（拖尾不透明度）与「辉光」（辉光层数）均存在",
+                hasColorGroup && hasGlowGroup,
+                (hasColorGroup ? "" : "颜色组缺失 ") + (hasGlowGroup ? "" : "辉光组缺失"));
 
         // L12：垂直间距。RowImpl.topGap(TopGap) 只把枚举存进 RowImpl 自己的字段
         //      （javap 实证：putfield topGap），不是 client property，运行时无法从组件树读回。
         //      改为断言「分组存在且每组都有独立标题行」这一可观测的结构判据：
         //      5 个分组标题（预设/总开关/淡出/颜色与辉光/拖尾手感/动画时序）都在。
-        String[] groups = {"动画预设", "颜色预设", "总开关", "淡出", "颜色与辉光",
-                "拖尾手感", "动画时序"};
+        String[] groups = {"动画预设", "颜色预设", "总开关", "淡出", "颜色", "辉光",
+                "单行输入输出", "多行缎带"};
         int found = 0;
         for (String g : groups) {
             if (blob.contains(g)) {
                 found++;
             }
         }
-        check("L12 7 个分组标题全部存在（垂直间距按组施加，Layout 规范落地）",
+        check("L12 8 个分组标题全部存在（垂直间距按组施加，Layout 规范落地）",
                 found == groups.length, found + "/" + groups.length);
     }
 
