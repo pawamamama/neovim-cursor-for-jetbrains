@@ -295,28 +295,6 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /**
-     * 当前应跟随的视觉位置：有选区跟 lead（活动端），否则跟 caret。
-     *
-     * <p>见 {@code refreshTarget()} 里的详细说明：这是「Shift+方向键选区扩展时
-     * 拖尾不跟手」的修复。
-     */
-    private VisualPosition leadOrCaretPosition() {
-        try {
-            CaretModel cm = editor.getCaretModel();
-            Caret primary = cm.getPrimaryCaret();
-            if (primary != null && primary.hasSelection()) {
-                VisualPosition lead = primary.getLeadSelectionPosition();
-                if (lead != null) {
-                    return lead;
-                }
-            }
-        } catch (Throwable ignored) {
-            // 取不到就用 caret 位置，不影响功能
-        }
-        return editor.getCaretModel().getVisualPosition();
-    }
-
-    /**
      * 给定 Caret 返回应跟随的位置（有选区跟 lead，否则跟 caret）。
      *
      * <p>多光标场景下每个 caret 各自判断。
@@ -1068,7 +1046,13 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 而「按 Shift+←」时 caret 侧会动，于是看起来有动画 —— 正好对上描述。
             //
             // 修正：有选区时跟 lead，无选区时跟 caret。
-            VisualPosition vp = leadOrCaretPosition();
+            // 【自检修正】这里不能调 leadOrCaretPosition() —— 它内部会 getPrimaryCaret()，
+            // 而 P0-5 契约要求「非快速路径帧每帧 getOffset 恰好 1 次」，
+            // 多调一次主光标会让快速路径的判定基准错位。
+            //
+            // 改为：用 caret 本身的视觉位置做快速路径判定（它便宜且够用），
+            // lead 的位置在下面的循环里按需取。
+            VisualPosition vp = editor.getCaretModel().getVisualPosition();
 
             // 【快速路径：恢复为顶层早退】
             //
@@ -1394,9 +1378,15 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 与 VS Code 一致（查过源码：每个 DOM .cursor 一个实例，
                     // 尺寸是单个光标）。这里取该行选区起点的像素坐标，
                     // 尺寸用单字符 (width, height) —— 不合并成整块。
-                    caretOff = blockStarts[i];
+                    //
+                    // 【自检修正】块选区也要跟随选区活动端：用 blockEnds[i] 而不是
+                    // blockStarts[i]。用户原来点的是「覆盖右边的字符」——
+                    // 起点是固定的，移动的是终点。
+                    caretOff = (blockEnds != null && i < blockEnds.length)
+                            ? blockEnds[i]
+                            : blockStarts[i];
                     try {
-                        blockLine = editor.getDocument().getLineNumber(caretOff);
+                        blockLine = editor.getDocument().getLineNumber(blockStarts[i]);
                         cvp = editor.offsetToVisualPosition(caretOff);
                     } catch (Throwable t) {
                         cvp = editor.getCaretModel().getVisualPosition();
