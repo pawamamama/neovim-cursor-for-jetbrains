@@ -46,7 +46,8 @@ public final class ProbeBrRendering {
                 String t = ((JEditorPane) c).getText();
                 // 中文在 DslLabel 的 HTML 里被转成 &#NNNNN; 数字实体，比较前必须解码
                 String dec = unescapeHtml(t);
-                if (dec != null && dec.contains("前缘（rank3）")) {
+                // 0.9.38：新文案的关键词（原「前缘（rank3）」已在精简时移除）
+                if (dec != null && dec.contains("打字/退格时拖尾持续多久")) {
                     hit = dec;
                 }
             }
@@ -57,30 +58,29 @@ public final class ProbeBrRendering {
         for (JComponent c : all) {
             if (c instanceof JEditorPane) {
                 String t = unescapeHtml(((JEditorPane) c).getText());
-                if (t != null && t.contains("前缘")) {
+                if (t != null && t.contains("拖尾持续多久")) {
                     dbg++;
-                    System.out.println("  [debug] 候选段含「前缘」，解码后长度 = " + t.length());
+                    System.out.println("  [debug] 命中目标段，解码后长度 = " + t.length());
                 }
             }
         }
-        System.out.println("  [debug] 解码后含「前缘」的段数 = " + dbg);
+        System.out.println("  [debug] 命中段数 = " + dbg);
 
         check("R11-1 找到「短动画时长」那条 comment 的 HTML", hit != null,
                 hit == null ? "未找到（可能文案变了）" : "长度 " + hit.length());
 
         if (hit != null) {
-            boolean hasBr = hit.contains("<br") || hit.contains("<BR");
-            check("R11-2 HTML 里含 <br/> 标签（否则 6 行会被折叠成一整段）",
-                    hasBr, hasBr ? "含 br" : "不含 br —— 渲染会成一整段");
+            // 【0.9.38】原断言检查 W_SHORT_LEN 的 6 行 <br/> 结构。
+            // 「精简说明」那轮把它改成了单句（用户反馈说明太长），
+            // 所以这里改为检查【新版说明存在且不为空】——
+            // 保护的语义不变（这个字段必须有可读的解释），不再绑定分行结构。
+            boolean nonEmpty = hit.trim().length() > 10;
+            check("R11-2 「短动画时长」有可读说明（不再要求多行 <br/>）",
+                    nonEmpty, "解码后长度 " + hit.trim().length());
 
-            // 6 个语义行首都必须出现在同一段 HTML 里
             String[] anchors = {
-                    "短动画时长 = 同行打字/退格时的拖尾时长。",
-                    "注意前缘（rank3）的有效时长 = 本值 × 0.22",
-                    "低于 0.036s",
-                    "0.036s ~ 0.227s",
-                    "0.227s 以上",
-                    "实测：0.03 起步步归零，0.04 起能跑。"
+                    "打字/退格时拖尾持续多久",
+                    "低于 0.04s 会看不出拖尾"
             };
             // 【为什么用正则而不是 contains】DslLabel 走 HTML 渲染，会把连续空白折叠、
             // 并在标签边界插入空格（实测："0.03 起步步归零" 变成 "0.03     起步步归零"、
@@ -99,12 +99,8 @@ public final class ProbeBrRendering {
                     System.out.println("    缺失片段: [" + s + "]");
                 }
             }
-            check("R11-3 六个语义行首全部在同一段 HTML 里（内容未丢，允许 HTML 空白规范化）",
+            check("R11-3 说明的关键信息齐全（时长含义 + 下限提示）",
                     found == anchors.length, found + "/" + anchors.length);
-
-            int brCount = countBr(hit);
-            check("R11-4 <br/> 数量 >= 5（首行后空行 + 4 处分行，至少 5 个换行）",
-                    brCount >= 5, "实际 " + brCount + " 个 <br/>");
         }
 
         System.out.println();

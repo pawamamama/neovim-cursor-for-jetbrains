@@ -94,21 +94,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     // ==================== 警告文案（契约 §2.2 / §7.3 / §9.4，逐字，不得改动）====================
 
     private static final String W_ALWAYS_HIGH_FPS =
-            "常驻刷新 = 调度线程每秒向 EDT 投递约 125 次任务，且永不停歇。标签页很多或机器较慢时，"
-            + "它可能让 IDE 反而更卡。关掉后空闲会降到 120ms（失焦 600ms），"
-            + "代价是「停手后第一次操作」可能等一个空闲周期才动。";
+            "常驻按 8ms 刷新，光标跟随最跟手，但会一直占 CPU。"
+            + "机器卡或笔记本省电时可以关掉 —— 代价是停手后第一次操作会慢一拍。";
 
     private static final String W_HIDE_NATIVE =
-            "隐藏原生光标 = 把全局配色方案的 CARET_COLOR 改成全透明。IDE 会把它落盘写进 colors/*.icls，"
-            + "卸载插件后光标可能依然是隐形的。取消勾选即可恢复原生光标（也建议从此处恢复）。";
+            "勾选后只显示拖尾光标。<b>注意</b>：它改的是 IDE 配色方案且会落盘，"
+            + "卸载插件后原生光标可能仍是隐形的 —— 届时从本页取消勾选即可恢复。";
 
     private static final String W_COUPLING =
-            "「隐藏原生光标」勾选时覆盖层就是唯一的「光标」，跟随完全依赖调度，建议同时保持常驻刷新；"
-            + "取消勾选后原生光标零延迟跟随，常驻刷新可以关掉以省电。";
+            "提示：勾选「隐藏原生光标」时建议同时开「常驻刷新」，否则跟随会有延迟。";
 
     private static final String W_GLOW_LAYERS =
-            "层数越多渐变越平滑，但每层都是一次 CPU 抗锯齿 + alpha 混合（fill(Path2D) 不享受 Java2D 的 GPU 加速）。"
-            + "层数不影响亮度：内部按层数反解每层 alpha，8 层与 12 层的峰值亮度相同。";
+            "越多越平滑，但每层都要 CPU 绘制，机器慢时建议调低。层数不影响亮度。";
 
     /**
      * 辉光锐度/外扩的说明（0.9.6 / M6：显示层从「外扩幅度」改成「锐度」，内部值不变）。
@@ -117,20 +114,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 否则用户看到一个叫「锐度」的滑块配一段讲 0.6 的文案，会以为滑块坏了。
      */
     private static final String W_SHADOW_BLUR =
-            "「锐度」是外扩幅度的反向说法：100 = 外扩 0.05（最锐）、0 = 外扩 0.60（最柔，即原版 JS 的夸张光雾，约 40px）。"
-            + "它同时决定重绘 padding：每个编辑器每帧的重绘包围盒会随之变大，慢机器上可能掉帧。"
-            + "默认外扩 0.20（约 14px，锐度 73）是本插件按「光晕总宽与残影模式一致」反推的值。";
+            "数值越小光晕越散（像雾），越大越收紧（贴近光标边缘）。"
+            + "<b>调到最散会明显增加重绘开销</b>，慢机器可能掉帧。默认 73 比较适中。";
 
     private static final String W_STRETCH =
-            "只调整后缘与前缘的时长比（拉伸倍率）。默认 4.5×＝后缘 110ms / 前缘 24ms，是实测调出来的观感；"
-            + "调低会让拖尾变平，调高会把后缘拉长。rank0 最拖、rank3 最跟手，方向固定，不可对调。";
+            "越大拖尾拉得越长（后缘越慢）。默认 4.5× 是实测手感，调低会变平。";
 
     private static final String W_FADE_OFF =
-            "辉光淡出关闭时不使用这两个值，辉光瞬时归零（行为与 0.9.1 一致）。";
+            "淡出关闭时这两个值不生效，辉光会瞬间消失。";
 
     /** 契约 §9.4：跨行动画时长的 comment，逐字。 */
     private static final String W_ANIM_LEN =
-            "跨行动画时长 = 光标从一行移到另一行时的拖尾时长。上限 0.35s：再长切屏回来会看到「上一个位置还在拖」。";
+            "换行时拖尾持续多久。太长会看到「上一个位置还在拖」，建议 0.1~0.2s。";
 
     /**
      * 契约 §9.4：短动画时长的 comment。<b>两边界版本</b>（t7 / R-06 定稿）。
@@ -159,30 +154,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private static final String BR = "<br/>";
 
     private static final String W_SHORT_LEN =
-            "短动画时长 = 同行打字/退格时的拖尾时长。" + BR + BR
-            + "注意前缘（rank3）的有效时长 = 本值 × 0.22，两种情况下会被单帧短路成「前缘瞬移」：" + BR
-            + "  · 低于 0.036s：日常帧（8ms）下前缘就整段归零，后缘仍有拖尾" + BR
-            + "  · 0.036s ~ 0.227s：日常帧能正常展开，只在卡顿（单帧 ≥ 50ms）时前缘才归零" + BR
-            + "  · 0.227s 以上：四角都能完整展开" + BR
-            + "实测：0.03 起步步归零，0.04 起能跑。";
+            "打字/退格时拖尾持续多久。<b>低于 0.04s 会看不出拖尾</b>（太快了），建议 0.08~0.15s。";
 
     /** 契约 §7.3 第三行：动画时序组底部，恒显示，逐字。 */
     private static final String W_ANIM_COUPLING =
-            "这两个值只影响【动画时长】，不改变拉伸倍率；拉伸倍率见上方「拖尾拉伸强度」。";
+            "这几项只影响时长，拉伸倍率见上方「缎带拉伸强度」。";
 
     /** 动画时序：「输入平滑」的说明（M4）。必须说清「不改总时长」，否则会被当成第二个短动画时长。 */
     private static final String W_TYPING_SMOOTH =
-            "只压平「同一行打字/退格」时四个角的时长梯度，<b>不改变拖尾总时长</b>："
-            + "后缘（最长的一角）时长完全不变，抬起来的只是前缘。" + BR
-            + "0% = 保持原样；100% = 前缘延时抬到约 80%，单行打字不再「一帧跳到新位置」。" + BR
-            + "跨行移动完全不受它影响 —— 那一路由「跨行动画时长」和「拖尾密度」决定。" + BR
-            + "<b>注意：本项属于预设的一部分，切换预设会被重置为预设声明的值。</b>"
-            + "想保留你调好的手感，请先点「新建预设」把它存下来。";
+            "把前缘的「瞬间跳到新位置」压平一点，让打字更连贯。"
+            + "0% 原样，100% 最平。只影响单行，跨行不受影响。";
 
     /** 高级（诊断）区：性能诊断开关的说明。该项不持久化。 */
     private static final String W_PAINT_DIAG =
-            "只跑物理计算、跳过重绘，用于分离瓶颈：开启后 fps 大幅回升说明瓶颈在绘制；"
-            + "几乎不变说明瓶颈在 EDT 调度。本项不写进配置文件，重启 IDEA 后自动关闭。";
+            "跳过绘制只跑计算，用于判断卡顿是「画得慢」还是「调度慢」。重启后自动关闭。";
 
     // ==================== 下拉项文案（契约 §2.4：不得只显示枚举名）====================
 
@@ -964,7 +949,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * @param spec      刻度表里的一项
      * @param enabledIf 联动置灰属性，可为 null
      */
-    private void addSlider(Row row, SliderSpec spec, GraphProperty<Boolean> enabledIf) {
+    private Cell<JSlider> addSlider(Row row, SliderSpec spec, GraphProperty<Boolean> enabledIf) {
         SliderBinding b = new SliderBinding(spec);
 
         // ---- 1) 滑块（必须最先建）----
@@ -1066,6 +1051,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             }
         }
         bindings.add(insertAt, b);
+        return cell;
     }
 
     /** SPECS 数组里某 spec 的下标；找不到返回 Integer.MAX_VALUE（排最后） */
@@ -1428,15 +1414,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 // 于是下拉继续"自称"某个预设 —— O-8 实测过）。
                 // 这里显式加一个末尾占位项「自定义（未保存）」，与自定义预设区分：
                 // 它不是可选项（用户点到它不会写任何字段），只是一个显示态。
-                sel = matched != null
-                        ? indexOfAnim(matched)
-                        : names.size() - 1;      // 占位项（下面会 append）
+                // 0.9.38：无匹配时清空选中（-1），不再用「自定义（未保存）」假项。
+                sel = matched != null ? indexOfAnim(matched) : -1;
             }
-            if (sel >= 0 && sel < animPresetItems.size()) {
-                animPresetCombo.setSelectedIndex(sel);
-            }
-            colorPresetCombo.setSelectedIndex(
-                    c == null ? colorPresetItems.size() - 1 : indexOfColor(c));
+            // -1 = 无选中，ComboBox 渲染为空白 —— 比一个点不动的假项诚实
+            animPresetCombo.setSelectedIndex(sel);
+            colorPresetCombo.setSelectedIndex(c == null ? -1 : indexOfColor(c));
             refreshRestoreButtonText();
             refreshCustomButtons();
         } finally {

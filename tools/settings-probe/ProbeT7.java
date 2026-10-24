@@ -238,8 +238,10 @@ public final class ProbeT7 {
             // ColorPanel.setSelectedColor 不派发 ActionEvent，这里直接驱动回调体
             // （平台上用户选色会派发；探针里等价调用同一个入口）
             conf.onColorPanelChangedForProbe();
-            check("T-02h 改 ColorPanel（onColorPanelChanged 路径）后颜色下拉变「自定义」",
-                    conf.colorPresetComboForProbe().getSelectedIndex() == customIdxColor,
+            // 0.9.38：删掉「自定义（未保存）」占位项后，无匹配状态用 -1（空选中）表示。
+            // 本断言的目的不变：确认改色后下拉不再"自称"某个预设。
+            check("T-02h 改 ColorPanel（onColorPanelChanged 路径）后颜色下拉清空选中（不再自称某预设）",
+                    conf.colorPresetComboForProbe().getSelectedIndex() == -1,
                     "颜色下拉下标=" + conf.colorPresetComboForProbe().getSelectedIndex());
         }
         System.out.println();

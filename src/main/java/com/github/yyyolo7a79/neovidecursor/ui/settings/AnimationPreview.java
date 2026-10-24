@@ -42,15 +42,62 @@ final class AnimationPreview extends JComponent {
     private final CaretTrailPanel panel;
     private final TrailCorner[] corners;
 
-    private static final int FONT_SIZE = 13;
-    private static final Font CODE_FONT = new Font(Font.MONOSPACED, Font.PLAIN, FONT_SIZE);
-    private static final float LINE_H = FONT_SIZE * 1.5f;
+    /**
+     * 基础字号。
+     *
+     * <p><b>为什么从 13 提到 18</b>：用户实拍反馈「动画的字号太小了，应该大一点才直观」。
+     * 13pt 在高 DPI 的 16 寸屏上只有真实编辑器的 2/3 大小，看不清拖尾细节。
+     *
+     * <p>18pt 在 16 寸 2.5K 屏上接近真实编辑器观感；同时用
+     * {@link #effectiveFontSize(int)} 按可用宽度自适应 —— 窄窗口自动缩小，
+     * 不会出现文字被截断。
+     */
+    private static final int BASE_FONT_SIZE = 18;
 
-    private static final double CURSOR_W = 2.0;
-    private static final double CURSOR_H = LINE_H * 0.8;
-    private static final float CHAR_W = 8.0f;
-    private static final int TEXT_X = 12;
-    private static final int PAD = 10;
+    /** 最窄可用字号（再小就失去观察价值） */
+    private static final int MIN_FONT_SIZE = 12;
+
+    /** 单行要演示的字符数（pawamamama = 10，中文那串 = 13，取 14 留余量） */
+    private static final int DEMO_CHARS = 14;
+
+    private static final double CURSOR_W = 2.5;
+    private static final int TEXT_X = 14;
+    private static final int PAD = 12;
+
+    /** 当前生效字号（每帧按宽度算，避免缓存失效） */
+    private int fontSize = BASE_FONT_SIZE;
+    private Font codeFont = new Font(Font.MONOSPACED, Font.PLAIN, BASE_FONT_SIZE);
+    private float lineH;
+    private float charW;
+    private double cursorH;
+
+    /**
+     * 按可用宽度算字号：要保证 {@link #DEMO_CHARS} 个字符放得下。
+     *
+     * <p>等宽字体一个字符宽 ≈ 字号 × 0.6。
+     */
+    private int effectiveFontSize(int availableWidth) {
+        int usable = Math.max(40, availableWidth - TEXT_X * 2);
+        // 目标：DEMO_CHARS 个字符 + 光标余量 放得下
+        int byWidth = (int) (usable / (DEMO_CHARS * 0.6f));
+        return Math.max(MIN_FONT_SIZE, Math.min(BASE_FONT_SIZE, byWidth));
+    }
+
+    /** 重算度量（字号变化时调用） */
+    private void remeasure(int width) {
+        int size = effectiveFontSize(width);
+        if (size == fontSize && lineH > 0) {
+            return;
+        }
+        fontSize = size;
+        codeFont = new Font(Font.MONOSPACED, Font.PLAIN, fontSize);
+        lineH = fontSize * 1.5f;
+        // 等宽字体实测宽度：取 FontMetrics 更准，但 headless 下 FontMetrics 可用
+        charW = Math.max(6f, fontSize * 0.6f);
+        cursorH = lineH * 0.8;
+        placed = false;          // 度量变了要重定位
+        glowSized = false;
+    }
 
     private static final int FRAME_MS = 8;
     private static final int TYPE_MS = 140;
@@ -115,9 +162,9 @@ final class AnimationPreview extends JComponent {
         if (placed || getWidth() <= 0) return;
         placed = true;
         centerX = PAD + CURSOR_W / 2;
-        centerY = LINE_H;
+        centerY = lineH;
         for (TrailCorner c : corners) {
-            c.snapTo(CURSOR_W, CURSOR_H, centerX, centerY);
+            c.snapTo(CURSOR_W, cursorH, centerX, centerY);
         }
     }
 
@@ -145,13 +192,13 @@ final class AnimationPreview extends JComponent {
                 setInterval(TYPE_MS);
             }
             int shown = (typed < 0) ? Math.max(0, max + typed) : typed;
-            targetX = TEXT_X + shown * CHAR_W + CURSOR_W / 2;
-            targetY = LINE_H;
+            targetX = TEXT_X + shown * charW + CURSOR_W / 2;
+            targetY = lineH;
         } else {
             row = 1 - row;
             double span = Math.max(60, getWidth() - PAD * 2 - 40);
             targetX = PAD + 10 + span * (row == 0 ? 0.1 : 0.7);
-            targetY = LINE_H + row * LINE_H;
+            targetY = lineH + row * lineH;
         }
 
         centerX = targetX;
@@ -159,7 +206,7 @@ final class AnimationPreview extends JComponent {
 
         int[] ranks = assignRanks(targetX, targetY);
         for (int i = 0; i < 4; i++) {
-            corners[i].jump(CURSOR_W, CURSOR_H, targetX, targetY, ranks[i]);
+            corners[i].jump(CURSOR_W, cursorH, targetX, targetY, ranks[i]);
         }
     }
 
@@ -172,13 +219,13 @@ final class AnimationPreview extends JComponent {
     private void step() {
         if (!placed) return;
         if (!glowSized) {
-            panel.updateGlowRadius(CURSOR_W, CURSOR_H);
+            panel.updateGlowRadius(CURSOR_W, cursorH);
             glowSized = true;
         }
         double dt = FRAME_MS / 1000.0;
         double maxOffset = 0;
         for (TrailCorner c : corners) {
-            c.update(CURSOR_W, CURSOR_H, centerX, centerY, dt, false);
+            c.update(CURSOR_W, cursorH, centerX, centerY, dt, false);
             maxOffset = Math.max(maxOffset, c.getOffsetMagnitude());
         }
         panel.setGlowStrength((float) Math.min(1.0, maxOffset / 8.0));
@@ -188,7 +235,7 @@ final class AnimationPreview extends JComponent {
     private int[] assignRanks(double cx, double cy) {
         double[] al = new double[4];
         for (int i = 0; i < 4; i++) {
-            al[i] = corners[i].calculateDirectionAlignment(CURSOR_W, CURSOR_H, cx, cy);
+            al[i] = corners[i].calculateDirectionAlignment(CURSOR_W, cursorH, cx, cy);
         }
         int[] r = new int[4];
         for (int i = 0; i < 4; i++) {
@@ -201,6 +248,7 @@ final class AnimationPreview extends JComponent {
 
     @Override
     protected void paintComponent(Graphics g) {
+        remeasure(getWidth());
         placeIfNeeded();
 
         g.setColor(new Color(0x1E1F22));
@@ -214,26 +262,26 @@ final class AnimationPreview extends JComponent {
                     RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             g2.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS,
                     RenderingHints.VALUE_FRACTIONALMETRICS_OFF);
-            g2.setFont(CODE_FONT);
+            g2.setFont(codeFont);
 
             if (mode == Mode.INLINE) {
                 String text = chinese ? TEXT_CN : TEXT_EN;
                 int max = text.length();
                 int shown = (typed < 0) ? Math.max(0, max + typed) : Math.min(typed, max);
                 String draw = text.substring(0, Math.max(0, shown));
-                int baseline = (int) (LINE_H + FONT_SIZE * 0.35);
+                int baseline = (int) (lineH + fontSize * 0.35);
                 g2.setColor(new Color(0xBCBEC4));
                 g2.drawString(draw, TEXT_X, baseline);
                 String rest = text.substring(Math.max(0, shown));
                 g2.setColor(new Color(0x4E5157));
-                g2.drawString(rest, TEXT_X + shown * CHAR_W, baseline);
+                g2.drawString(rest, TEXT_X + shown * charW, baseline);
             } else {
                 g2.setColor(new Color(0x2B2D30));
-                g2.drawLine(PAD, (int) LINE_H, getWidth() - PAD, (int) LINE_H);
-                g2.drawLine(PAD, (int) (LINE_H * 2), getWidth() - PAD, (int) (LINE_H * 2));
+                g2.drawLine(PAD, (int) lineH, getWidth() - PAD, (int) lineH);
+                g2.drawLine(PAD, (int) (lineH * 2), getWidth() - PAD, (int) (lineH * 2));
                 g2.setColor(new Color(0x4E5157));
-                g2.drawString("int x = 0;", TEXT_X, (int) (LINE_H + FONT_SIZE * 0.35));
-                g2.drawString("return x;", TEXT_X, (int) (LINE_H * 2 + FONT_SIZE * 0.35));
+                g2.drawString("int x = 0;", TEXT_X, (int) (lineH + fontSize * 0.35));
+                g2.drawString("return x;", TEXT_X, (int) (lineH * 2 + fontSize * 0.35));
             }
 
             panel.beginQuads();
@@ -251,6 +299,9 @@ final class AnimationPreview extends JComponent {
 
     @Override
     public Dimension getPreferredSize() {
-        return new Dimension((int) (TEXT_X * 2 + CHAR_W * 24), (int) (LINE_H * 2 + PAD * 2));
+        // 按基准字号算：字符宽 ≈ 18 × 0.6 = 10.8，14 字符 ≈ 151 + 左右留白
+        float demoCharW = BASE_FONT_SIZE * 0.6f;
+        return new Dimension((int) (TEXT_X * 2 + demoCharW * DEMO_CHARS),
+                (int) (BASE_FONT_SIZE * 1.5f * 2 + PAD * 2));
     }
 }
