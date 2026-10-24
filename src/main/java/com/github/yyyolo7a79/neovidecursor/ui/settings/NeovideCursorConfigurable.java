@@ -1815,6 +1815,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 它乘进四角系数，是拉伸强度的头号旋钮；不写它 → 用户把 smooth 拖到 100 后
         // 切任何预设都是规整矩形（"横向拉伸变小了，全部预设都这样"）。
         s.typingSmoothness = p.typingSmoothness();
+        // 【第 10 个字段：拉伸强度】
+        //
+        // 【2026-10-24 用户实测 bug】只让 smooth 进预设、k 不进 →
+        // 切任何预设 k 都保持用户上次拖出来的值 → 三个预设手感实际完全相同。
+        // 用户原话：「切换预设手感动效没回来」「怎么切换都覆盖不了」。
+        s.stretchRatioK = p.stretchRatioK();
     }
 
     /** 把 6 个值写回 State（glowLayers 是整数：四舍五入，不截断）。 */
