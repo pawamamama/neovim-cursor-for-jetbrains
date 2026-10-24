@@ -568,6 +568,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     row.comment("Neovide Cursor v" + pluginVersion()
                             + " ｜ 本页所有改动点「应用 / OK」后才生效；面板内不做实时预览。",
                             COMMENT, NO_LINK);
+                    row.comment("遇到光标异常需要反馈时，可在 Help → Edit Custom VM Options "
+                            + "加一行 -Dneovide.cursor.diag=true 并重启，"
+                            + "复现后把 idea.log 提供给开发者（默认关闭，不影响性能）。",
+                            COMMENT, NO_LINK);
                     return kotlin.Unit.INSTANCE;
                 });
 

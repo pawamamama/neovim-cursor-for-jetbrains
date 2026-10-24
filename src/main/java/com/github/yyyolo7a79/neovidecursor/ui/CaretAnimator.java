@@ -113,17 +113,6 @@ public class CaretAnimator implements Disposable, CaretListener {
      * <p><b>历史</b>：曾试过 12ms(83fps) 以减少 EDT 投递，用户反馈「不够跟手」而回退。
      * 那次是往<b>上</b>调，与 5ms 那次同为"改目标帧间隔"的思路，两次都没解决根本问题。
      */
-    /**
-     * 选区跟随诊断开关。
-     *
-     * <p><b>为什么需要它</b>：选区跟随改了两轮（0.9.22 / 0.9.24）都没生效，
-     * 之前一直靠推理而不是实测。打开后会往 idea.log 打每次的
-     * {@code vp} / {@code lead} / 实际用了哪个，用真实数据定位。
-     *
-     * <p>默认 false（不产生日志）。
-     */
-    static final boolean DIAG_SELECTION = false;
-
     static final int ACTIVE_DELAY_MS = 8;
 
     /** 静止时的轮询间隔（低频看门狗） */
@@ -305,37 +294,29 @@ public class CaretAnimator implements Disposable, CaretListener {
         return moved;
     }
 
-    /**
-     * 给定 Caret 返回应跟随的位置（有选区跟 lead，否则跟 caret）。
-     *
-     * <p>多光标场景下每个 caret 各自判断。
-     */
-    private VisualPosition followPositionOf(Caret caret) {
-        try {
-            if (caret != null && caret.hasSelection()) {
-                VisualPosition lead = caret.getLeadSelectionPosition();
-                VisualPosition vp = caret.getVisualPosition();
-                // 限流：每 30 帧一次（原本 4 分钟打了 15457 条，把日志撑爆了）
-                if (DIAG_SELECTION && (frameSeq % 30) == 0) {
-                    com.intellij.openapi.diagnostic.Logger.getInstance(CaretAnimator.class)
-                            .info("neovide-cursor-diag: hasSelection=true  vp="
-                                    + (vp == null ? "null" : vp.line + ":" + vp.column)
-                                    + "  lead="
-                                    + (lead == null ? "null" : lead.line + ":" + lead.column)
-                                    + "  用=" + (lead != null ? "LEAD" : "CARET"));
-                }
-                if (lead != null) {
-                    return lead;
-                }
-            }
-        } catch (Throwable t) {
-            if (DIAG_SELECTION) {
-                com.intellij.openapi.diagnostic.Logger.getInstance(CaretAnimator.class)
-                        .info("neovide-cursor-diag: followPositionOf 异常 " + t);
-            }
+
+    /** 诊断用：数组前若干个元素 → "[a,b,c...]" */
+    private static String head(int[] arr) {
+        if (arr == null) {
+            return "null";
         }
-        return caret != null ? caret.getVisualPosition()
-                : editor.getCaretModel().getVisualPosition();
+        StringBuilder sb = new StringBuilder("[");
+        int n = Math.min(arr.length, 6);
+        for (int i = 0; i < n; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(arr[i]);
+        }
+        if (arr.length > n) {
+            sb.append(",...(").append(arr.length).append(')');
+        }
+        return sb.append(']').toString();
+    }
+
+    /** 诊断用：VisualPosition → "line:column" */
+    private static String fmtVp(VisualPosition vp) {
+        return vp == null ? "null" : (vp.line + ":" + vp.column);
     }
 
     /** 多光标上限：防止「全选文件」时创建上万条拖尾 */
@@ -1412,16 +1393,31 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 尺寸是单个光标）。这里取该行选区起点的像素坐标，
                     // 尺寸用单字符 (width, height) —— 不合并成整块。
                     //
-                    // 【实测修正】块选区跟 blockStarts[i]。
+                    // 【块选区：先用 blockStarts，靠诊断日志确认】
                     //
-                    // 依据：普通选区实测 vp 是活动端。块选区与之一致 ——
-                    // caret 落在起始列那侧，随 Shift+方向键移动的是该列。
+                    // 2026-10-24 实测数据：
+                    //   普通选区：vp 在动、lead 恒定  → 跟 vp（已修好）
+                    //   块选区：  vp 恒定、lead 在动  → 可能该跟 lead
+                    //
+                    // 但块选区的 vp/lead 是【主 caret】的，不是每行的。
+                    // 每行位置来自 blockStarts/blockEnds 数组。
+                    // 到底用哪个，先打日志看数组内容。
                     caretOff = blockStarts[i];
                     try {
                         blockLine = editor.getDocument().getLineNumber(blockStarts[i]);
                         cvp = editor.offsetToVisualPosition(caretOff);
                     } catch (Throwable t) {
                         cvp = editor.getCaretModel().getVisualPosition();
+                    }
+                    if (CursorDiag.shouldSample(frameSeq) && i == 0) {
+                        CursorDiag.blockSample(blockStarts.length,
+                                head(blockStarts), head(blockEnds));
+                        Caret pc = editor.getCaretModel().getPrimaryCaret();
+                        if (pc != null) {
+                            CursorDiag.caretSample("block", pc.hasSelection(),
+                                    fmtVp(pc.getVisualPosition()),
+                                    fmtVp(pc.getLeadSelectionPosition()), "BLOCK");
+                        }
                     }
                     targetW = width;
                     targetH = height;
@@ -1432,6 +1428,15 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 【实测修正】getVisualPosition() 就是活动端（见上方说明）
                     cvp = caret.getVisualPosition();
                     caretOff = caret.getOffset();
+                    if (CursorDiag.shouldSample(frameSeq)) {
+                        VisualPosition dVp = caret.getVisualPosition();
+                        VisualPosition dLead = null;
+                        try {
+                            dLead = caret.getLeadSelectionPosition();
+                        } catch (Throwable ignored) { }
+                        CursorDiag.caretSample("single", caret.hasSelection(),
+                                fmtVp(dVp), fmtVp(dLead), "VP");
+                    }
                     targetCx = 0;               // 普通光标分支不用这两个值
                     targetCy = 0;
                 }
@@ -1773,7 +1778,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
         panel.beginQuads();
         // 【诊断】限流打印：每 30 帧一次，看目标位置 vs 实际画出位置
-        boolean diagNow = DIAG_SELECTION && (frameSeq % 30) == 0;
         for (SpringTrail trail : activeTrails) {
             // 同组共享组内最大偏移 → 相邻行呈现为一个整体，组间互不影响
             double offForGlow = groupMaxOffset[trail.groupId];
@@ -1786,15 +1790,6 @@ public class CaretAnimator implements Disposable, CaretListener {
                             trail.corners[0].getCurrentY(), trail.corners[1].getCurrentY(),
                             trail.corners[2].getCurrentY(), trail.corners[3].getCurrentY()},
                     trailGlow);
-            if (diagNow) {
-                com.intellij.openapi.diagnostic.Logger.getInstance(CaretAnimator.class)
-                        .info("neovide-cursor-diag2: 画 corner0X=" + String.format("%.1f", trail.corners[0].getCurrentX())
-                                + " 目标cx=" + String.format("%.1f", trail.centerX)
-                                + " 目标cy=" + String.format("%.1f", trail.centerY)
-                                + " 线=" + trail.currentLine
-                                + " 组=" + trail.groupId
-                                + " 已初始化=" + trail.isInitialized());
-            }
         }
 
         computeTrailBounds(currentBounds);
