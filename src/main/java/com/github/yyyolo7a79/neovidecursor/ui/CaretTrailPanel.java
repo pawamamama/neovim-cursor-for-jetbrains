@@ -318,6 +318,54 @@ public class CaretTrailPanel extends JComponent {
                 0f, top, 0f, bottom, rgbFractions, rgbColors);
     }
 
+    // ==================== 光标渐变（双拼）====================
+    //
+    // 【末端色算法】用户要求「算法天然适配光标色和辉光色」。
+    //
+    //   末端色 = HSL(辉光色.色相, 辉光色.饱和度 × 1.05, 辉光色.亮度 × 0.58)
+    //
+    // 为什么用辉光色而不是人造色：辉光色本来就是用户选的、与主色协调的第二个颜色。
+    // 拿它降亮度，色相自动协调，不需要额外的色相环计算。
+    //
+    // 【系数 0.58 的实测依据】（WCAG 相对亮度 + CIE76 ΔE，tools/bench/ZzDualToneScan）
+    //   系数   WCAG对比度   感知色差ΔE    判读
+    //   0.85   1.42~2.11   —            太弱，看不出渐变
+    //   0.72   1.96~2.78   22.6~33.0    用户实测「不明显」
+    //   0.58   2.88~3.86   34.2~40.0    当前值
+    //   0.50   3.69~4.65   41.1~47.2    接近「两种颜色拼的」
+    //
+    // 【待实现】做成面板参数条（用户要求），10 处改动清单见 docs/NEXT-STEPS.md。
+    private static final float DUAL_TONE_LUMA_FACTOR = 0.58f;
+
+    /**
+     * 生成光标渐变（双拼）画笔：上端 = 拖尾色，下端 = 从辉光色推导的末端色。
+     *
+     * @param top    四边形上边界
+     * @param bottom 四边形下边界
+     * @return 渐变画笔；边界退化或颜色不可用时返回 null（调用方回退纯色）
+     */
+    private java.awt.Paint buildDualTonePaint(float top, float bottom) {
+        if (!Float.isFinite(top) || !Float.isFinite(bottom) || bottom - top <= 1.0f) {
+            return null;
+        }
+        if (fillColor == null) {
+            return null;
+        }
+        // 末端色基底：优先辉光色；辉光色不可用时退回主色
+        java.awt.Color base = (glowColor != null) ? glowColor : fillColor;
+        float[] hsb = java.awt.Color.RGBtoHSB(
+                base.getRed(), base.getGreen(), base.getBlue(), null);
+        int endRgb = java.awt.Color.HSBtoRGB(
+                hsb[0],
+                Math.min(1f, hsb[1] * 1.05f),      // 略补饱和，抵消降亮度带来的发灰
+                hsb[2] * DUAL_TONE_LUMA_FACTOR);
+        // 透明度沿用拖尾不透明度（tailOpacity），不用辉光的（辉光恒为不透明）
+        int alpha = fillColor.getAlpha();
+        java.awt.Color end = new java.awt.Color(
+                (endRgb >> 16) & 0xFF, (endRgb >> 8) & 0xFF, endRgb & 0xFF, alpha);
+        return new java.awt.GradientPaint(0f, top, fillColor, 0f, bottom, end);
+    }
+
     private float glowWidth = 12f;
 
     /**
@@ -707,31 +755,28 @@ public class CaretTrailPanel extends JComponent {
         drawQuadGlow(g2, path, glow);
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
-        // 【RGB 与纯色互斥】
         //
-        // 用户要求：「开启这个的时候混色要关闭，关闭 rgb 动态混色要恢复」。
+        // ==================== 0.9.83：光标渐变（双拼）====================
         //
-        // 实现方式就是 if/else —— RGB 开 → 用渐变（不调 setColor）；
-        // RGB 关 → setColor(fillColor)，即原来的纯色路径。
-        // 两条路径不会同时生效，切回来立刻恢复。
+        // 【控件语义】光标设置里的「光标渐变」复选框（字段仍是 rgbGradient）。
+        //   开 → 上端 = 拖尾颜色，下端 = 从辉光色算出的末端色（同一色系）
+        //   关 → 纯色填充
+        //
+        // 【与历史的关系】
+        //   最早（0.9.29 引入 RGB 渐变）就是「拖尾色 → 蓝紫 #7B68EE」两色渐变。
+        //   0.9.75 我把它换成了色相循环（彩虹），那是理解错了 ——
+        //   用户要的一直是「光标自己从上到下有个同色系的深浅变化」。
+        //   现在把蓝紫换成「按辉光色算出来的末端色」，两端属于同一色系。
+        //
+        // 【辉光不动】辉光始终用 glowColor（= shadowColor），与本体无关。
+        //   查过全部 git 历史：从引入双拼到现在，辉光从未跟随过光标本体色。
+        //   紧贴光标的辉光层被本体盖住，外圈是稀薄的 shadowColor —— 这个层次是对的。
         if (rgbEnabled) {
-            // 【0.9.75：从「两色纵向渐变」升级为「色相循环」】
-            //
-            // 旧实现是「拖尾色 -> 蓝紫」的单段渐变，只有两个色标。
-            // 问题：沿长度方向只有一次颜色变化，看起来就是一条渐变的粉条，
-            // 没有「流动」感，也无法从颜色读出拖尾的方向与速度。
-            //
-            // 新实现沿长度方向铺 RGB_HUE_SPAN 个完整色相圈（详见 buildRgbWashPaint），
-            // 整条色相还随时间前移 —— 静止时也能看出在流动。
-            //
-            // 【不混色】这是用户明确要求。实现上靠**单一 LinearGradientPaint 多色标**：
-            // 色标之间是线性插值（相邻色相间隔 1/8 圈，视觉上连续），
-            // 但**不叠加任何半透明层** —— 所以不会像上游那样多层混成浊色。
             float top = (float) Math.min(Math.min(quadY[0], quadY[1]), Math.min(quadY[2], quadY[3]));
             float bottom = (float) Math.max(Math.max(quadY[0], quadY[1]), Math.max(quadY[2], quadY[3]));
-            java.awt.Paint wash = buildRgbWashPaint(top, bottom);
-            if (wash != null) {
-                g2.setPaint(wash);
+            java.awt.Paint dual = buildDualTonePaint(top, bottom);
+            if (dual != null) {
+                g2.setPaint(dual);
             } else {
                 g2.setColor(fillColor);
             }

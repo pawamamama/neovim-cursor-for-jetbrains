@@ -1137,7 +1137,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         });
     }
 
-    /** C. 颜色 —— 拖尾纯色 + 不透明度。RGB 渐变在「光标」组，两者互斥。 */
+    /**
+     * 「光标渐变」的说明（0.9.83 重写）。
+     *
+     * <p><b>为什么必须重写</b>：旧文案写「下端=蓝紫」，但 0.9.75 起实现
+     * 已被换成色相循环（彩虹）——文案与行为不符了好几个版本。
+     * 现在恢复「同色系深浅渐变」，文案必须说清两端的颜色从哪来。
+     */
+    private static final String W_CURSOR_GRADIENT =
+            "光标本身<b>从上到下有个同色系的深浅变化</b>："
+            + "上端 = 你选的拖尾颜色，下端 = 从<b>辉光颜色</b>自动算出的更深版本。"
+            + "<br/>所以换了拖尾色或辉光色，这个渐变会跟着变，始终是同一色系的两个层次。"
+            + "<br/><b>关闭时是纯色填充</b>，没有渐变。"
+            + "<br/>辉光本身的颜色不受本项影响 —— 它始终用「辉光颜色」那一项。";
+
+    /** C. 颜色 —— 拖尾纯色 + 不透明度。光标渐变在「光标」组，两者互斥。 */
     private void buildColorGroup(Panel panel) {
         panel.group("颜色", true, g -> {
             g.row("拖尾颜色", row -> {
@@ -1221,15 +1235,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            cur.row("RGB 渐变（实验性）", row -> {
+            // 【0.9.83】改名 + 重写说明。
+            //
+            // 原名「RGB 渐变（实验性）」+ 文案「下端=蓝紫」，但 0.9.75 起
+            // 实现被换成了色相循环（彩虹），文案与实际行为早已不符。
+            // 现在恢复「光标自身的同色系渐变」语义，文案同步重写。
+            cur.row("光标渐变（上下深浅）", row -> {
                 bindCheck(row, () -> pending.rgbGradient,
                         v -> pending.rgbGradient = v)
-                        .comment("<b>实验性</b>。拖尾纵向颜色渐变"
-                                + "（上端=拖尾颜色，下端=蓝紫）。"
-                                + "2px 宽也能看出上下色差。<br/>"
-                                + "<b>与「颜色」组的纯色填充互斥</b>："
-                                + "开启本项时纯色被覆盖，关闭后自动恢复。"
-                                + "默认关。", COMMENT, NO_LINK);
+                        .comment(W_CURSOR_GRADIENT, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
