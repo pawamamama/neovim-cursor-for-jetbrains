@@ -890,6 +890,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         return kotlin.Unit.INSTANCE;
                     });
 
+                    g.row("RGB 渐变（实验性）", row -> {
+                        bindCheck(row, () -> pending.rgbGradient,
+                                v -> pending.rgbGradient = v)
+                                .comment("<b>实验性</b>。拖尾从上到下做纵向颜色渐变"
+                                        + "（上端=拖尾颜色，下端=蓝紫）。"
+                                        + "宽度 2px 时几乎看不出效果，"
+                                        + "建议把「光标宽度」调到 4~5px 再开。"
+                                        + "默认关。", COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+
                     g.row("光标高度（% 行高）", row -> {
                         Cell<JSlider> c = row.slider(30, 100, 5, 10);
                         JSlider s = c.getComponent();

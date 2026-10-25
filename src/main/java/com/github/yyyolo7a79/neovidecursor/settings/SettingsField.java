@@ -350,6 +350,8 @@ public final class SettingsField {
                 (s, v) -> s.cursorWidthPx = v, null, null));
         out.add(floats("cursorHeightRatio", s -> s.cursorHeightRatio,
                 (s, v) -> s.cursorHeightRatio = v, null, null));
+        out.add(bools("rgbGradient", s -> s.rgbGradient,
+                (s, v) -> s.rgbGradient = v, null, null));
         out.add(ints("cursorDisappearDelay", s -> s.cursorDisappearDelay, (s, v) -> s.cursorDisappearDelay = v,
                 c -> c.cursorDisappearDelay, (c, v) -> c.cursorDisappearDelay = v));
         out.add(floats("cursorFadeOutDuration", s -> s.cursorFadeOutDuration, (s, v) -> s.cursorFadeOutDuration = v,

@@ -223,6 +223,9 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 光标高度占行高比例（1.0 = 顶格）；来自 State，不随预设变化 */
     private float cursorHeightRatio = 1.0f;
+
+    /** RGB 渐变开关（来自 State） */
+    private boolean rgbGradient;
     private final NeovideConfig config;
     /**
      * 每个 {@code Caret} 一份拖尾状态（多光标）。
@@ -1844,6 +1847,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             effectiveGlowLayers = 0;
         }
         panel.setEffectiveGlowLayers(effectiveGlowLayers);
+        panel.setRgbEnabled(rgbGradient);
 
         panel.beginQuads();
         boolean diagFrame = CursorDiag.shouldSample(frameSeq);
@@ -2076,10 +2080,16 @@ public class CaretAnimator implements Disposable, CaretListener {
                     .getService(com.github.yyyolo7a79.neovidecursor.settings
                             .NeovideCursorSettings.class)
                     .getState().cursorHeightRatio;
+            rgbGradient = com.intellij.openapi.application.ApplicationManager
+                    .getApplication()
+                    .getService(com.github.yyyolo7a79.neovidecursor.settings
+                            .NeovideCursorSettings.class)
+                    .getState().rgbGradient;
         } catch (Throwable ignored) {
             multiCursorNoGlow = false;
             cursorWidthPx = 0;
             cursorHeightRatio = 1.0f;
+            rgbGradient = false;
         }
 
         afterimageTrail.clear();

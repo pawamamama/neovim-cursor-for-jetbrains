@@ -127,8 +127,19 @@ public class CaretTrailPanel extends JComponent {
      * <p><b>为什么默认关</b>：parity 是逐字节比对的黄金基准，
      * 任何绘制变化都会让它变红。实验功能必须默认不影响默认路径。
      */
-    private static final boolean RGB_EXPERIMENTAL =
+    /**
+     * RGB 渐变是否开启。
+     *
+     * <p><b>0.9.58</b>：从「只认启动参数」改为「界面开关优先，启动参数兜底」。
+     * 用户反馈「rgb没见开关」。
+     */
+    private boolean rgbEnabled =
             Boolean.getBoolean("neovide.cursor.rgb");
+
+    /** 设置 RGB 开关（由 CaretAnimator 每帧从 State 同步） */
+    public void setRgbEnabled(boolean on) {
+        this.rgbEnabled = on;
+    }
 
     /** RGB 渐变的终止色（硬编码，可调版明天做） */
     private static final java.awt.Color RGB_END_COLOR = new java.awt.Color(0x7B68EE);
@@ -465,7 +476,7 @@ public class CaretTrailPanel extends JComponent {
         drawQuadGlow(g2, path, glow);
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
-        if (RGB_EXPERIMENTAL) {
+        if (rgbEnabled) {
             // 【T3 RGB 最小可运行案例 —— 实验性，默认关】
             //
             // 用户要求：「先做简单运行案例我明天带你做可调版本」。

@@ -654,6 +654,13 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      */
     public float cursorHeightRatio = 1.0f;
 
+    /**
+     * RGB 纵向渐变（实验性，默认关）。
+     *
+     * <p>用户要求：「rgb没见开关」——原来只有启动参数，现在做成界面开关。
+     */
+    public boolean rgbGradient = false;
+
         /** 2. 拖尾渲染模式 */
         public NeovideConfig.TrailMode trailMode = NeovideConfig.TrailMode.SPRING;
 
@@ -825,6 +832,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         multiCursorNoGlow = from.multiCursorNoGlow;
         cursorWidthPx = from.cursorWidthPx;
         cursorHeightRatio = from.cursorHeightRatio;
+        rgbGradient = from.rgbGradient;
         }
 
         /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
