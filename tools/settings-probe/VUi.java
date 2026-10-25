@@ -271,6 +271,15 @@ public final class VUi {
         return (i >= 0 && i < sliders.size()) ? sliders.get(i) : null;
     }
 
+    /** 按滑块取同一行里的输入框（与 {@link #sliderByKey} 配套）。找不到返回 null。 */
+    public JTextComponent textFieldOf(JSlider slider) {
+        if (slider == null) {
+            return null;
+        }
+        int i = sliders.indexOf(slider);
+        return (i >= 0 && i < textFields.size()) ? textFields.get(i) : null;
+    }
+
     /** 文案包含判断：忽略 null、忽略首尾空白。 */
     private static boolean labelContains(String text, String part) {
         if (text == null || part == null) {

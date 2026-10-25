@@ -198,9 +198,30 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 探针 VDefaultFreeze 的 F-2 只查了 FIELDS 覆盖度，查不到这里 —— 现已补 VLoadState。
         // 0.9.76 新增：目标帧率（只接受 125/144，其他值回落到 125）
         target.targetFps = (from.targetFps == 144) ? 144 : 125;
-        // 斜度：0..100 原样保留；越界或旧值 -1 一律迁移成 100（= 对齐上游）
-        target.slopeTicks = (from.slopeTicks >= 0 && from.slopeTicks <= 100)
-                ? from.slopeTicks : 100;
+        // ==================== 斜度迁移（0.9.81）====================
+        //
+        // 【为什么需要专门迁移】0.9.80 的默认值是 82，0.9.81 改成 100
+        // （公式变了：现在 0=纯矩形、100=完全斜=上游；旧的 82 在新公式下只有
+        //   3.24px 倾斜，不到上游的 4.06px）。
+        //
+        // 若直接把 82 当「用户改过的值」保留，会产生一个**用户没做过的改动**：
+        //   预设「基础」声明的 slope = 100，而 State 里是 82
+        //   → refreshPresetDisplay 判定「已修改」
+        //   → 自动派生「基础 副本」
+        //   → 用户什么都没干，下拉里凭空多出个副本
+        //
+        // 82 是 0.9.80 的**出厂默认**，不是用户选择。所以把它归到 100。
+        // 用户真正调过的其它值（0-81、83-100）原样保留。
+        //
+        // 代价：极少数恰好把滑块停在 82 的用户会被改成 100 —— 但 82 就是那个版本的
+        // 「等于上游」值，归到 100 后观感不变（100 才是真正等于上游）。
+        if (from.slopeTicks == 82) {
+            target.slopeTicks = 100;
+        } else if (from.slopeTicks >= 0 && from.slopeTicks <= 100) {
+            target.slopeTicks = from.slopeTicks;
+        } else {
+            target.slopeTicks = 100;      // 越界 / 旧值 -1 → 对齐上游
+        }
 
         target.diagLogging = from.diagLogging;
         target.multiCursorNoGlow = from.multiCursorNoGlow;

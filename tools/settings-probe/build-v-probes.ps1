@@ -72,7 +72,9 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
         'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState',
         'VReviewFixes', 'VQuadProbeTruth', 'VRgbWash', 'VRankCollapse', 'VDeadField',
-        'VSlopePreset'
+        'VSlopePreset', 'VSlopeMigration'
+# VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：
+# 82（旧出厂默认）→ 100（消除「凭空多出副本」），用户真实值原样保留。
 # VSlopePreset 锁「斜度进预设域」：
 # 82 产出上游系数 / 三个预设都是 82 / 切预设拉回 82 / 默认 82 / 旧值 -1 迁移成 82。
 # VDeadField 锁「字段必须被真正消费」：

@@ -113,8 +113,12 @@ public final class VOrder {
         svc.getState().cursorDisappearDelay = 50;
         conf.reset();
         VUi ui = VUi.build(conf);
-        JTextComponent tf = ui.textFields.get(0);
-        JSlider sl = ui.sliders.get(0);
+        // 【0.9.81 修复：不能再用 get(0)】
+        // 面板渲染顺序是 Inline→Cross→Color→Cursor→Glow→Fade，
+        // 索引 0 现在是 shortAnimationLength（量程 2-25），不是 cursorDisappearDelay。
+        // 用按 key 定位（VUi.sliderByKey），语义与顺序解耦。
+        JSlider sl = ui.sliderByKey("cursorDisappearDelay");
+        JTextComponent tf = ui.textFieldOf(sl);
         setText(tf, "333");
         int sliderAfterTyping = sl.getValue();
         conf.apply();

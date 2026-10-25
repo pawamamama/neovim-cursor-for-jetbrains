@@ -30,8 +30,10 @@ public final class VMixed {
         svc.getState().cursorDisappearDelay = 50;
         conf.reset();
         ui = VUi.build(conf);
-        JTextComponent tf = ui.textFields.get(0);
-        JSlider sl = ui.sliders.get(0);
+        // 【0.9.81 修复：不用 get(0)】面板渲染顺序是 Inline→Cross→Color→Cursor→Glow→Fade，
+        // 索引 0 现在是 shortAnimationLength，不是 cursorDisappearDelay。
+        JSlider sl = ui.sliderByKey("cursorDisappearDelay");
+        JTextComponent tf = ui.textFieldOf(sl);
         setText(tf, "333");
         sl.setValue(400);
         conf.apply();
@@ -44,8 +46,8 @@ public final class VMixed {
         svc.getState().cursorDisappearDelay = 50;
         conf.reset();
         ui = VUi.build(conf);
-        tf = ui.textFields.get(0);
-        sl = ui.sliders.get(0);
+        sl = ui.sliderByKey("cursorDisappearDelay");
+        tf = ui.textFieldOf(sl);
         sl.setValue(400);
         setText(tf, "333");
         conf.apply();
