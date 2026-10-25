@@ -198,6 +198,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 探针 VDefaultFreeze 的 F-2 只查了 FIELDS 覆盖度，查不到这里 —— 现已补 VLoadState。
         // 0.9.76 新增：目标帧率（只接受 125/144，其他值回落到 125）
         target.targetFps = (from.targetFps == 144) ? 144 : 125;
+        // 斜度：-1 或 0..100，其他值回落 -1（=用 k 推导）
+        target.slopeTicks = (from.slopeTicks >= 0 && from.slopeTicks <= 100)
+                ? from.slopeTicks : -1;
 
         target.diagLogging = from.diagLogging;
         target.multiCursorNoGlow = from.multiCursorNoGlow;
@@ -374,7 +377,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 派生量：新建数组，绝不复用 State 的对象引用
         // 输入平滑（M4）也在这里落地：它只改这四档系数，而 trailFactors 只在短跳分支被读
         // （TrailCorner.jump():220），因此对跨行分支零影响。
-        c.trailFactors = deriveTrailFactors(s.stretchRatioK, s.typingSmoothness);
+        // 三参版本：slopeTicks >= 0 时用斜度，否则沿用 k 推导（默认 -1 = 旧行为）
+                c.trailFactors = deriveTrailFactors(
+                        s.stretchRatioK, s.typingSmoothness, s.slopeTicks);
     }
 
     /**
@@ -463,6 +468,68 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      *
      * @param smooth 0–1（面板 0–100）；0 = 关闭
      */
+    /**
+     * 「斜度」直接控制四角梯度差（0–100）。
+     *
+     * <p><b>为什么要有它（0.9.79 用户要求拆职责）</b>
+     *
+     * <p>{@code stretchRatioK} 现在同时表达两件事：
+     * <ol>
+     *   <li>四角梯度差 → 决定「斜度」（单行打字时平行四边形的倾角）</li>
+     *   <li>标称倍率 → 面板显示「4.5×」之类的数字</li>
+     * </ol>
+     * 用户想更斜就只能把 k 拉到 8，而 k 的标签含义会让用户以为在改别的东西。
+     * 这正是纪律四-D「一个字段承担两个职责 = 定时炸弹」。
+     *
+     * <p><b>实测各档位能到多斜</b>（2×32 光标，单行右移一字符，tools/bench/BenchSlopeRange）：
+     * <pre>
+     *   slope=0   → 1.00/1.00/1.00/1.00  斜度 0.00px  0.0°  纯矩形
+     *   slope=25  → 1.00/0.91/0.82/0.76  斜度 0.58px  1.0°  轻微
+     *   slope=50  → 1.00/0.83/0.65/0.52  斜度 1.35px  2.4°  明显
+     *   slope=75  → 1.00/0.74/0.47/0.29  斜度 3.03px  5.4°  很斜
+     *   slope=100 → 1.00/0.66/0.29/0.05  斜度 8.87px 15.5°  极端
+     *   默认 k=4.5 →                      4.06px  7.2°   （参照）
+     * </pre>
+     *
+     * @param slope 0–100；{@code < 0} 表示「用 k 推导」（兼容旧行为）
+     */
+    public static float[] deriveTrailFactorsFromSlope(float slope) {
+        if (slope < 0f) {
+            return null;              // 调用方回退到 deriveTrailFactors(k)
+        }
+        float t = clamp(slope, 0f, 100f) / 100f;
+        // 最短角从 1.0（无梯度）线性降到 0.05（极端）
+        float minFac = 1.0f - t * 0.95f;
+        // 四角在 1.0 与 minFac 之间按 k=4.5 的形状 {1, 0.72, 0.42, 0.22} 分配
+        float[] shape = {1.0f, 0.72f, 0.42f, 0.22f};
+        float[] out = new float[4];
+        for (int i = 0; i < 4; i++) {
+            out[i] = round2(1.0f - (1.0f - minFac) * (1.0f - shape[i]) / 0.78f);
+        }
+        return out;
+    }
+
+    /**
+     * 合成四角系数：优先用「斜度」参数，否则用 k 推导，最后叠加输入平滑。
+     *
+     * @param k      拉伸强度（1–8），slope &lt; 0 时才生效
+     * @param smooth 输入平滑（0–1）
+     * @param slope  斜度（0–100），&lt; 0 = 用 k
+     */
+    public static float[] deriveTrailFactors(float k, float smooth, float slope) {
+        float[] bySlope = deriveTrailFactorsFromSlope(slope);
+        float[] base = (bySlope != null) ? bySlope : deriveTrailFactors(k);
+        float s = clamp(smooth, 0f, 1f) * 0.8f;
+        if (s <= 0f) {
+            return base;
+        }
+        float[] out = new float[base.length];
+        for (int i = 0; i < base.length; i++) {
+            out[i] = round2(base[i] + (1.0f - base[i]) * s);
+        }
+        return out;
+    }
+
     public static float[] deriveTrailFactors(float k, float smooth) {
         float[] base = deriveTrailFactors(k);
         float s = clamp(smooth, 0f, 1f) * 0.8f;
@@ -728,6 +795,19 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          */
         public int targetFps = 125;
 
+        /**
+         * 5b. 斜度（0–100，-1 = 用 {@code stretchRatioK} 推导）。
+         *
+         * <p><b>为什么加它</b>（用户 2026-09-79 要求拆职责）：{@code stretchRatioK}
+         * 同时表达「四角梯度差（=斜度）」与「标称倍率」两件事，
+         * 想更斜只能把它拉到 8，而它的标签是「拉伸强度」，容易误解。
+         *
+         * <p><b>默认 -1 表示「沿用 k」</b>：这样升级不掉观感 ——
+         * 老用户的 {@code stretchRatioK} 继续生效，行为完全不变。
+         * 用户第一次拖动斜度滑块时才会写入 0–100。
+         */
+        public int slopeTicks = -1;
+
         /** 5. 辉光淡出（停止后柔和熄灭） */
         public boolean overlayFadeOut = true;
 
@@ -863,6 +943,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             hideNativeCaret = from.hideNativeCaret;
             alwaysHighFps = from.alwaysHighFps;
             targetFps = from.targetFps;
+            slopeTicks = from.slopeTicks;
             overlayFadeOut = from.overlayFadeOut;
             cursorDisappearDelay = from.cursorDisappearDelay;
             cursorFadeOutDuration = from.cursorFadeOutDuration;

@@ -122,6 +122,24 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             + "<b>144</b> 适合 144Hz 以上显示器，实测能精准达成。"
             + "<br/>再往上（165/240）受系统睡眠精度限制，实测反而更不准，所以不提供。";
 
+    /**
+     * 「斜度」的说明。
+     *
+     * <p>实测各档位（2×32 光标，单行右移一字符，tools/bench/BenchSlopeRange）：
+     * <pre>
+     *   0%   → 斜度 0.00px  0.0°  纯矩形（四角等速）
+     *   25%  → 斜度 0.58px  1.0°  轻微
+     *   50%  → 斜度 1.35px  2.4°  明显
+     *   75%  → 斜度 3.03px  5.4°  很斜
+     *   100% → 斜度 8.87px 15.5°  极端
+     *   跟随 → 由「拉伸强度」决定（默认 k=4.5 时 4.06px / 7.2°）
+     * </pre>
+     */
+    private static final String W_SLOPE =
+            "单行打字时四边形<b>倾斜多少</b>。0% 是四角等速（纯矩形），越大越斜。"
+            + "<br/><b>「跟随拉伸强度」</b>表示由上方那一项推导 —— 不碰它就是原来的行为。"
+            + "<br/>注意「输入平滑」会把这个倾斜压平：平滑开大时把斜度也调高，净效果可能不明显。";
+
     /** 目标帧率下拉项（List 而不是数组 —— row.comboBox 要求 Collection） */
     private static final java.util.List<String> FPS_ITEMS =
             Arrays.asList("125 fps（推荐）", "144 fps");
@@ -419,6 +437,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     (s, v) -> s.stretchRatioK = v / 10f,
                     (c, v) -> c.stretchText(v / 10f),
                     v -> String.format(Locale.ROOT, "%.1f×", v / 10f)),
+
+            // 8b. 斜度（0.9.79 拆自 stretchRatioK 的第二个职责）
+            //
+            // 刻度 -1 = 「沿用拉伸强度」（默认，升级不掉观感）；
+            // 0 = 四角等速（纯矩形）；100 = 极端梯度。
+            //
+            // 拖动时把 -1「点亮」成实际值：用户一旦碰它就是要覆盖 k 的推导。
+            new SliderSpec("slopeTicks", -1, 100, 5, "",
+                    s -> s.slopeTicks,
+                    (s, v) -> s.slopeTicks = v,
+                    (c, v) -> v < 0 ? "跟随拉伸强度"
+                            : (v + "%"),
+                    v -> v < 0 ? "跟随" : (v + "%")),
 
             // 9. 跨行动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
             new SliderSpec("animationLength", ANIM_MIN, ANIM_MAX, ANIM_STEP, " s",
@@ -1035,6 +1066,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             g.row("拉伸强度（行内后缘）", row -> {
                 addSlider(row, specOf("stretchRatioK"), springMode);
                 row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                return kotlin.Unit.INSTANCE;
+            });
+            // 【0.9.79 新增：斜度】从「拉伸强度」拆出来的第二个职责。
+            //
+            // 用户想更斜时，原来只能把「拉伸强度」拉到 8 —— 而那个滑块的标签
+            // 是「拉伸强度」，用户以为改的是拖尾长度。两个职责挤在一个字段里
+            // 正是纪律四-D 说的定时炸弹，这里拆开。
+            //
+            // 默认「跟随拉伸强度」：不碰它 = 旧行为完全不变。
+            g.row("斜度（单行倾斜）", row -> {
+                addSlider(row, specOf("slopeTicks"), springMode);
+                row.rowComment(W_SLOPE, COMMENT, NO_LINK).enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });
             return kotlin.Unit.INSTANCE;

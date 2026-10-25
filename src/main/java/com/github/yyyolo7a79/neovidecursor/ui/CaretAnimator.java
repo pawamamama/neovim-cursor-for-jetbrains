@@ -1314,6 +1314,14 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 本帧不重算坐标，也【不更新】lastVisualLine/lastVisualColumn ——
                     // 这样下一帧若几何重新一致，仍能正常重算。
                     imeSkipFrames++;
+                    // 【0.9.79 新增诊断】原来这里完全没有输出，用户报「f;f; 掉帧」
+                    // 时无法判断是不是本判据在拦截。现在记下来：
+                    //   · skip=N  连续跳过第几帧
+                    //   · vpX/offX 两个 API 给出的 x 差多少
+                    // 如果用户报掉帧时日志出现大量 ime-skip，说明本判据误判；
+                    // 若完全没出现，问题在别处（EDT 负载 / 重绘面积）。
+                    CursorDiag.imeSkipPicked(imeSkipFrames, p.x, caretOffset,
+                            editor.offsetToXY(caretOffset).x);
                     return false;
                 }
             }

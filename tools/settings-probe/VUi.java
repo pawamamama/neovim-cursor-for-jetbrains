@@ -128,26 +128,54 @@ public final class VUi {
      * 又重演了一次。现在 13 项与面板实际一致。
      */
     public static final String[] KEYS = {
-            "cursorDisappearDelay", "cursorFadeOutDuration", "tailOpacity", "glowOpacity",
-            "glowLayers", "shadowBlurFactor", "trailSize", "stretchRatioK",
-            "animationLength", "shortAnimationLength", "typingSmoothness",
-            "cursorWidthPx", "cursorHeightRatio"};
+            // ===== 【顺序 = 面板真实渲染顺序，不是 SPECS 声明顺序】=====
+            //
+            // 这两个顺序从 0.9.62（S3 拆分 createPanel）起就不一致：
+            //   SPECS 数组按「字段类别」声明；
+            //   面板按 buildXxxGroup 的【调用顺序】渲染（Inline → Cross → Color →
+            //   Color → Cursor → Glow → Fade）。
+            //   ★ 注意 Cursor 在 Glow 之前（NeovideCursorConfigurable:851/854）。
+            //
+            // 之前 VUi 用 SPECS 顺序，探针拿到的 key 与实际滑块错位，
+            // 但因为每档量程恰好能对上部分，没有立即爆红 —— 直到 0.9.79 加了
+            // 第 14 个滑块（slopeTicks）才全线暴露：面板[0] 量程 [2,25]（= cursorFadeOut
+            // 的旧值）却对应 KEYS[0]=cursorDisappearDelay。
+            //
+            // 现在严格按渲染顺序。校验方法：跑 ZzSliderOrder 打印面板量程，
+            // 与下面 SPEC 的 [min,max] 逐项比对。
+            "shortAnimationLength",   // [0]  Inline 组
+            "typingSmoothness",       // [1]  Inline 组
+            "stretchRatioK",          // [2]  Inline 组
+            "slopeTicks",             // [3]  Inline 组（0.9.79 新增）
+            "trailSize",              // [4]  Cross 组
+            "animationLength",        // [5]  Cross 组
+            "tailOpacity",            // [6]  Color 组
+            "cursorWidthPx",          // [7]  Cursor 组（★ 在 Glow 之前，见 851/854 行）
+            "cursorHeightRatio",      // [8]  Cursor 组
+            "glowOpacity",            // [9]  Glow 组
+            "glowLayers",             // [10] Glow 组
+            "shadowBlurFactor",       // [11] Glow 组
+            "cursorDisappearDelay",   // [12] Fade 组
+            "cursorFadeOutDuration"   // [13] Fade 组
+    };
 
     /** {min, max, step}，下标与 {@link #KEYS} 一一对应。 */
     private static final int[][] SPEC = {
-            {0, 500, 50},      // cursorDisappearDelay   —— 50ms 一档
-            {0, 1000, 25},     // cursorFadeOutDuration  —— 25ms 一档
-            {0, 100, 5},       // tailOpacity            —— 5% 一档
-            {0, 100, 5},       // glowOpacity            —— 5% 一档
-            {1, 12, 1},        // glowLayers             —— 逐层
-            {0, 100, 1},       // shadowBlurFactor       —— 显示层是「锐度 0–100」，步长 1
-            {0, 100, 5},       // trailSize              —— 5% 一档
-            {10, 80, 5},       // stretchRatioK          —— 0.5 倍一档
-            {5, 35, 1},        // animationLength        —— 10ms 一档
-            {2, 25, 1},        // shortAnimationLength   —— 10ms 一档
-            {0, 100, 5},       // typingSmoothness       —— 5% 一档
-            {1, 5, 1},         // cursorWidthPx          —— 1px 一档（0.9.71 补）
-            {30, 100, 10},     // cursorHeightRatio      —— 10% 一档（0.9.71 补）
+            // 下标与 KEYS 一一对应（= 面板渲染顺序，见 KEYS 上方注释）
+            {2, 25, 1},        // [0]  shortAnimationLength   —— 10ms 一档
+            {0, 100, 5},       // [1]  typingSmoothness       —— 5% 一档
+            {10, 80, 5},       // [2]  stretchRatioK          —— 0.5 倍一档
+            {-1, 100, 5},      // [3]  slopeTicks             —— 5% 一档；-1=跟随 k
+            {0, 100, 5},       // [4]  trailSize              —— 5% 一档
+            {5, 35, 1},        // [5]  animationLength        —— 10ms 一档
+            {0, 100, 5},       // [6]  tailOpacity            —— 5% 一档
+            {1, 5, 1},         // [7]  cursorWidthPx          —— 1px 一档
+            {30, 100, 10},     // [8]  cursorHeightRatio      —— 10% 一档
+            {0, 100, 5},       // [9]  glowOpacity            —— 5% 一档
+            {1, 12, 1},        // [10] glowLayers             —— 逐层
+            {0, 100, 1},       // [11] shadowBlurFactor       —— 锐度 0–100，步长 1
+            {0, 500, 50},      // [12] cursorDisappearDelay   —— 50ms 一档
+            {0, 1000, 25},     // [13] cursorFadeOutDuration  —— 25ms 一档
     };
 
     /** 滑块字段名（按面板从上到下的顺序）。 */

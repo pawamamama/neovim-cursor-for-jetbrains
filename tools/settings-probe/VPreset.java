@@ -178,25 +178,34 @@ public final class VPreset {
 
         // 动画预设也不许碰 stretchRatioK / trailMode（契约 §5.3）
         System.out.println();
-        System.out.println("--- V5a2：换动画预设不得改 stretchRatioK / trailMode ---");
+        System.out.println("--- V5a2：换动画预设【改】stretchRatioK、【不改】trailMode ---");
         int bad2 = 0;
         for (int i = 0; i < CursorPresets.ANIM_PRESETS.length; i++) {
             NeovideCursorSettings.State st = svc.getState();
-            st.stretchRatioK = 4.5f;
+            // 先设一个与【任何预设都不同】的 k，这样「预设确实改了它」才可观测。
+            // 原来设 4.5f（= 基础预设的值），选「基础」时改与不改无法区分。
+            st.stretchRatioK = 6.0f;
             st.trailMode = NeovideConfig.TrailMode.SPRING;
             conf.reset();
             ui = VUi.build(conf);
             ui.combos.get(0).setSelectedIndex(i);
             NeovideCursorSettings.State p = conf.pendingForProbe();
-            boolean ok = Float.floatToRawIntBits(p.stretchRatioK)
-                    == Float.floatToRawIntBits(4.5f) && p.trailMode == NeovideConfig.TrailMode.SPRING;
+            // 期望：k == 该预设声明的值；trailMode 保持 SPRING（不进预设域）
+            float wantK = CursorPresets.ANIM_PRESETS[i].stretchRatioK();
+            boolean ok = Math.abs(p.stretchRatioK - wantK) < 1e-4f
+                    && p.trailMode == NeovideConfig.TrailMode.SPRING;
             if (!ok) {
                 bad2++;
             }
             System.out.println("    " + (ok ? "PASS " : "FAIL ") + CursorPresets.ANIM_PRESETS[i].name()
-                    + " stretchRatioK=" + bits(p.stretchRatioK) + " trailMode=" + p.trailMode);
+                    + " k=" + p.stretchRatioK + "（期望 " + wantK + "）"
+                    + " trailMode=" + p.trailMode);
         }
-        check("V5a2 全部动画预设都不改 stretchRatioK / trailMode", bad2 == 0, bad2 + " 个越界");
+        // 【0.9.79 修正断言方向】0.9.46 起 stretchRatioK **已在预设域**
+        // （用户要求「切换预设手感要回来」）。这条断言原来写的是「不改」，
+        // 是 0.9.46 之前的旧契约。现在改为：预设必须改 k，且必须不改 trailMode。
+        check("V5a2 全部动画预设【改】stretchRatioK（0.9.46 起属预设域）"
+                        + "、【不改】trailMode", bad2 == 0, bad2 + " 个越界");
     }
 
     // ------------------------------------------------------- V5 正交性（颜色）
@@ -293,18 +302,36 @@ public final class VPreset {
 
         check("V3-1 默认值 + 全部预设值的越界数 = 0", violations == 0, "越界 " + violations + " 项");
 
-        // 同时核对面板里 10 个 JSlider 的真实量程与上面这张表一致
+        // 同时核对面板里每个 JSlider 的真实量程与【VUi 的契约表】一致。
+        //
+        // 【0.9.79 修复：原来用本方法局部的 mins[]/maxs[]，那是 SPECS 声明顺序，
+        //  而面板按 buildXxxGroup 调用顺序渲染 —— 两者从 0.9.62 S3 重构起就不同。
+        //  于是这条断言从那时起就是"拿错表比对"，一直报假失败。
+        //
+        //  现在改用 VUi.spec(i)（已按渲染顺序对齐，见 VUi.KEYS 的注释），
+        //  量程契约只在 VUi 一处定义。】
         int mismatch = 0;
+        int checked = 0;
         for (int i = 0; i < ui.sliders.size(); i++) {
             JSlider s = ui.sliders.get(i);
-            if (s.getMinimum() != mins[i] || s.getMaximum() != maxs[i]) {
+            int[] spec = VUi.spec(i);
+            if (spec == null) {
+                mismatch++;
+                System.out.println("    FAIL VUi 契约表缺第 " + i + " 项（"
+                        + VUi.nameOf(i) + "）");
+                continue;
+            }
+            checked++;
+            if (s.getMinimum() != spec[0] || s.getMaximum() != spec[1]) {
                 mismatch++;
                 System.out.println("    FAIL 量程不符 " + VUi.nameOf(i)
                         + " 面板=[" + s.getMinimum() + "," + s.getMaximum()
-                        + "] 契约=[" + mins[i] + "," + maxs[i] + "]");
+                        + "] 契约=[" + spec[0] + "," + spec[1] + "]");
             }
         }
-        check("V3-2 面板 11 个滑块的量程与契约 §6.2 + M4 增补逐项一致", mismatch == 0, mismatch + " 项不符");
+        check("V3-2 面板 " + checked + " 个滑块的量程与 VUi 契约表逐项一致",
+                mismatch == 0 && checked == ui.sliders.size(),
+                mismatch + " 项不符（已核对 " + checked + " 项）");
     }
 
     private static int[] toArray(java.util.List<Integer> list) {
@@ -351,8 +378,12 @@ public final class VPreset {
         // 等字段表重构落地后这里会变成「从表导出」，届时本断言自动跟随）。
         // 23 = stateVersion(1) + 19 参数 + 3 预设元数据（animPresetBase / customAnimPresets / animCustomName）。
         // 0.9.9 把 0.9.8 的单个覆盖串拆成「自建预设表 + 当前选中名」两项。
-        check("V14-1 State 的 public 实例字段数 == 23（stateVersion + 19 参数 + 3 预设元数据）",
-                fields == 23, "fields=" + fields);
+        // 【0.9.79 更新基线】0.9.51 起陆续新增：
+        //   diagLogging / multiCursorNoGlow / cursorWidthPx / cursorHeightRatio /
+        //   rgbGradient / targetFps / slopeTicks  → 23 变 30
+        // 这条断言的用途是「新增字段要有人知道」，它工作了。
+        check("V14-1 State 的 public 实例字段数 == 30（23 + 后续 7 个新增）",
+                fields == 30, "fields=" + fields);
 
         // 契约 §5.2 的 P-1 语义是「预设是纯动作，不持久化『当前选中了哪个预设的哪个值副本』」，
         // 但它允许两个**元数据**字段：

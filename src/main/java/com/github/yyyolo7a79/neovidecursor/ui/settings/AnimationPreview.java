@@ -684,16 +684,46 @@ public final class AnimationPreview extends JComponent {
         repaint();
     }
 
+    /**
+     * 四角 rank（与生产代码 SpringTrail.assignRanks 同一套算法）。
+     *
+     * <p><b>【0.9.79 修复：预览曾用旧版塌缩算法】</b>
+     *
+     * <p>本方法原来是「比它小的有几个」计数：
+     * <pre>
+     *   for (j) if (al[j] &lt; al[i]) r[i]++;
+     * </pre>
+     * 和对齐度相等时双方都不计数 → 纯水平移动塌成 2 档（rank 0 2 2 0），
+     * 同侧上下角同速 → 预览里永远是矩形。
+     *
+     * <p>0.9.77 修了生产代码的 {@code SpringTrail.assignRanks()}，
+     * 但**预览窗是另一份独立实现**，于是：生产里斜缎带出来了，
+     * 预览里还是矩形 —— 用户看到「动画预览没有变斜」。
+     *
+     * <p>这与四-G「假通过 B：探针复刻逻辑而非调用生产代码」是同一类错误：
+     * 同一套算法存在两份实现，改一份另一份不会跟着变。
+     *
+     * <p>现在改为与生产完全一致的「稳定排序 + 索引 tiebreak」。
+     */
     private int[] assignRanks(double cx, double cy) {
         double[] al = new double[4];
         for (int i = 0; i < 4; i++) {
             al[i] = corners[i].calculateDirectionAlignment(cursorW, cursorH, cx, cy);
         }
-        int[] r = new int[4];
-        for (int i = 0; i < 4; i++) {
-            for (int j = 0; j < 4; j++) {
-                if (al[j] < al[i]) r[i]++;
+        // 稳定插入排序：只有严格大于才后移，并列保持原始顺序（索引 tiebreak）
+        int[] order = {0, 1, 2, 3};
+        for (int i = 1; i < 4; i++) {
+            int key = order[i];
+            int j = i - 1;
+            while (j >= 0 && al[order[j]] > al[key]) {
+                order[j + 1] = order[j];
+                j--;
             }
+            order[j + 1] = key;
+        }
+        int[] r = new int[4];
+        for (int k = 0; k < 4; k++) {
+            r[order[k]] = k;
         }
         return r;
     }

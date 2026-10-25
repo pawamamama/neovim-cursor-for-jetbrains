@@ -149,9 +149,21 @@ public final class CursorPresetApplier {
         NeovideCursorSettings.State s = svc.getState();
         s.tailColor = p.tailColor();
         s.shadowColor = p.shadowColor();
+        // 【0.9.79 修复：Tools 切颜色时没同步 rgbGradient】
+        //
+        // 0.9.75 给颜色预设加了 rgbWash 标记（「彩虹（动态）」= true，其余 false），
+        // 设置面板的 onColorPresetPicked / restoreColorPreset 都同步写了；
+        // **但 Tools 菜单这条路径忘了写** —— 于是：
+        //   · 从「彩虹」在 Tools 里切到「冰蓝」→ 两个 HEX 变了，
+        //     但 rgbGradient 仍是 true → 绘制层继续走色相循环 → 光标还是彩虹
+        //   · 用户看到「切了颜色没变化，只有从设置面板切才管用」
+        //
+        // 这与「两条路径语义必须一致」是同一类问题（restoreSkipping 那次也是）。
+        s.rgbGradient = p.rgbWash();
         svc.persistQuietly();
         NeovideCaretManager.applyConfig();
-        LOG.info("neovide-cursor: 已应用颜色预设 " + p.name());
+        LOG.info("neovide-cursor: 已应用颜色预设 " + p.name()
+                + " rgbWash=" + p.rgbWash());
         return p;
     }
 
@@ -213,8 +225,12 @@ public final class CursorPresetApplier {
             return null;
         }
         for (CursorPresets.ColorPreset p : CursorPresets.COLOR_PRESETS) {
+            // 【0.9.79】必须同时比对 rgbWash，否则：
+            // 「彩虹」与「原版粉色」的两个 HEX 完全相同（都是 #FFC0CB），
+            // 只比 HEX 会导致菜单里两个预设同时勾选，或者切到彩虹后仍显示「原版粉色」。
             if (p.tailColor().equalsIgnoreCase(s.tailColor)
-                    && p.shadowColor().equalsIgnoreCase(s.shadowColor)) {
+                    && p.shadowColor().equalsIgnoreCase(s.shadowColor)
+                    && p.rgbWash() == s.rgbGradient) {
                 return p;
             }
         }

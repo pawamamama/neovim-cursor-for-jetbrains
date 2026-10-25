@@ -181,10 +181,25 @@ public class CaretTrailPanel extends JComponent {
     /**
      * 色相循环的周期（毫秒）—— 整条色相带前移一圈的时间。
      *
-     * <p>取 3000ms：上游 wash 的 hue 周期是 4000ms，但那是作用在整块文字上的
-     * 氛围变化；光标是高频关注的细条，4 秒一圈会显得几乎没动。
+     * <p><b>0.9.79 改回 4000ms，照抄上游</b>：用户要求「旋转方式也一样」。
+     * 上游 {@code --dsh-claude-period-wash-hue = 4000ms}。
+     * 我之前改成 3000ms 的理由是「4 秒一圈显得没动」，但那是主观判断，
+     * 与用户「照上游」的要求冲突，现以后者为准。
      */
-    private static final long RGB_HUE_PERIOD_MS = 3000L;
+    private static final long RGB_HUE_PERIOD_MS = 4000L;
+
+    /**
+     * 色带相位漂移周期（毫秒）。
+     *
+     * <p>对应上游 {@code --dsh-claude-period-wash-drift = 5000ms}。
+     * 上游用这个周期做「八层色团的位置循环」（{@code background-position} 四段关键帧）；
+     * 我们是一条细线，做不了八层，但可以照抄**节拍**：
+     * 让沿长度方向的色带相位以 5000ms 为周期缓慢滑动。
+     *
+     * <p>两个不同周期（4000 旋转 + 5000 漂移）叠加，避免「每 4 秒整条同时跳一下」
+     * 的机械感 —— 这正是上游用两个动画的理由。
+     */
+    private static final long RGB_DRIFT_PERIOD_MS = 5000L;
 
     /**
      * 沿长度方向铺几个完整色相圈。
@@ -194,8 +209,16 @@ public class CaretTrailPanel extends JComponent {
      */
     private static final float RGB_HUE_SPAN = 2.0f;
 
-    /** 饱和度 / 亮度：不用默认 1.0（深色主题上刺眼），0.75/0.95 鲜亮不刺目 */
-    private static final float RGB_HUE_SATURATION = 0.75f;
+    /**
+     * 饱和度 / 亮度。
+     *
+     * <p><b>0.9.79 饱和度 0.75 → 0.42</b>：用户反馈「rgb 太土了」。
+     * 0.75 在深色主题上是彩虹糖那种艳；0.42 是雾面色。
+     *
+     * <p>为什么不是更低：0.3 以下会发灰，在深色背景上像脏了。
+     * 亮度保持 0.95（降低会让它在深色背景上更加灰暗）。
+     */
+    private static final float RGB_HUE_SATURATION = 0.42f;
     private static final float RGB_HUE_BRIGHTNESS = 0.95f;
 
     /** 色相循环起始时刻（纳秒）；-1 = 尚未初始化 */
@@ -242,8 +265,25 @@ public class CaretTrailPanel extends JComponent {
         if (rgbPhaseStartNanos < 0L) {
             rgbPhaseStartNanos = now;
         }
-        double phase = ((now - rgbPhaseStartNanos) / 1_000_000.0) / RGB_HUE_PERIOD_MS;
-        phase -= Math.floor(phase);
+        double elapsedMs = (now - rgbPhaseStartNanos) / 1_000_000.0;
+
+        // 【两个周期叠加，照抄上游的两个动画】
+        //
+        // 上游 motion.css：
+        //   animation: dsh-claude-wash-hue   4000ms linear      infinite,
+        //              dsh-claude-wash-drift 5000ms ease-in-out infinite;
+        //
+        // hue   = 整圈色相旋转（改变所有颜色）
+        // drift = 色团位置循环（改变「哪一段是什么颜色」）
+        //
+        // 我们只有一条细线，没有二维位置可漂，但仍然保留**两个不同周期**：
+        //   huePhase   控制整条色相绕圈
+        //   driftPhase 控制沿长度方向的色带起点偏移
+        // 两个不同步的周期叠加，避免「每 4 秒整条同时换色一次」的机械感。
+        double huePhase = elapsedMs / RGB_HUE_PERIOD_MS;
+        huePhase -= Math.floor(huePhase);
+        double driftPhase = elapsedMs / RGB_DRIFT_PERIOD_MS;
+        driftPhase -= Math.floor(driftPhase);
 
         // 色标：沿长度每 1/8 圈一个点，跨度 2 圈 -> 16 段 + 首尾。
         // 少于 8 段时色带有明显分段（肉眼看得出格子）。
@@ -259,7 +299,8 @@ public class CaretTrailPanel extends JComponent {
         int userAlpha = fillColor == null ? 255 : fillColor.getAlpha();
         for (int i = 0; i <= RGB_WASH_STEPS; i++) {
             rgbFractions[i] = i / (float) RGB_WASH_STEPS;
-            double hue = (phase + rgbFractions[i] * RGB_HUE_SPAN) % 1.0;
+            // huePhase 控制整体旋转，driftPhase 让色带起点缓慢滑动（对应上游 drift）
+            double hue = (huePhase + driftPhase * 0.5 + rgbFractions[i] * RGB_HUE_SPAN) % 1.0;
             if (hue < 0) {
                 hue += 1.0;
             }

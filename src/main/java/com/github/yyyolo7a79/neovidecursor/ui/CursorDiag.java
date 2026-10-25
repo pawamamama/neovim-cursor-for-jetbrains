@@ -161,6 +161,35 @@ eovide-cursor-diag.log}
      *
      * @param blockSpread 块选区各行目标 x 的最大差值；非块选区传 -1
      */
+    /**
+     * 记录一次「被 IME 几何判据拦截」。
+     *
+     * <p><b>为什么需要这条日志</b>：用户报「f;f; 这种全角输入会撕裂掉帧，纯英文不会」。
+     * 现有 IME 判据是「{@code offsetToXY(offset).x != visualPositionToXY(vp).x} 就冻结本帧」——
+     * 如果它在正常输入下误判，表现就是帧被大量跳过（观感掉帧）。
+     *
+     * <p>但原来这条路径**一个字节都不输出**，于是无法区分：
+     * <ul>
+     *   <li>判据在误冻结（日志有大量 ime-skip）</li>
+     *   <li>判据没介入，掉帧在别处（日志无 ime-skip，应查 EDT 负载 / 重绘面积）</li>
+     * </ul>
+     *
+     * @param skipN  连续跳过的第几帧（1 起）
+     * @param vpX    visualPositionToXY 给出的 x
+     * @param offset 当前 caret offset
+     * @param offX   offsetToXY 给出的 x（与 vpX 不同才会走到这里）
+     */
+    static void imeSkipPicked(int skipN, int vpX, int offset, int offX) {
+        if (!enabled()) {
+            return;
+        }
+        // 每 5 帧记一次：判据若误判会连续命中，但要能看出「连续多久」
+        if (skipN == 1 || skipN % 5 == 0) {
+            LOG.info("[ime-skip] skip=" + skipN + " offset=" + offset
+                    + " vpX=" + vpX + " offX=" + offX + " dx=" + (vpX - offX));
+        }
+    }
+
     static void frameSummary(long frameSeq, int caretCount, int trailCount,
                              boolean targetMoved, boolean anyOffsetMoved,
                              double blockSpread, double fps) {
