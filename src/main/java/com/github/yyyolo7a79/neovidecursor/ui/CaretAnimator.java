@@ -1277,10 +1277,8 @@ public class CaretAnimator implements Disposable, CaretListener {
             }
             double width = resolveCursorWidth(config.hideNativeCaret, realCursorWidth,
                     config.cursorWidth);
-            // 【T1】用户设了宽度（>0）就用它，上限 5px
-            if (cursorWidthPx > 0) {
-                width = Math.min(5.0, cursorWidthPx);
-            }
+            // 【T1 / 0.9.59】宽度直接取用户设置（1–5），不再有「0=跟随 IDEA」档位
+            width = Math.max(1.0, Math.min(5.0, cursorWidthPx));
 
             // ==================== 多光标：逐 Caret 更新 ====================
             //
@@ -2087,7 +2085,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     .getState().rgbGradient;
         } catch (Throwable ignored) {
             multiCursorNoGlow = false;
-            cursorWidthPx = 0;
+            cursorWidthPx = 2;
             cursorHeightRatio = 1.0f;
             rgbGradient = false;
         }

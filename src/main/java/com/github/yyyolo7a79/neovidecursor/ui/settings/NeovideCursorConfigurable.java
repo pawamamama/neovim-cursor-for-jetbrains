@@ -867,41 +867,52 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
 
                     // ---------- 光标尺寸（T1 / T2）----------
-                    g.row("光标宽度（0 = 跟随 IDEA）", row -> {
-                        Cell<JSlider> c = row.slider(0, 5, 1, 1);
+
+                // ---------- C3. 光标（尺寸 / 颜色效果）----------
+                //
+                // 【职责边界】只管「光标这个矩形本身」：多大、什么颜色效果。
+                // 与「辉光」（围绕矩形的光晕）和「淡出」（时间上的衰减）分开。
+                //
+                // 【为什么从「辉光」组移出来】
+                // 原来这三项被错放在辉光组里 —— 用户截图指出「塞到了辉光那一栏」。
+                // 光标尺寸和辉光没有因果关系，放在一起会让人以为调宽度会影响辉光。
+                panel.group("光标（尺寸 / 颜色效果）", true, cur -> {
+                    cur.row("光标宽度", row -> {
+                        // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
+                        // 那个档位看不出区别。改成纯 1-5px。
+                        Cell<JSlider> c = row.slider(1, 5, 1, 1);
                         JSlider s = c.getComponent();
-                        s.setValue(pending.cursorWidthPx);
-                        javax.swing.JLabel lab = new javax.swing.JLabel(
-                                pending.cursorWidthPx == 0 ? "IDEA"
-                                        : pending.cursorWidthPx + " px");
+                        int initW = Math.max(1, Math.min(5, pending.cursorWidthPx));
+                        s.setValue(initW);
+                        javax.swing.JLabel lab = new javax.swing.JLabel(initW + " px");
                         row.cell(lab);
                         s.addChangeListener(e -> {
                             if (syncingControls) {
                                 return;
                             }
                             pending.cursorWidthPx = s.getValue();
-                            lab.setText(s.getValue() == 0 ? "IDEA" : s.getValue() + " px");
+                            lab.setText(s.getValue() + " px");
                             afterPendingEdited();
                         });
-                        row.rowComment("<b>全局设置，不随预设变化</b>。"
-                                + "0 = 跟随 IDEA 原生宽度（约 5px）；1~5 = 固定像素。"
-                                + "最大 5px（IDEA 原光标宽度上限）。"
+                        row.rowComment("<b>持久配置，全局生效</b>。1~5 像素；"
+                                + "5 = IDEA 粗光标宽度（上限）。"
                                 + "<b>静止时也保持这个宽度。</b>", COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
 
-                    g.row("RGB 渐变（实验性）", row -> {
+                    cur.row("RGB 渐变（实验性）", row -> {
                         bindCheck(row, () -> pending.rgbGradient,
                                 v -> pending.rgbGradient = v)
-                                .comment("<b>实验性</b>。拖尾从上到下做纵向颜色渐变"
+                                .comment("<b>实验性</b>。拖尾纵向颜色渐变"
                                         + "（上端=拖尾颜色，下端=蓝紫）。"
-                                        + "宽度 2px 时几乎看不出效果，"
-                                        + "建议把「光标宽度」调到 4~5px 再开。"
+                                        + "2px 宽也能看出上下色差。<br/>"
+                                        + "<b>与「颜色」组的纯色填充互斥</b>："
+                                        + "开启本项时纯色被覆盖，关闭后自动恢复。"
                                         + "默认关。", COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
 
-                    g.row("光标高度（% 行高）", row -> {
+                    cur.row("光标高度（% 行高）", row -> {
                         Cell<JSlider> c = row.slider(30, 100, 5, 10);
                         JSlider s = c.getComponent();
                         int init = Math.round(pending.cursorHeightRatio * 100);
@@ -916,12 +927,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                             lab.setText(s.getValue() + " %");
                             afterPendingEdited();
                         });
-                        row.rowComment("<b>全局设置，不随预设变化</b>。"
-                                + "100% = 顶格（占满行高，当前行为）；"
-                                + "30% = 只占行高的三成（居中）。"
+                        row.rowComment("<b>持久配置，全局生效</b>。"
+                                + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
                                 + "<b>上限就是顶格，不能超过。</b>", COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
                     });
+                    return kotlin.Unit.INSTANCE;
+                });
                     return kotlin.Unit.INSTANCE;
                 });
 

@@ -476,6 +476,13 @@ public class CaretTrailPanel extends JComponent {
         drawQuadGlow(g2, path, glow);
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
+        // 【RGB 与纯色互斥】
+        //
+        // 用户要求：「开启这个的时候混色要关闭，关闭 rgb 动态混色要恢复」。
+        //
+        // 实现方式就是 if/else —— RGB 开 → 用渐变（不调 setColor）；
+        // RGB 关 → setColor(fillColor)，即原来的纯色路径。
+        // 两条路径不会同时生效，切回来立刻恢复。
         if (rgbEnabled) {
             // 【T3 RGB 最小可运行案例 —— 实验性，默认关】
             //

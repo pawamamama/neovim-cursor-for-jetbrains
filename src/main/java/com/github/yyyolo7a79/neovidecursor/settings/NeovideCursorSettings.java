@@ -645,7 +645,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      * <p><b>为什么不进预设</b>：它是设备级设置（和屏幕/字体相关），
      * 不是观感风格 —— 与输入平滑同理。
      */
-    public int cursorWidthPx = 0;
+    public int cursorWidthPx = 2;   // 0.9.59: 0 档取消（用户说看不出区别），改成 1-5
 
     /**
      * 光标高度占行高的比例（0.3–1.0）。<b>1.0 = 顶格（当前行为）</b>。
