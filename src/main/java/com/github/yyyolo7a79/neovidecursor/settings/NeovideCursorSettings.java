@@ -152,8 +152,22 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 正确做法是**显式重映射**：只有 0/1（基础/缎带）能一对一保留，
         // 其余（3..6 的「社区·快/平滑/柔和/高对比」）一律回落到默认预设 0（基础，辉光开）。
         // 宁可让用户回到默认，也不能把他静默丢进一个关了辉光的预设。
+        // 【0.9.72 修复：上界写死 1 把合法的「纯平滑输入」(2) 踢回「基础」(0)】
+        //
+        // 这段重映射是 0.9.10「七个预设精简到三个」时写的，上界写成 <= 1。
+        // 但精简后数组就是 3 项（0=基础 / 1=缎带 / 2=纯平滑输入），
+        // 上界 1 会把 2 也当成旧下标 —— 用户每次重启从「纯平滑输入」被踹回「基础」。
+        //
+        // 【为什么不做 stateVersion 分支迁移】
+        // 本来正确做法是「依据 stateVersion 区分旧下标 2 与新合法值 2」，但：
+        //   · 本插件实际只有单一用户（作者本人），没有需要保护的历史存量数据；
+        //   · 加一次迁移意味着 STATE_VERSION 1→2 + 一套双分支断言，
+        //     为一个不存在的人群付复杂度成本。
+        // 所以直接按当前数组长度做校验 —— 越界回落默认，合法值原样保留。
+        // 将来若真有外部用户，再按 stateVersion 补迁移。
         int oldBase = from.animPresetBase;
-        target.animPresetBase = (oldBase >= 0 && oldBase <= 1)
+        int lastValid = CursorPresets.ANIM_PRESETS.length - 1;
+        target.animPresetBase = (oldBase >= 0 && oldBase <= lastValid)
                 ? oldBase
                 : CursorPresets.ANIM_PRESET_DEFAULT_INDEX;
 
@@ -164,6 +178,30 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                 (from.customAnimPresets == null) ? "" : from.customAnimPresets;
         target.animCustomName =
                 (from.animCustomName == null) ? "" : from.animCustomName;
+
+        // ==================== 0.9.72：补上漏拷的 5 个字段 ====================
+        //
+        // 【这是 BLOCKER：它们是「重启即失效」的根因】
+        //
+        // 本方法手写逐字段赋值（不是整份拷贝），而 State 有 28 个字段，
+        // 原来只写了 23 个 —— 漏的 5 个是：
+        //   diagLogging / multiCursorNoGlow / cursorWidthPx / cursorHeightRatio / rgbGradient
+        //
+        // 后果：XmlSerializer 会把它们写进 XML（含 cursorWidthPx=5），
+        // 但**每次启动读回时被丢弃**（target 里保持 State 的声明初值），
+        // 于是用户设的光标宽度 / 高度比例 / RGB / 多光标不辉光 / 诊断日志
+        // 重启即回默认，零提示。用户实测反馈「RGB 勾了重启又没了」就是这个。
+        //
+        // 【为什么这是第四处拷贝】项目里「同一个 State 字段要同步几处」已经有：
+        //   ① 字段声明  ② SettingsField.FIELDS  ③ State.copyFrom()  ④ 本方法 loadState
+        // copyFrom 在 0.9.51 补过 diagLogging，而 loadState 从来没补过。
+        // 探针 VDefaultFreeze 的 F-2 只查了 FIELDS 覆盖度，查不到这里 —— 现已补 VLoadState。
+        target.diagLogging = from.diagLogging;
+        target.multiCursorNoGlow = from.multiCursorNoGlow;
+        // 范围 clamp 与 loadState 其他数值字段一致（越界值不能进运行期）
+        target.cursorWidthPx = clamp(from.cursorWidthPx, 1, 5);
+        target.cursorHeightRatio = clamp(from.cursorHeightRatio, 0.3f, 1.0f);
+        target.rgbGradient = from.rgbGradient;
 
         state = target;
 

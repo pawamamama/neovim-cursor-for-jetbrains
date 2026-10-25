@@ -117,8 +117,24 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             "数值越小光晕越散（像雾），越大越收紧（贴近光标边缘）。"
             + "<b>调到最散会明显增加重绘开销</b>，慢机器可能掉帧。默认 73 比较适中。";
 
+    /**
+     * 拉伸强度的说明。
+     *
+     * <p><b>0.9.72 补两点用户实际踩到的事实</b>：
+     * <ol>
+     *   <li>它<b>只作用于单行</b>：跨行分支（{@code TrailCorner.jump} 的 else 分支）
+     *       完全不读 {@code trailFactors}，所以调它换行时毫无反应。原文只说了
+     *       「跨行缎带由拖尾密度控制」，没点明「调本项对跨行无效」。</li>
+     *   <li>它会被「输入平滑」抵消：实测 k 从 4.5 拉到 8.0，最短角只从 0.38 变到 0.26，
+     *       而 {@code round2} 取整 + 平滑把梯度朝 1.0 压，净效果很小。
+     *       用户「拉满了怎么没变化」的疑问就来自这里。</li>
+     * </ol>
+     */
     private static final String W_STRETCH =
-            "<b>只影响单行打字/退格</b>：越大后缘越慢、拉得越长。跨行缎带由「拖尾密度」控制。";
+            "<b>只影响单行打字/退格</b>：越大后缘越慢、拉得越长。"
+            + "<br/><b>调它对换行没有影响</b> —— 跨行缎带由「拖尾密度」和「跨行动画时长」决定。"
+            + "<br/>另外它会被「输入平滑」抵消：平滑把四角速度差压平后，拉伸强度的效果会变弱。"
+            + "两者都调高时，观感可能反而更「平」。";
 
     private static final String W_FADE_OFF =
             "淡出关闭时这两个值不生效，辉光会瞬间消失。";
@@ -160,10 +176,46 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private static final String W_ANIM_COUPLING =
             "这几项只影响时长，拉伸倍率见上方「缎带拉伸强度」。";
 
-    /** 动画时序：「输入平滑」的说明（M4）。必须说清「不改总时长」，否则会被当成第二个短动画时长。 */
+    /**
+     * 「拖尾密度」（trailSize）的说明 —— 0.9.72 新增。
+     *
+     * <p><b>为什么必须解释</b>：这个参数的效果极强但完全没有文案。
+     * 它在跨行分支里决定 {@code leading = animationLength × (1 - trailSize)}：
+     * <pre>
+     *   trailSize = 1.0 → leading = 0 → 前缘两角【瞬时吸附】，只有后缘拖出缎带
+     *   trailSize = 0.5 → leading = 半个 animationLength → 前缘也开始拖
+     *   trailSize = 0.0 → leading = 满 animationLength → 前后缘等速，缎带消失
+     * </pre>
+     * 用户把滑块推到 1.0 会看到「前缘瞬间到位、后缘拉很长」这种不规则四边形 ——
+     * 那正是缎带效果的核心，但没有文案的话会被当成 bug（「怎么一边是硬的」）。
+     */
+    private static final String W_TRAIL_SIZE =
+            "<b>控制跨行缎带的两端差异</b>。"
+            + "1.0 = 前缘在<b>第一帧就到新位置</b>、只有后缘慢慢拖出去（最像缎带）；"
+            + "调小则前缘也开始拖，0 = 前后缘等速、缎带消失。"
+            + "<br/>所以本项只决定跨行；行内打字由「拉伸强度」决定。"
+            + "<br/>注：前缘最快也要 1 帧（约 8ms），不可能真的 0 —— 那是绘制帧率的下限。";
+
+    /** 「跨行动画时长」补充说明：它同时是 trailSize 的基准。 */
+    private static final String W_ANIM_LEN_EXTRA =
+            "<b>它和「拖尾密度」一起决定缎带长度</b>：后缘 = 本值，"
+            + "前缘 = 本值 ×（1 − 拖尾密度）。所以拖尾密度为 1.0 时前缘是 0（瞬间到位）。";
+
+    /**
+     * 动画时序：「输入平滑」的说明。
+     *
+     * <p><b>0.9.72 修正了两处错误陈述</b>：
+     * <ol>
+     *   <li>原文写「全局设置，不随预设变化」—— 0.9.67 已把它改回<b>预设域</b>
+     *       （三个预设各带 smooth 值）。文案不改就是在骗用户。</li>
+     *   <li>漏掉了它与「拉伸强度」<b>互相抵消</b>这个关键事实 —— 见下。</li>
+     * </ol>
+     */
     private static final String W_TYPING_SMOOTH =
-            "<b>全局设置，不随预设变化</b>。把前缘的「瞬间跳到新位置」压平一点，让打字更连贯；"
-            + "0% 原样，100% 最平。只影响单行，跨行不受影响。"
+            "把四角速度差压平一点，让打字更连贯。<b>0% 原样，100% 最平</b>。"
+            + "<br/><b>它与「拉伸强度」互相抵消</b>：两者都在调四角的快慢差，"
+            + "所以把拉伸强度调高、同时又把本项开大，净效果可能几乎看不出来。"
+            + "<br/>只影响单行；跨行缎带不受本项影响（由「拖尾密度」和「跨行动画时长」决定）。"
             + "<br/><b>注意：开得越大，单行连续快速输入时拖尾会跟不上。</b>";
 
     /** 高级（诊断）区：性能诊断开关的说明。该项不持久化。 */
@@ -963,14 +1015,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 row.cell(crossPreview());
                 return kotlin.Unit.INSTANCE;
             });
-            g.row("拖尾密度（整体）", row -> {
+            // 【0.9.72 文案修正】
+            //
+            // 原文写「也影响行内，但行内主要由『缎带拉伸强度』决定」—— 这是错的。
+            // 核实 TrailCorner.jump()：短跳分支（:209-221）只读 shortAnimationLength
+            // 与 trailFactors，**完全不读 trailSize**。trailSize 只出现在跨行分支（:227）。
+            // 所以「也影响行内」是没有依据的陈述，会误导用户去调它试行内手感。
+            g.row("拖尾密度（跨行缎带）", row -> {
                 addSlider(row, specOf("trailSize"), springMode);
-                row.rowComment("<b>控制跨行缎带拉多长</b>（越大越长）。也影响行内，但行内主要由「缎带拉伸强度」决定。", COMMENT, NO_LINK);
+                row.rowComment(W_TRAIL_SIZE, COMMENT, NO_LINK).enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });
             g.row("跨行动画时长", row -> {
                 addSlider(row, specOf("animationLength"), null);
-                row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
+                row.rowComment(W_ANIM_LEN + BR + W_ANIM_LEN_EXTRA, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
             // 契约 §7.3 / §7.4：耦合提示保留在这里（它们讲的就是跨行与短跳的关系）
@@ -1563,9 +1621,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return;
             }
             CustomPresets.Entry e = entries.get(ci);
-            // 自定义预设是【全参数快照】：恢复它 = 把 19 个参数一次性写回
-            SettingsField
-                    .restore(pending, e.snapshot);
+            // 【BLOCKER 修复：必须用 restoreSkipping，不能用 restore】
+            //
+            // 自定义预设快照存的是全部字段，其中包含 4 个「运行环境开关」：
+            //   enabled / hideNativeCaret / trailMode / alwaysHighFps
+            //
+            // 直接 restore 的后果（审查实测确认）：
+            //   · 快照里 enabled=false → 选中该预设并应用 → **整个插件被关掉**
+            //   · hideNativeCaret 被改写 → 触发 IDEA 配色方案 CARET_COLOR 的
+            //     不可逆落盘副作用
+            //
+            // 而 Tools 菜单那条路径（CursorPresetApplier）早已用 restoreSkipping 修过。
+            // 两条路径语义必须一致，否则「菜单切预设安全、面板切预设危险」。
+            // 跳过清单统一放在 SettingsField.RUNTIME_SWITCH_KEYS，避免再次漂移。
+            SettingsField.restoreSkipping(pending, e.snapshot,
+                    SettingsField.RUNTIME_SWITCH_KEYS);
             pending.animCustomName = e.name;
         }
         syncAllControlsFromPending();
@@ -2181,9 +2251,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     .deriveTrailFactors(pending.stretchRatioK, pending.typingSmoothness);
             long trailing = Math.round(pending.shortAnimationLength * 1000f * f[0]);
             long leading = Math.round(pending.shortAnimationLength * 1000f * f[2]);
+            // 【0.9.72：把 smooth 对系数的影响写出来】
+            //
+            // 原来只报「拉伸系数」，而那个系数是 deriveTrailFactors(k, smooth) 的结果 ——
+            // 用户把 smooth 调高后再看这个数字会觉得「我没改拉伸强度啊，怎么系数变了」。
+            // 现在直接标注当前 smooth 值，让两个参数的关系可见。
             singleMoveHint.setText(String.format(Locale.ROOT,
-                    "单行动画时长 = 短动画时长 × 拉伸系数：后缘 %d ms / 横向前缘 %d ms（系数 %.2f×）。",
-                    trailing, leading, f[2] > 0f ? f[0] / f[2] : 0f));
+                    "单行动画时长 = 短动画时长 × 拉伸系数：后缘 %d ms / 横向前缘 %d ms"
+                            + "（系数 %.2f×，已含输入平滑 %.0f%% 的压平效果）。",
+                    trailing, leading, f[2] > 0f ? f[0] / f[2] : 0f,
+                    pending.typingSmoothness * 100f));
         }
         if (crossMoveHint != null) {
             long trailing = Math.round(pending.animationLength * 1000f);
@@ -2198,11 +2275,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 【为什么不直接乘一个系数】那是新的写死数字，需要在多处同步维护，
             // 下一轮审查必然再抓一次。改成「说明它是时间常数」既准确又零新常量。
+            // 【0.9.72 修正：原文写「为 1.00 时前缘为 0」，不准确】
+            //
+            // 实测（VTextFacts 的 T-2）：trailSize=1.0 时前缘是 **1 帧 = 8ms**，不是 0。
+            // 原因是 DampedSpring.update() 首句 if (animationLength <= dt) 归零 ——
+            // leading=0 时第一帧（dt=8ms）就命中短路，但那已经消耗了一帧。
+            // 任何角点至少要跑一帧才会被判为「静止」，所以 0ms 在物理上不存在。
+            String leadText = (leading <= 0)
+                    ? "第 1 帧即到位（约 8 ms）"
+                    : leading + " ms";
             crossMoveHint.setText(String.format(Locale.ROOT,
-                    "跨行动画时长：DampedSpring 时间常数 —— 后缘 = %d ms；前缘 = %d ms"
-                            + "（拖尾密度 %.2f，为 1.00 时前缘为 0）。"
-                            + "实际拖尾约为该值的 2.6 倍（0.35 s 实测约 920 ms / 115 帧）。",
-                    trailing, leading, pending.trailSize));
+                    "跨行动画时长：DampedSpring 时间常数 —— 后缘 = %d ms；前缘 = %s"
+                            + "（拖尾密度 %.2f，为 1.00 时前缘只剩 1 帧）。"
+                            + "<br/>实际拖尾约为该值的 2.6 倍（0.35 s 实测约 920 ms / 115 帧）。",
+                    trailing, leadText, pending.trailSize));
         }
         // 拉伸强度那一行的数值标签里也带派生时长 → 一并刷新
         for (SliderBinding b : bindings) {

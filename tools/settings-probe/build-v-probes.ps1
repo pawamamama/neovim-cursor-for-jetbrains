@@ -70,7 +70,20 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
-        'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding'
+        'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState'
+# VLoadState 守 State 的【第四处拷贝】：loadState。
+# 前三处（字段声明 / FIELDS / copyFrom）都有探针，第四处从来没被守过 ——
+# 结果 loadState 手写 23 条而 State 有 28 字段，漏的 5 个（含 rgbGradient /
+# cursorWidthPx / cursorHeightRatio）每次启动被静默丢弃，用户设了重启就失效。
+# 变异测试已验证：删一条赋值 → L-1 + L-2 双红。
+# VTextFacts 锁「面板文案里的可验证断言与代码一致」：
+# T-1 短跳不读 trailSize / T-2 trailSize=1.0 前缘<=1帧 / T-3 调小前缘变长 /
+# T-4 smooth 在预设域 / T-5 平滑削弱拉伸 / T-6 跨行不读 stretchRatioK。
+# 0.9.72 发现三处文案在骗人（代码改了文案没改），本探针防再犯。, 'VTextFacts'
+# VTextFacts 锁「面板文案里的可验证断言与代码一致」：
+# T-1 短跳不读 trailSize / T-2 trailSize=1.0 前缘≤1帧 / T-3 调小前缘变长 /
+# T-4 smooth 在预设域 / T-5 平滑削弱拉伸 / T-6 跨行不读 stretchRatioK。
+# 0.9.72 发现三处文案在骗人（代码改了文案没改），本探针防再犯。
 # VColorBinding 锁「ColorPanel 三向同步登记一次即全有」：
 # C-1 登记数 == 面板上 ColorPanel 数（漏登记就红）、
 # C-3~C-7 pull/push/differs 三个方向各自真的工作。

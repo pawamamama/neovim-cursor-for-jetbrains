@@ -191,16 +191,31 @@ public final class VOrtho {
 
     // ---------------------------------------------------------------- 6) 老下标迁移
 
-    /** 问题 6：老用户 animPresetBase ∈ 0..6，现在只有 0..2。 */
+    /**
+     * animPresetBase 的越界回落（0.9.72 决策变更）。
+     *
+     * <p><b>原判据</b>：「老下标 0..6 迁移后都必须落到辉光开着的预设」。
+     * 那是 0.9.10 七预设精简为三时的规则 —— 当时 2 是别的预设，
+     * 把它映射到现在的 2（纯平滑输入，关辉光）会让用户莫名失去辉光。
+     *
+     * <p><b>为什么现在改</b>：0.9.72 起数组就是 3 项，<b>2 = 纯平滑输入 是合法值</b>，
+     * 用户主动选中它当然允许关辉光。旧判据会把「我就是要关辉光」当成缺陷来报。
+     *
+     * <p>而且本插件实际只有单一用户（作者本人），没有需要保护的历史存量。
+     *
+     * <p><b>现在只测真正该管的事</b>：越界下标必须回落到「辉光开着」的默认预设，
+     * 不能回落到关辉光那一档。
+     */
     private static void legacyIndexMigration() {
         System.out.println();
-        System.out.println("--- 6a. 老 animPresetBase（0..6）迁移到 3 个预设 ---");
-        int lostShadow = 0;
+        System.out.println("--- 6a. animPresetBase 越界回落（合法值不再强改）---");
+        int bad = 0;
         StringBuilder trace = new StringBuilder();
-        for (int legacy = 0; legacy <= 6; legacy++) {
+        int last = CursorPresets.ANIM_PRESETS.length - 1;
+        // 越界值：必须回落到「辉光开着」的默认预设
+        for (int legacy : new int[]{last + 1, 6, 99, -1}) {
             resetSvc();
             NeovideCursorSettings.State old = new NeovideCursorSettings.State();
-            old.stateVersion = 1;
             old.animPresetBase = legacy;
             V0Env.svc.loadState(old);
 
@@ -208,16 +223,15 @@ public final class VOrtho {
             int idx = CursorPresets.clampAnimPresetIndex(stored);
             CursorPresets.AnimPreset p = CursorPresets.ANIM_PRESETS[idx];
             trace.append(legacy).append("→").append(p.name())
-                    .append(p.useShadow() ? "" : "(关辉光)").append("  ");
+                    .append(p.useShadow() ? "" : "(关辉光!)").append("  ");
             if (!p.useShadow()) {
-                lostShadow++;
+                bad++;
             }
-            System.out.println("    老下标 " + legacy + " 落库=" + stored
-                    + " → 界面上是「" + p.name() + "」 useShadow=" + p.useShadow());
+            System.out.println("    越界 " + legacy + " 落库=" + stored
+                    + " → 「" + p.name() + "」 useShadow=" + p.useShadow());
         }
-        check("O-1 【问题6】老用户无论原来停在第几个预设，迁移后都必须仍是「辉光打开」的预设"
-                        + "（旧 3..6 号高对比类预设已删，不能把他们静默丢进关辉光的纯平滑输入）",
-                lostShadow == 0, lostShadow + " 个老下标落到关辉光的预设 | " + trace);
+        check("O-1 越界下标必须回落到「辉光开着」的预设（合法值原样保留，不再强改）",
+                bad == 0, bad + " 个越界值落到关辉光的预设 | " + trace);
     }
 
     /** 问题 6 的根因：loadState 的 clamp 上界是硬编码 6，与表长脱钩。 */

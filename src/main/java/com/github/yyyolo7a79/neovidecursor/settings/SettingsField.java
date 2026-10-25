@@ -517,6 +517,26 @@ public final class SettingsField {
      * @param skip 要跳过的字段 key（可变参数，null 安全）
      * @return 成功写入的字段数
      */
+    /**
+     * 「运行环境开关」字段 —— 恢复自定义预设时<b>必须跳过</b>。
+     *
+     * <p><b>为什么提成常量</b>：原来这份清单硬写在
+     * {@code CursorPresetApplier} 里，而设置面板那条路径忘了跳过 ——
+     * 于是「Tools 菜单切预设安全、设置面板切预设会把插件关掉」。
+     * 两条路径必须用同一份清单，否则迟早再漂移一次。
+     *
+     * <p><b>这些字段为什么不能进预设快照</b>：
+     * <ul>
+     *   <li>{@code enabled} —— 快照里 false 时，切到该预设会把整个插件关掉</li>
+     *   <li>{@code hideNativeCaret} —— 会改写 IDEA 全局配色方案（不可逆、会落盘）</li>
+     *   <li>{@code trailMode} / {@code alwaysHighFps} —— 性能策略，不是观感</li>
+     * </ul>
+     * 内置预设路径（{@code applyAnimPresetFields}）从不碰这几个，所以自定义路径也必须一致。
+     */
+    public static final String[] RUNTIME_SWITCH_KEYS = {
+            "enabled", "hideNativeCaret", "trailMode", "alwaysHighFps"
+    };
+
     public static int restoreSkipping(NeovideCursorSettings.State s, String snapshot,
                                       String... skip) {
         if (s == null || snapshot == null || snapshot.isEmpty()) {

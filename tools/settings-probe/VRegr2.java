@@ -86,40 +86,73 @@ public final class VRegr2 {
 
     // ---------------------------------------------------------------- 1) F1 重映射
 
-    /** 上一轮 F1：老 animPresetBase（0..6）升级后是什么。 */
+    /**
+     * animPresetBase 的合法值校验（0.9.72 决策变更）。
+     *
+     * <p><b>决策变更原因</b>：本探针原来断言「0/1 保留、2..6 一律回落 0」，
+     * 那是 0.9.10「七个预设精简到三个」时写的老下标迁移规则 —— 当时 2 是别的预设。
+     *
+     * <p>但 0.9.72 起，数组就是 3 项，<b>2 = 纯平滑输入 是合法值</b>。
+     * 旧规则会把用户选的「纯平滑输入」每次重启踢回「基础」。
+     *
+     * <p><b>为什么不做 stateVersion 分支迁移</b>：本插件实际只有单一用户（作者本人），
+     * 没有需要保护的历史存量数据。为一个不存在的用户群加一次迁移 + 双分支断言不划算。
+     * 真出现外部用户时再补（届时 R-1 会变回双分支断言）。
+     *
+     * <p>现在的判据：<b>合法范围内原样保留，越界回落默认</b>。
+     */
     private static void legacyBaseRemap() {
         System.out.println();
-        System.out.println("--- 1. F1 回归：老 animPresetBase 显式重映射（0/1 保留，其余回落默认）---");
-        int[] expect = {0, 1, 0, 0, 0, 0, 0};       // 0、1 保留；2..6（旧自定义/社区/柔和/高对比）回落 0
+        System.out.println("--- 1. animPresetBase 合法值校验（合法保留 / 越界回落）---");
+        int last = CursorPresets.ANIM_PRESETS.length - 1;
         int bad = 0;
         StringBuilder trace = new StringBuilder();
-        for (int legacy = 0; legacy <= 6; legacy++) {
+        // 合法范围内：0..last 必须原样保留
+        for (int v = 0; v <= last; v++) {
             resetSvc();
             NeovideCursorSettings.State old = new NeovideCursorSettings.State();
             old.stateVersion = 1;
-            old.animPresetBase = legacy;
+            old.animPresetBase = v;
             V0Env.svc.loadState(old);
             int got = V0Env.svc.getState().animPresetBase;
-            trace.append(legacy).append("→").append(got).append("  ");
-            if (got != expect[legacy]) {
+            trace.append(v).append("→").append(got).append("  ");
+            if (got != v) {
                 bad++;
-                System.out.println("    FAIL 老下标 " + legacy + " 期望 " + expect[legacy] + " 实际 " + got);
+                System.out.println("    FAIL 合法下标 " + v + " 被改动，实际 " + got);
             }
         }
-        check("R-1 【F1 回归】老 0/1 保留、2..6 一律回落 0（基础）",
+        // 越界：必须回落默认
+        for (int v : new int[]{-1, last + 1, 99}) {
+            resetSvc();
+            NeovideCursorSettings.State old = new NeovideCursorSettings.State();
+            old.animPresetBase = v;
+            V0Env.svc.loadState(old);
+            int got = V0Env.svc.getState().animPresetBase;
+            if (got != CursorPresets.ANIM_PRESET_DEFAULT_INDEX) {
+                bad++;
+                System.out.println("    FAIL 越界 " + v + " 未回落，实际 " + got);
+            }
+        }
+        check("R-1 合法下标（0.." + last + "）原样保留，越界回落默认",
                 bad == 0, bad + " 个不符 | " + trace);
     }
 
-    /** F1 的真正目的：任何老下标都不许被静默丢进关辉光的预设。 */
+    /**
+     * 原 F1 目的：老下标不许被丢进关辉光的预设。
+     *
+     * <p><b>0.9.72 起这条不再适用于「合法下标」</b>：2 = 纯平滑输入 本来就关辉光，
+     * 用户<b>主动选中</b>它当然是允许的。本探针改为只检查<b>越界回落</b>的那一档
+     * —— 越界值必须落到「辉光开着」的默认预设，不能落到关辉光的那一档。
+     */
     private static void legacyBaseNeverTurnsGlowOff() {
         System.out.println();
-        System.out.println("--- 2. F1 目的：迁移后落到「辉光开着」的预设 ---");
+        System.out.println("--- 2. 越界下标回落时必须落到「辉光开着」的预设 ---");
         int bad = 0;
         StringBuilder trace = new StringBuilder();
-        for (int legacy = 0; legacy <= 6; legacy++) {
+        // 只测越界值：合法下标（含 2=纯平滑输入）是用户主动选择的，不该被强改
+        for (int legacy : new int[]{CursorPresets.ANIM_PRESETS.length, 99, -1}) {
             resetSvc();
             NeovideCursorSettings.State old = new NeovideCursorSettings.State();
-            old.stateVersion = 1;
             old.animPresetBase = legacy;
             old.useShadow = true;
             V0Env.svc.loadState(old);
