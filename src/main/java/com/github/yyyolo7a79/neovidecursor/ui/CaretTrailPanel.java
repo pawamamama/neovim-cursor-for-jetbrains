@@ -52,8 +52,16 @@ public class CaretTrailPanel extends JComponent {
      * VSCode 上游的 {@code currentPosition} 全程 float 直接喂 canvas，
      * canvas 支持 sub-pixel 因此平滑；我们改成 double + Path2D 才能对齐。
      */
-    private final double[] polyX = new double[4];
-    private final double[] polyY = new double[4];
+    /** updateCorners 的中转数组（复用，避免每次调用两次 new double[4]） */
+    private final double[] ucX = new double[4];
+    private final double[] ucY = new double[4];
+
+    // 【0.9.74 已删除 polyX / polyY】
+    //
+    // 这对数组原属「单四边形快捷路径」。多光标重构后生产代码全改走
+    // beginQuads() + addQuad()，updateCorners 零调用，于是它们恒为初值 0 ——
+    // 但 cornersForProbe() 仍在读它们，导致探针"验证通过"却验的是死数据。
+    // 现在 cornersForProbe(int) 直接读 quads 存储，这对中转数组已无任何用途。
 
     /** 四边形路径（复用，避免每帧分配）。用 Path2D 而非 Polygon 以保留亚像素精度。 */
     private final Path2D.Double quadPath = new Path2D.Double();
@@ -249,19 +257,21 @@ public class CaretTrailPanel extends JComponent {
                               double x1, double y1,
                               double x2, double y2,
                               double x3, double y3) {
-        // 直接存 double，不做任何取整 —— 取整就是抖动的来源（见字段注释）
-        polyX[0] = x0;
-        polyY[0] = y0;
-        polyX[1] = x1;
-        polyY[1] = y1;
-        polyX[2] = x2;
-        polyY[2] = y2;
-        polyX[3] = x3;
-        polyY[3] = y3;
-
-        // 同步进多四边形存储，让绘制路径只有一条（避免两套代码分叉）
+        // 【0.9.74】不再经过 polyX/polyY 中转 ——
+        // 那对数组在重构后恒为初值 0（生产代码全走 addQuad），
+        // 中转只会让人误以为它是真相源。直接转发，路径更短也更诚实。
+        //
+        // 直接存 double，不做任何取整 —— 取整就是抖动的来源。
+        // 调用方负责先 beginQuads()（本方法的契约与 addQuad 一致）。
+        //
+        // 【为什么用复用的中转数组而不是 new double[]{...}】
+        // 本类多处注释承诺「零分配热路径」。虽然 updateCorners 目前只有探针调用，
+        // 但保留一次每帧两次 new double[4] 的写法，等于给未来留了个坑。
+        // 用成员数组中转，与 addQuad 内部从 quads 读回的做法同源。
+        ucX[0] = x0; ucX[1] = x1; ucX[2] = x2; ucX[3] = x3;
+        ucY[0] = y0; ucY[1] = y1; ucY[2] = y2; ucY[3] = y3;
         beginQuads();
-        addQuad(polyX, polyY, glowStrength);
+        addQuad(ucX, ucY, glowStrength);
     }
 
     /**
@@ -342,18 +352,44 @@ public class CaretTrailPanel extends JComponent {
     }
 
     /**
-     * 探针：四个角点的当前坐标（double）。
+     * 探针：第 {@code i} 个四边形的四个角点坐标（double）。
      *
-     * <p>返回的正是绘制时使用的 {@code polyX/polyY}，不是副本计算 ——
-     * 探针要断言的就是「生产路径有没有保留小数」。
+     * <p><b>0.9.74 修复：原实现读的是 {@code polyX/polyY}，而那对数组已恒为 0。</b>
      *
-     * @return 长度 8 的数组：x0,y0,x1,y1,x2,y2,x3,y3
+     * <p>历史：这对数组原属「单四边形快捷路径」（{@link #updateCorners}）。
+     * 但多光标重构后，生产代码全部改走 {@code beginQuads() + addQuad()}，
+     * {@code updateCorners} 变成**零调用**，于是 {@code polyX/polyY} 永远是初值 0。
+     *
+     * <p>后果：探针读到 8 个 0，却"验证通过"——是**假的安全感**
+     * （与 0.9.66 的 VPreviewSizeLive 只验字段不验绘制同类）。
+     *
+     * <p>现在改读真正的 {@code quads} 存储，与绘制路径同源。
+     *
+     * @param i 四边形下标
+     * @return 长度 8 的数组：x0,y0,x1,y1,x2,y2,x3,y3；越界返回 {@code null}
      */
-    public double[] cornersForProbe() {
+    public double[] cornersForProbe(int i) {
+        if (i < 0 || i >= quadCount) {
+            return null;
+        }
+        int base = i * QUAD_STRIDE;
         return new double[]{
-                polyX[0], polyY[0], polyX[1], polyY[1],
-                polyX[2], polyY[2], polyX[3], polyY[3]
+                quads[base], quads[base + 1],
+                quads[base + 2], quads[base + 3],
+                quads[base + 4], quads[base + 5],
+                quads[base + 6], quads[base + 7]
         };
+    }
+
+    /**
+     * 兼容旧签名：返回第 0 个四边形的角点。
+     *
+     * @deprecated 用 {@link #cornersForProbe(int)} 明确指定下标 ——
+     *             多光标时"第 0 个"不等于"主光标"，容易误判。
+     */
+    @Deprecated
+    public double[] cornersForProbe() {
+        return cornersForProbe(0);
     }
 
     /**
@@ -365,7 +401,21 @@ public class CaretTrailPanel extends JComponent {
      * @return 长度 8：dirX0..3, dirY0..3
      */
     public double[] offsetDirectionsForProbe() {
-        computeOffsetDirections(polyX, polyY, dirX, dirY);
+        // 【0.9.74】同 cornersForProbe()：不能读恒为 0 的 polyX/polyY，
+        // 要从真正的 quads 存储取第 0 个四边形。
+        if (quadCount <= 0) {
+            return null;
+        }
+        int base = 0;
+        quadX[0] = quads[base];
+        quadX[1] = quads[base + 2];
+        quadX[2] = quads[base + 4];
+        quadX[3] = quads[base + 6];
+        quadY[0] = quads[base + 1];
+        quadY[1] = quads[base + 3];
+        quadY[2] = quads[base + 5];
+        quadY[3] = quads[base + 7];
+        computeOffsetDirections(quadX, quadY, dirX, dirY);
         return new double[]{
                 dirX[0], dirX[1], dirX[2], dirX[3],
                 dirY[0], dirY[1], dirY[2], dirY[3]

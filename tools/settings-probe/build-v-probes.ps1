@@ -71,7 +71,11 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 # ---------- 3. 跑探针 ----------
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
         'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState',
-        'VReviewFixes'
+        'VReviewFixes', 'VQuadProbeTruth'
+# VQuadProbeTruth 锁 P4 三处 medium：
+# M-1 HEX 颜色必须校验（否则坏颜色流进绘制层变黑且 decode 返回 true）/
+# M-2 探针不能读恒为 0 的 polyX/polyY（假的安全感）/
+# M-3 updateCorners 零分配 + polyX/polyY 已删。
 # VReviewFixes 锁代码审查抓到的 5 条：
 # S-1 平滑不参与预设 / R-1 thread volatile / R-2 loop 有 try-catch 且能自愈 /
 # A-1 refreshTarget 的 catch 有日志 / M-1 syncConfigToStateAndPersist 有初始化守卫。

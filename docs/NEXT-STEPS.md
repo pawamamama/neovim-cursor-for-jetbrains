@@ -1,107 +1,110 @@
 # 下一步做什么
 
-> 状态：0.9.64 已删除辉光自适应降级，只保留用户原有的「多光标时关闭辉光」开关。
-> 本文按「先做哪个、为什么、怎么算做完」排列。
+> 状态：**v0.9.73 已发布**（https://github.com/pawamamama/neovim-cursor-for-jetbrains/releases/tag/v0.9.73）
+> 待办文档上次更新停留在 0.9.64，2026-10-25 全面核对后重写。
 
 ---
 
-## P0 — 预览窗失真（用户已指定下一个做这个）
+## 已完成（不要再做一次）
 
-**问题**：单行预览窗画出的拉伸比真实单行夸张得多。用户原话：
-「动画的单行删除预览窗口是拉长的很诡异」。
-
-**根因**（已查明，见 `docs/design/PREVIEW-STRETCH-MISMATCH.md`）：
-预览窗每帧把光标从 A 点整体跑到 B 点，用整段行程展示拉伸；
-而真实单行每帧只挪一个字符宽，且用的是 `trailFactors` 那套四角时长。
-预览等于把「跨行」的位移量套在了「单行」的标题下。
-
-**要做的**：
-1. 预览窗改成与 `TrailCorner.jump()` 同一套算法：
-   - 单行预览：每次只挪 1 个字符宽，四角时长 = `shortAnimationLength × trailFactors[rank]`
-   - 跨行预览：`leading = animationLength × (1-trailSize)`，前缘可以到 0
-2. 预览要**真实读取当前设置**（`stretchRatioK` / `typingSmoothness` /
-   `trailSize` / `animationLength` / `shortAnimationLength`），现在用的是简化模型。
-3. 顺带支持「光标大小实时预览」（用户之前提过的需求）。
-
-**完成判据**：
-- 单行预览的拖尾长度与真实编辑器里肉眼一致（可用像素长度比对）
-- 改 `stretchRatioK` / `trailSize` 时预览立刻跟着变
-- 探针新增一条：预览用的四角时长 == `TrailCorner.jump` 同参数下算出的时长
+| 项 | 完成版本 | 守门探针 |
+|---|---|---|
+| 预览窗失真（`charsMoved` 显式设置） | 0.9.65 | `VPreviewBranch` |
+| 预览实时（尺寸 + RGB 真的进入绘制） | 0.9.67 | `VPreviewRealtime` |
+| 面板文案三处缺失说明 | 0.9.72 | `VTextFacts` |
+| GitHub 发布（v0.9.33 → v0.9.73） | 0.9.73 | — |
+| 设置面板 S1/S3 重构 | 0.9.60 / 0.9.62 | 组件树逐位比对 |
+| `SPECS[]` 下标改按 key 查 | 0.9.71 | `VAddSetting` |
+| `ColorPanelBinding` 三向同步 | 0.9.71 | `VColorBinding` |
+| `loadState` 漏拷 5 字段（重启即失效） | 0.9.72 | `VLoadState` |
+| 自定义预设恢复未跳过环境开关 | 0.9.72 | `VLoadState` L-5 |
+| 平滑移出预设 | 0.9.73 | `VSmoothGlobal` |
+| 审查抓到的 4 条 bug（静默 catch / volatile / loop 无保护 / 无初始化守卫） | 0.9.73 | `VReviewFixes` |
 
 ---
 
-## P1 — 面板文案补三处缺失说明
+## P2 — 8 光标长尾（p99 = 44ms）**只记录，暂不做**
 
-用户不需要读代码就能理解参数，这是设置面板的本分。现在缺三条：
+用户决定：「p2 收益低 只记录」。
 
-### 1. `stretchRatioK` 与 `typingSmoothness` 互相抵消
+**已排除**：不是「平滑掉帧」—— 真实 p50 = 8.5ms（117fps）。
 
-实测：`k=4.5` 最短角 0.38，`k=8.0` 最短角 0.26 —— 但 `round2` 取整 +
-输入平滑把梯度朝 1.0 压，净效果很小。用户把 k 从 4.5 拉到 8 却看不出变化，
-会以为滑块坏了。
-
-**文案建议**：「输入平滑会把四角梯度朝同速压平，与拉伸强度部分抵消。
-两者都调高时，拉伸反而不明显。」
-
-### 2. `trailSize = 1.0` 的强效果
-
-`trailSize = 1.0` 让跨行前缘时长恒为 0（瞬时吸附），后缘拖满
-`animationLength`。这是缎带效果的核心，但 UI 里一句解释都没有。
-
-**文案建议**：「1.0 = 前缘瞬时到位、只有后缘拖出缎带。调小则前缘也开始拖。」
-
-### 3. `stretchRatioK` 只影响单行
-
-跨行分支**完全不读** `trailFactors`，所以调 k 对换行没有任何影响。
-现在滑块说明里没写这一点，用户会以为它管全部。
-
-**文案建议**：「只影响行内打字/退格的四角梯度；跨行缎带由『拖尾密度』和
-『跨行动画时长』决定。」
-
----
-
-## P2 — 8 光标长尾（p99 = 44ms）未定位
-
-**已排除**："平滑掉帧" —— 真实 p50 = 8.5ms（117fps）。
-
-**已知**：
-- 慢帧里 13/14 是 `offsetMoved=true`（拖尾正在动）
+**已知证据**：
+- 73 个慢帧里 14 个 >12ms，其中 **13 个是 `offsetMoved=true`**（拖尾正在动）
 - 辉光绘制占其中约 1.6ms
-- JFR 显示 EDT 采样里我们的代码只占 1.6%（14/873）
+- JFR：EDT 采样 873 个，**我们的代码只占 14 个（1.6%）**
 - 剩余约 40ms 在 IntelliJ 自身的编辑器重绘
+  （`IntervalTreeImpl` / `DocumentImpl.processRangeMarkers` 占 46/873）
 
-**下一步要查的**：
-1. 8 光标时 IDEA 自己在做什么（`IntervalTreeImpl` / `DocumentImpl.processRangeMarkers`
-   在 EDT 采样里占 46/873）
-2. 我们的 `repaintRegion` 提交的区域是否过大 —— 8 个光标各提交一次，
-   若区域重叠会让 RepaintManager 重复合成
-3. 是否有必要把 8 个光标的 repaint 合并成一次（当前每个 animator 独立提交）
+**如果将来要做，从这三处入手**：
+1. 8 光标时 IDEA 自己在做什么（为啥 `IntervalTreeImpl` 占比这么高）
+2. `repaintRegion` 提交的区域是否过大 —— 8 个光标各提交一次，区域重叠会让
+   RepaintManager 重复合成
+3. 是否该把 8 个光标的 repaint 合并成一次（当前每个 animator 独立提交）
 
-**注意**：这条是 P2，因为用户当前最强烈的诉求是预览窗失真，
-且长尾在关掉辉光后应显著减轻。
+**为什么收益低**：辉光只占 1.6ms，砍它救不了长尾；真正的 40ms 在 IDEA 侧，
+不受本插件控制。而且用户实测「关掉辉光后长尾明显减轻」，已有出口。
 
 ---
 
-## P3 — 技术债
+## 技术债（记录，不做）
 
-1. **块选区 `charsMoved` 传 -1 的绕法**（`updateBlockCharsMoved` 恒返回 -1）——
-   当时为了修「多光标横向拉伸是单行 2.5 倍」，把块选区强制走归一化判据。
-   正确做法是给块选区一套真实的 charsMoved 语义。
-2. **`CursorDiag` 的 `[trail]` 前缀每帧输出 8 行**（8 光标时），
-   日志涨到 328KB/2 分钟。诊断确实要详，但可以把逐光标快照降频到每 N 次采样一次。
-3. **GitHub release 落后**：线上 v0.9.33，本地 0.9.64。之前 push 任务被中断，
-   未完成。
+### 1. 块选区 `charsMoved = -1`（**结论：不是缺陷**）
+`updateBlockCharsMoved` 恒返回 -1，让 `TrailCorner.jump` 走归一化兜底判据。
+
+**这是正确做法**：块选区的 offset 跨行时天然差几十上百个字符，用它算字符数
+必然 > `typingMaxChars` → 连行内小步移动也被判成跨行 → 横向拉伸暴涨 2.55 倍。
+
+**唯一瑕疵**：归一化判据 `|deltaX/width| <= 8` 依赖光标宽度 —— 宽度 1px 时
+等价 8px 位移、5px 时等价 40px。影响极轻微，与预览窗那个「随字号漂移」同类。
+
+### 2. `CursorDiag` 的 `[trail]` 前缀每帧 8 行
+8 光标时日志涨到 328KB / 2 分钟。可以把逐光标快照降频到每 N 次采样一次。
+不影响功能，只在长时间开诊断时撑大日志。
+
+### 3. `AnimPreset.smoothTicks` 与访问器已成死字段
+0.9.73 平滑移出预设后，该字段不再被任何生产代码读写，
+只有 `VRegr2` / `VPreset9` 等探针在比对预设字段域时读它。
+删它要改一串探针，保留成本更低。已在 javadoc 明确标注。
+
+### 4. `origin` 仓库落后 197 个提交
+`origin` = `yyyyolo7a79-sketch/neovim-cursor-for-jetbrains` 停在 v0.5.1，
+而发布走的是 `fork` = `pawamamama/neovim-cursor-for-jetbrains`（v0.9.73）。
+需确认 `origin` 是否废弃；若废弃可归档。
+
+---
+
+## P4 — 审查剩下的 high / medium（未修）
+
+0.9.72~0.9.73 修了 2 个 blocker、1 个 high、4 条 bug。
+审查报告里还有以下**未修**项，按风险排序：
+
+| 级别 | 问题 | 位置 |
+|---|---|---|
+| high | `matchAnimPreset` 不比 `typingSmoothness`，但（0.9.73 前）`applyAnimPresetFields` 会写它 → 显示层撒谎 | `CursorPresetApplier:182` |
+| medium | `persistQuietly` 在 EDT 上同步 `saveSettings`（可能卡 UI） | `NeovideCursorSettings:458` |
+| medium | `CaretAnimator:1291-1313` 宽度决策被下一行**无条件覆盖**，注释与行为相反 | `CaretAnimator` |
+| medium | `CaretTrailPanel.updateCorners` **零调用** → `polyX/polyY` 恒为 0，但探针仍在读它（在验证死数据） | `CaretTrailPanel:248` |
+| medium | `SettingsField.decode` 的 HEX 分支不校验 → 手改坏的自定义预设能把拖尾变黑且返回 true | `SettingsField` |
+| medium | `addQuad` 每光标每帧 `new double[4]` ×2，与「零分配热路径」的注释矛盾 | `CaretTrailPanel:285` |
+| low | `CursorPresets:353-528` 是 180 行零调用的 0.9.8 override 死 API | `CursorPresets` |
+| low | `CaretAnimator` 的 `glowStrengthFor` / `collectTrailTargets` / `__unusedLastVisualLine` 全是死代码 | `CaretAnimator` |
+| low | `disposeUIResources` 不清 `inlinePreview` / `crossPreview` | `NeovideCursorConfigurable` |
+| low | `apply()` 在 `baseline == null` 时 NPE | `NeovideCursorConfigurable` |
+
+> 完整清单见用户 2026-10-25 收到的审查报告（2 blocker / 6 high / 9 medium / 12 low）。
+
+**注意 high 那条已在 0.9.73 间接触发变化**：`applyAnimPresetFields` 不再写
+`typingSmoothness`，所以「写了却不比对」的矛盾消失了。但 `matchAnimPreset`
+本身仍不看 smooth，若将来又把 smooth 放回预设域会立刻复发。
 
 ---
 
 ## 建议顺序
 
 ```
-P0 预览窗（含光标大小实时预览）  ← 用户已指定
-P1 文案三处                      ← 半小时，收益高
-P2 长尾定位                      ← 需要用户配合实测
-P3 技术债                        ← 有空再说
+P4 里那几条 medium（死代码 / 死数据探针 / 覆盖式赋值）  ← 低风险、纯清理
+其余按需
 ```
 
-P1 建议插在 P0 之后立刻做：改文案几乎零风险，但能直接消除
-「我调了 k 怎么没反应」这类困惑。
+P2 与 P3 按用户决定**只记录不做**。

@@ -203,7 +203,23 @@ public final class SettingsField {
                     }
                     break;
                 }
-                case HEX:
+                case HEX: {
+                    // 【0.9.74 修复：HEX 分支原来完全不校验】
+                    //
+                    // 后果：手改坏的自定义预设串（例如 tailColor=\"not-a-color\"）
+                    // 会被原样写进 State → NeovideColors.parse 解析失败 →
+                    // 返回不透明黑色 → **光标变黑**，而 decode 返回 true（声称成功）。
+                    // 用户看到的是「切了个预设光标黑了」，且没有任何错误提示。
+                    //
+                    // 现在要求 #RRGGBB 或 #AARRGGBB（大小写不限），否则返回 false
+                    // 让调用方保持原值 —— 与 ENUM 分支「非法就不写」的语义一致。
+                    String hex = raw.trim();
+                    if (!isValidHexColor(hex)) {
+                        return false;
+                    }
+                    v = hex;
+                    break;
+                }
                 default: {
                     v = raw.trim();
                     break;
@@ -214,6 +230,35 @@ public final class SettingsField {
         } catch (RuntimeException ex) {
             return false;
         }
+    }
+
+    /**
+     * HEX 颜色串是否合法：{@code #RRGGBB} 或 {@code #AARRGGBB}，大小写不限。
+     *
+     * <p>只做格式校验，不校验"颜色是否好看" —— 那是 UI 的事。
+     * 这里的目标是挡住「明显不是颜色」的串，避免它流进绘制层变成黑色。
+     */
+    public static boolean isValidHexColor(String s) {
+        if (s == null) {
+            return false;
+        }
+        String t = s.trim();
+        if (t.length() != 7 && t.length() != 9) {
+            return false;
+        }
+        if (t.charAt(0) != '#') {
+            return false;
+        }
+        for (int i = 1; i < t.length(); i++) {
+            char c = t.charAt(i);
+            boolean hex = (c >= '0' && c <= '9')
+                    || (c >= 'a' && c <= 'f')
+                    || (c >= 'A' && c <= 'F');
+            if (!hex) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 按名字解析枚举（沿用当前值的枚举类型，不硬编码常量名）。 */

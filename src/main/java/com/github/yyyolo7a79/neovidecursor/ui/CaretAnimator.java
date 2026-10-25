@@ -1283,34 +1283,28 @@ public class CaretAnimator implements Disposable, CaretListener {
             // （IDEA 默认 1，用户设「粗」时 2 或 3），不是像素。
             // 直接当像素用 → 用户设成粗光标时，我们画出 2px 而 IDEA 画 10px。
             //
-            // 正确来源：EditorUtil.getDefaultCaretWidth() —— IDEA 自己的换算方法，
-            // 它把「倍率 × 字体度量」算成真实像素宽度。
+            // ==================== 0.9.74：删掉被覆盖的死代码 ====================
             //
-            // 两个都读一下：优先用 getDefaultCaretWidth（像素），
-            // 失败时退回 getLineCursorWidth（至少能反映"用户设了粗光标"这个事实）。
-            int realCursorWidth = -1;
-            try {
-                realCursorWidth = com.intellij.openapi.editor.ex.util.EditorUtil
-                        .getDefaultCaretWidth();
-            } catch (Throwable ignored) {
-                // 退回倍率（虽然语义不同，但比完全不读好）
-            }
-            if (realCursorWidth <= 0) {
-                try {
-                    int ratio = editor.getSettings().getLineCursorWidth();
-                    // 倍率 → 像素：IDEA 的基准宽度是 1px（普通光标），
-                    // 所以 ratio × 1 近似成立；真正的像素值以 getDefaultCaretWidth 为准。
-                    if (ratio > 0) {
-                        realCursorWidth = ratio;
-                    }
-                } catch (Throwable ignored) {
-                    // 两者都取不到：保持 -1，由 resolveCursorWidth 回退到 config
-                }
-            }
-            double width = resolveCursorWidth(config.hideNativeCaret, realCursorWidth,
-                    config.cursorWidth);
-            // 【T1 / 0.9.59】宽度直接取用户设置（1–5），不再有「0=跟随 IDEA」档位
-            width = Math.max(1.0, Math.min(5.0, cursorWidthPx));
+            // 【审查发现】这里原本有约 25 行代码去读 IDEA 的原生光标宽度
+            // （EditorUtil.getDefaultCaretWidth + getLineCursorWidth 兜底），
+            // 再交给 resolveCursorWidth() 做决策 —— 然后**下一行无条件覆盖它**：
+            //
+            //     double width = resolveCursorWidth(...);   // ← 算出来的值
+            //     width = Math.max(1.0, Math.min(5.0, cursorWidthPx));  // ← 立刻丢掉
+            //
+            // 后果有两条：
+            //   · 每次 refreshTarget 白做两次 EditorUtil 调用 + 两次 try/catch；
+            //   · 那 25 行注释详细解释了「为什么要跟随 IDEA 宽度」，
+            //     而实际行为是「完全不跟随」——**注释与行为相反**，误导后来者。
+            //
+            // 【为什么现在确实是「不跟随」】0.9.59 用户明确要求：
+            // 「宽度最大 5px 应该是 idea 原光标宽度…记住是静止的时候也这么大」，
+            // 并取消了「0 = 跟随 IDEA」这一档。所以宽度就是纯用户设置。
+            //
+            // 【保留 resolveCursorWidth 静态方法】探针 VWidth 在直接调它验证
+            // 它的决策逻辑（那是纯函数、有测试价值），但生产路径不再使用。
+            // 这是**明确记录的技术债**，不是遗漏。
+            double width = Math.max(1.0, Math.min(5.0, cursorWidthPx));
 
             // ==================== 多光标：逐 Caret 更新 ====================
             //
