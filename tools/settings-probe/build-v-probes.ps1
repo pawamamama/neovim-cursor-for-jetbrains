@@ -69,7 +69,12 @@ Step "javac V 探针（$($vprobes.Count) 个）"
 if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
-$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret'
+$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize'
+# VAddSetting 是「设置页加新参数的稳健性」守门探针：State 字段 vs FIELDS 表、
+# copyFrom 覆盖度、面板可建成、reset/apply 无残留脏状态。
+# 已用 4 个变异证明它抓得住漏改（M1 删 FIELDS 项 / M2 漏 copyFrom /
+# M3 key 拼错 / M4 新字段完全不注册），见 docs/SETTINGS-ROBUSTNESS-AUDIT.md。
+# VGlowBudget 已随自适应降级一起删除，不在此列表。
 # VOrder 是「已知偏差上报器」：它的 O-1 断言的是契约 V13 的机械判据，
 # 实测不成立（见 VERIFY-SETTINGS-V2.md 的 F-2），但同一探针里的行为判据成立。
 # 它不参与本脚本的通过门（否则每次跑都会因一条已知文档缺陷而 exit 1），
