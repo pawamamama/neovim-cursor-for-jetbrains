@@ -72,7 +72,20 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
         'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState',
         'VReviewFixes', 'VQuadProbeTruth', 'VRgbWash', 'VRankCollapse', 'VDeadField',
-        'VSlopePreset', 'VSlopeMigration'
+        'VSlopePreset', 'VSlopeMigration',
+        # ============ 0.9.83：补回被遗忘的探针 ============
+        # 这些探针引用的生产类都还在、且 27 个实测全过 ——
+        # 它们只是从这份清单里掉了，等于「写了但从不运行」。
+        # 删掉 = 白丢覆盖；正确做法是补回来。
+        # （实测：30 个里 27 个全过，只有 VReset2/VSepBound/VSleep 有已知失败）
+        'VBaseline', 'VBlockStretch', 'VCursorWidth', 'VDead', 'VDiagPersist',
+        'VGroup', 'VHandFeel', 'VInfo', 'VMCDiff', 'VMultiNoGlow', 'VPresetFeel',
+        'VSelection', 'VSelfCheck', 'VSelFix', 'VSepDiag', 'VSepUi', 'VSize',
+        'VSleep2', 'VStretchDiag', 'VUniform', 'VYourConfig', 'V0Create', 'V0Tree',
+        'VerifyApplyConfig', 'VerifyPanel', 'VerifyPersistence', 'VSmoothGlobal',
+        'VPreviewSize',
+        # 已知有失败但覆盖有效功能，保留运行以便跟踪：
+        'VReset2', 'VSepBound', 'VSleep'
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：
 # 82（旧出厂默认）→ 100（消除「凭空多出副本」），用户真实值原样保留。
 # VSlopePreset 锁「斜度进预设域」：
