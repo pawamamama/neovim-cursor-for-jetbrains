@@ -53,9 +53,12 @@ public final class VDefaultFreeze {
         // 目标帧率（0.9.76 新增）。只允许 125/144 —— 实测 165/240 达不到，
         // 给做不到的数字让用户选是骗人（见 docs/PERFORMANCE-FPS.md）。
         GOLDEN.put("targetFps", "125");
-        // 斜度（0.9.79 新增）。默认 -1 = 「跟随拉伸强度」，即旧行为不变。
-        // 这是有意的：升级不掉观感，用户第一次拖滑块才写入 0-100。
-        GOLDEN.put("slopeTicks", "-1");
+        // 斜度（0.9.80 起进预设域）。默认 82 = 对齐上游
+        // （deriveTrailFactorsFromSlope(82) 产出 [1.000,0.720,0.420,0.220]，
+        //   与上游 k=4.5 的四角系数逐位相同）。
+        // 【默认值变更记录】0.9.79 曾用 -1（=跟随 k），0.9.80 改为 82。
+        // 旧值 -1 在 loadState 里迁移成 82，所以老用户不会停在负数上。
+        GOLDEN.put("slopeTicks", "82");
         GOLDEN.put("overlayFadeOut", "true");
         GOLDEN.put("cursorDisappearDelay", "50");
         GOLDEN.put("cursorFadeOutDuration", "0.075");

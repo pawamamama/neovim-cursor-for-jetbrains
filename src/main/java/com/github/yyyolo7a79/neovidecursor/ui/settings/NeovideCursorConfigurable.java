@@ -137,7 +137,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private static final String W_SLOPE =
             "单行打字时四边形<b>倾斜多少</b>。0% 是四角等速（纯矩形），越大越斜。"
-            + "<br/><b>「跟随拉伸强度」</b>表示由上方那一项推导 —— 不碰它就是原来的行为。"
+            + "<br/><b>82% 是上游原版的值</b>（四角系数 1.00/0.72/0.42/0.22），三个内置预设都用它。"
+            + "<br/><b>本项随预设变化</b>：改了它会自动生成副本，切预设会回到该预设的值。"
             + "<br/>注意「输入平滑」会把这个倾斜压平：平滑开大时把斜度也调高，净效果可能不明显。";
 
     /** 目标帧率下拉项（List 而不是数组 —— row.comboBox 要求 Collection） */
@@ -444,12 +445,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 0 = 四角等速（纯矩形）；100 = 极端梯度。
             //
             // 拖动时把 -1「点亮」成实际值：用户一旦碰它就是要覆盖 k 的推导。
-            new SliderSpec("slopeTicks", -1, 100, 5, "",
+            new SliderSpec("slopeTicks", 0, 100, 5, "",
                     s -> s.slopeTicks,
                     (s, v) -> s.slopeTicks = v,
-                    (c, v) -> v < 0 ? "跟随拉伸强度"
-                            : (v + "%"),
-                    v -> v < 0 ? "跟随" : (v + "%")),
+                    (c, v) -> v + "%",
+                    v -> v + "%"),
 
             // 9. 跨行动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
             new SliderSpec("animationLength", ANIM_MIN, ANIM_MAX, ANIM_STEP, " s",
@@ -2293,6 +2293,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         s.tailOpacity = p.tailOpacity();
         s.cursorDisappearDelay = p.cursorDisappearDelay();
         s.cursorFadeOutDuration = p.cursorFadeOutDuration();
+        // 【0.9.80 斜度进预设域】用户要求「这个参数进预设，改它会生成副本」。
+        // 三个内置预设都是 82（= 对齐上游 trailFactors），所以切预设时
+        // 斜度会回落到 82 —— 这正是「预设决定斜度」的语义。
+        s.slopeTicks = p.slopeTicksValue();
+
         // 【0.9.73 修正：输入平滑不参与预设】
         //
         // 0.9.67 我误读了用户要求「其他持久化 比如平滑关闭」——

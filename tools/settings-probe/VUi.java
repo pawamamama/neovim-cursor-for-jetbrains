@@ -165,7 +165,7 @@ public final class VUi {
             {2, 25, 1},        // [0]  shortAnimationLength   —— 10ms 一档
             {0, 100, 5},       // [1]  typingSmoothness       —— 5% 一档
             {10, 80, 5},       // [2]  stretchRatioK          —— 0.5 倍一档
-            {-1, 100, 5},      // [3]  slopeTicks             —— 5% 一档；-1=跟随 k
+            {0, 100, 5},       // [3]  slopeTicks             —— 5% 一档（0.9.80 起进预设域，82=上游）
             {0, 100, 5},       // [4]  trailSize              —— 5% 一档
             {5, 35, 1},        // [5]  animationLength        —— 10ms 一档
             {0, 100, 5},       // [6]  tailOpacity            —— 5% 一档

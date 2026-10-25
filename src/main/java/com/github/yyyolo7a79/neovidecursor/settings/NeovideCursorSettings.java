@@ -198,9 +198,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 探针 VDefaultFreeze 的 F-2 只查了 FIELDS 覆盖度，查不到这里 —— 现已补 VLoadState。
         // 0.9.76 新增：目标帧率（只接受 125/144，其他值回落到 125）
         target.targetFps = (from.targetFps == 144) ? 144 : 125;
-        // 斜度：-1 或 0..100，其他值回落 -1（=用 k 推导）
+        // 斜度：0..100，其他值（含旧的 -1 = 跟随 k）一律迁移成 82（对齐上游）
         target.slopeTicks = (from.slopeTicks >= 0 && from.slopeTicks <= 100)
-                ? from.slopeTicks : -1;
+                ? from.slopeTicks : 82;
 
         target.diagLogging = from.diagLogging;
         target.multiCursorNoGlow = from.multiCursorNoGlow;
@@ -491,7 +491,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      *   默认 k=4.5 →                      4.06px  7.2°   （参照）
      * </pre>
      *
-     * @param slope 0–100；{@code < 0} 表示「用 k 推导」（兼容旧行为）
+     * @param slope 0–100；{@code < 0} 表示「用 k 推导」（旧值兼容，0.9.80 起不再默认走这条）
      */
     public static float[] deriveTrailFactorsFromSlope(float slope) {
         if (slope < 0f) {
@@ -802,11 +802,18 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          * 同时表达「四角梯度差（=斜度）」与「标称倍率」两件事，
          * 想更斜只能把它拉到 8，而它的标签是「拉伸强度」，容易误解。
          *
-         * <p><b>默认 -1 表示「沿用 k」</b>：这样升级不掉观感 ——
-         * 老用户的 {@code stretchRatioK} 继续生效，行为完全不变。
-         * 用户第一次拖动斜度滑块时才会写入 0–100。
+         * <p><b>0.9.80 起默认 82 并进入预设域</b>（用户要求「这个参数进预设，
+         * 初始就是对齐上游的参数，改这个参数会生成副本」）。
+         *
+         * <p><b>82 是「对齐上游」的值</b>：它让 {@code deriveTrailFactorsFromSlope(82)}
+         * 产出 {@code [1.000, 0.720, 0.420, 0.220]}，与上游 k=4.5 的四角系数逐位相同。
+         * 而 k=4.5 也正是 {@code stretchRatioK} 的默认值 —— 两者自洽。
+         *
+         * <p><b>为什么不保留 -1（跟随 k）作默认</b>：斜度进预设域之后，
+         * 「-1」在切换预设时没有意义（预设必须能确定一个具体值）。
+         * 旧值 -1 在 {@link #loadState} 里会被迁移成 82。
          */
-        public int slopeTicks = -1;
+        public int slopeTicks = 82;
 
         /** 5. 辉光淡出（停止后柔和熄灭） */
         public boolean overlayFadeOut = true;

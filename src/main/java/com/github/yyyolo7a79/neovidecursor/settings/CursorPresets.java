@@ -161,13 +161,25 @@ public final class CursorPresets {
          */
         private final int smoothTicks;
 
+        /**
+         * 斜度（0–100）。
+         *
+         * <p><b>0.9.80 进预设域</b>（用户要求「这个参数进预设吧，初始就是对齐上游的参数，
+         * 改这个参数会生成副本」）。
+         *
+         * <p><b>82 是「对齐上游」的值</b>：反推自 {@code trailFactors = {1.0, 0.72, 0.42, 0.22}}，
+         * slope=82 时我的公式产出 [1.000, 0.720, 0.420, 0.220]，与上游逐位相同。
+         * （推导见 tools/bench/ZzSlopeReverse.java）
+         */
+        private final int slopeTicks;
+
         private AnimPreset(String name, int animLengthTicks, int shortLengthTicks,
                            int trailSizeTicks, int glowLayers,
                            int blurFactorTicks, int glowOpacityTicks,
                            boolean useShadow, boolean overlayFadeOut,
                            int stretchTicks,
                            int tailOpacityTicks, int disappearDelayMs, int fadeOutMs,
-                           int smoothTicks) {
+                           int smoothTicks, int slopeTicks) {
             this.name = name;
             this.animLengthTicks = animLengthTicks;
             this.shortLengthTicks = shortLengthTicks;
@@ -182,6 +194,7 @@ public final class CursorPresets {
             this.disappearDelayMs = disappearDelayMs;
             this.fadeOutMs = fadeOutMs;
             this.smoothTicks = smoothTicks;
+            this.slopeTicks = slopeTicks;
         }
 
         /** 拖尾不透明度（0–1）。 */
@@ -210,6 +223,11 @@ public final class CursorPresets {
 
         public int typingSmoothnessTicks() {
             return smoothTicks;
+        }
+
+        /** 斜度（0–100）。{@link #ANIM_PRESETS} 三个预设都是 82 = 对齐上游。 */
+        public int slopeTicksValue() {
+            return slopeTicks;
         }
 
         /** 拉伸强度（1.0–8.0）。见 {@link #stretchTicks} 的注释。 */
@@ -317,9 +335,10 @@ public final class CursorPresets {
             //   总开关除「多光标关闭辉光」外全开，其余持久化项取默认（含平滑关闭 = 0）。
             //   所以这里 tailOpacity=100（全不透明）、淡出前 50ms、淡出 75ms、平滑 0，
             //   与 State 的默认值逐位一致 —— 保证「首次安装的观感 == 点『基础』的观感」。
-            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,   45, 100,  50,  75,  0),
+            // 第 14 参 = 斜度。三个预设都是 82 = 对齐上游 trailFactors {1.0,0.72,0.42,0.22}
+            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,   45, 100,  50,  75,  0,  82),
             // ② 缎带：跨行动画拉长，斜缎带最明显。
-            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,   80, 100,  50,  75,  0),
+            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,   80, 100,  50,  75,  0,  82),
             // ③ 纯平滑输入：对齐 VS Code 原版的拖尾观感 —— 无辉光扩散、无淡出。
             //
             // 【blur 必须填 60 而不是 0（第二轮审查 F2，high）】
@@ -330,7 +349,7 @@ public final class CursorPresets {
             // → 下拉显示「基准项」但实际已经不是那个预设（显示层撒谎）。
             //
             // 60 = 0.60 = 最柔端。这是「万一用户手动开回辉光时得到柔和光雾」的正确取值。
-            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   20, 100,  50,  75,  20),
+            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   20, 100,  50,  75,  20,  82),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */
