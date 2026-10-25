@@ -453,6 +453,18 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final long STATS_WINDOW_NANOS = 5_000_000_000L;
 
     private int frameCount = 0;
+
+    /**
+     * 最近一次由<b>本 animator 自己</b>测得的帧率（帧/秒），供诊断日志打印。
+     *
+     * <p><b>为什么不用 {@code CursorDiag} 里的全局计数器</b>：那个是 static 的，
+     * 多个编辑器各自的 animator 会往同一个计数器里累加 —— 开两个编辑器时
+     * 帧率表观翻倍。而这里统计的是本 animator 的 {@code recordFrameStats}
+     * 记账，每帧一次，口径干净。
+     *
+     * <p>窗口不满 1 秒前保持 -1，让诊断行显示 {@code fps=?} 而不是编一个数。
+     */
+    private double measuredFps = -1;
     private int peakRepaintArea = 0;
     private long fpsWindowStart = 0L;
 
@@ -971,6 +983,10 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         long elapsed = now - fpsWindowStart;
         if (elapsed >= STATS_WINDOW_NANOS) {
+            // 帧率读数必须在【重置之前】算：下面那段会把 frameCount 归零，
+            // 之后再算就只能得到 0。窗口满 1 秒才锁定一次，其余时间沿用上次读数 ——
+            // 用瞬时值会让日志里的 fps 上下乱跳，看不出趋势。
+            measuredFps = frameCount * 1_000_000_000.0 / elapsed;
             // 【T0-1】日志门控：Debug Log 未开时连 String.format 都不求值。
             // 编辑器标识只在"窗口到期 + Debug 开启"时才计算（每帧绝不计算），
             // 且必须追加在行尾 —— build/analyze-log.ps1:8 与 diag/extract.py:6
@@ -1913,7 +1929,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 块选区时中心 x 应当一致（同一列），spread 接近 0
             CursorDiag.frameSummary(frameSeq,
                     editor.getCaretModel().getAllCarets().size(), diagTotal,
-                    false, anyAnimating, spread);
+                    false, anyAnimating, spread, measuredFps);
         }
 
         computeTrailBounds(currentBounds);

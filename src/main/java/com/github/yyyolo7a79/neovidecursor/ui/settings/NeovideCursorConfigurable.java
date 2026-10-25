@@ -628,399 +628,496 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return BuilderKt.panel(panel -> {
 
                 // ---------- 0. 顶行：左边版本+提示，右边插件信息 ----------
-                //
-                // 【用户要求】「顶行右边有点空 建议这边打个广告 简单介绍一下插件
-                //  然后弄个github跳转 检查更新」
-                //
-                // 用 BorderLayout：WEST 放版本说明，EAST 放 PluginInfoBar。
-                // 这样右侧空白被利用起来，且不挤压左侧的说明文字。
-                panel.row("", row -> {
-                    javax.swing.JPanel bar = new javax.swing.JPanel(
-                            new java.awt.BorderLayout(12, 0));
-                    bar.setOpaque(false);
+                buildVersionRow(panel);
 
-                    javax.swing.JLabel ver = new javax.swing.JLabel(
-                            "<html>Neovide Cursor v" + pluginVersion()
-                                    + " ｜ 下方预览窗实时渲染，"
-                                    + "拖动滑块/改颜色会立刻变化；"
-                                    + "作用于编辑器仍需点「应用 / OK」</html>");
-                    ver.setForeground(new Color(0x8A8A8A));
-                    ver.setFont(ver.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
-                    bar.add(ver, java.awt.BorderLayout.WEST);
-
-                    bar.add(PluginInfoBar.create(pluginVersion()),
-                            java.awt.BorderLayout.EAST);
-
-                    row.cell(bar);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // ---------- 0. 预设置顶（契约 §9.1 的第一块）----------
-                panel.row("", row -> {
-                    row.topGap(TopGap.MEDIUM);
-                    row.bottomGap(BottomGap.SMALL);
-                    row.label("动画预设");
-                    animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
-                    animPresetCombo.addActionListener(e -> onAnimPresetPicked());
-                    row.label("颜色预设");
-                    colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
-                    colorPresetCombo.addActionListener(e -> onColorPresetPicked());
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // 0b. 一键恢复：把当前预设已保存的值重新写进 pending。
-                // 只改 pending（和选预设完全同一条路径），落库仍由「应用 / OK」完成。
-                panel.row("", row -> {
-                    row.bottomGap(BottomGap.SMALL);
-                    animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
-                    animRestoreBtn.addActionListener(e -> restoreAnimPreset());
-                    row.cell(animRestoreBtn);
-                    colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
-                    colorRestoreBtn.addActionListener(e -> restoreColorPreset());
-                    row.cell(colorRestoreBtn);
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // 0c. 自定义预设的三个动作（0.9.9）。
-                //
-                // 【为什么「新建」不是多余的】自动派生只在「改动画字段」时发生；
-                // 用户想「把当前整套观感（含颜色/拉伸强度等）存下来」时需要一个显式出口。
-                // 「重命名」「删除」只对自定义预设可用 —— 内置预设永久只读，按钮置灰。
-                panel.row("", row -> {
-                    row.bottomGap(BottomGap.SMALL);
-                    animNewBtn = new javax.swing.JButton("新建预设…");
-                    animNewBtn.addActionListener(e -> createCustomPreset());
-                    row.cell(animNewBtn);
-                    animRenameBtn = new javax.swing.JButton("重命名…");
-                    animRenameBtn.addActionListener(e -> renameCustomPreset());
-                    row.cell(animRenameBtn);
-                    animDeleteBtn = new javax.swing.JButton("删除");
-                    animDeleteBtn.addActionListener(e -> deleteCustomPreset());
-                    row.cell(animDeleteBtn);
-                    // 初值：内置预设选中时改名/删除置灰。之后每次 refreshPresetDisplay 会再刷。
-                    animRenameBtn.setEnabled(false);
-                    animDeleteBtn.setEnabled(false);
-                    return kotlin.Unit.INSTANCE;
-                });
+                // ---------- 0. 预设区（下拉 / 一键恢复 / 自定义预设动作）----------
+                buildPresetRows(panel);
 
                 // ---------- A. 总开关 ----------
-                panel.group("总开关", true, g -> {
-                    g.row("启用拖尾光标（总开关）", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("隐藏原生光标（覆盖层充当光标）", row -> {
-                        bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
-                                .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("常驻刷新（永远按 8ms 调度）", row -> {
-                        bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
-                                .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    // 【多光标不辉光】全局设置，不随预设变化
-                    g.row("多光标时关闭辉光（只保留拉伸）", row -> {
-                        bindCheck(row, () -> pending.multiCursorNoGlow,
-                                v -> pending.multiCursorNoGlow = v)
-                                .comment("<b>全局设置，不随预设变化</b>。"
-                                        + "光标 ≥ 2 个时把辉光层数强制归零，"
-                                        + "只保留拖尾拉伸形状 —— 减少多光标时的绘制开销。"
-                                        + "单光标不受影响。", COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    // 契约 §2.2：W_COUPLING 挂在 #3/#4 下方的 rowComment
-                    g.row("", row -> {
-                        row.rowComment(W_COUPLING, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
+                buildMasterGroup(panel);
 
                 // ---------- D. 单行输入输出（只影响行内打字/退格）----------
-                //
-                // 分组依据：**看预览窗**。用户不需要记参数名 ——
-                // 想调「打字时的感觉」就来这一组，想调「换行时的缎带」就去下一组。
-                // ---------- D. 单行输入输出 ----------
-                //
-                // 【排版原则】预览窗 + 它影响的参数放在同一组。
-                // 用户不需要记参数名 —— 看着窗调，调的就是窗里发生的事。
-                panel.group("单行输入输出（打字 / 退格）", true, g -> {
-                    g.row("", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        row.cell(inlinePreview());
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("短动画时长（打字/退格）", row -> {
-                        addSlider(row, SPECS[9], null);
-                        row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("输入平滑（拖尾形状 · 全局）", row -> {
-                        addSlider(row, SPECS[10], null);
-                        row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    // 【0.9.38：从「多行缎带」移到此处】
-                    //
-                    // 它改的是 trailFactors，而 trailFactors 只在【短跳】分支被读
-                    // （见 TrailCorner.jump 的 isShortJump 分支），跨行分支用的是
-                    // trailSize + animationLength。
-                    // 放在「多行缎带」下会让用户以为它管跨行 —— 调了没反应。
-                    g.row("拉伸强度（行内后缘）", row -> {
-                        addSlider(row, SPECS[7], springMode);
-                        row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
+                buildInlineGroup(panel);
 
                 // ---------- E. 多行缎带（只影响跨行/跳转）----------
-                panel.group("多行缎带（换行 / 跳转）", true, g -> {
-                    g.row("", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        row.cell(crossPreview());
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    // 【顺序必须保持 6 → 7 → 8】
-                    //
-                    // 探针 Probe4Bugs 的 SLIDER_NAMES / SLIDER_TARGET / tickOf()
-                    // 都按【索引】硬编码。我一度为了分组语义把顺序改成 8→7→6，
-                    // 结果 B1-1 报「7/11 跟随」—— 拖动 sliders[6] 时校验的是
-                    // tickOf(6)=trailSize，而那个滑块实际是 animationLength。
-                    //
-                    // 语义上没坏，但索引契约被破坏。恢复原序。
-                    g.row("拖尾密度（整体）", row -> {
-                        addSlider(row, SPECS[6], springMode);
-                        row.rowComment("<b>控制跨行缎带拉多长</b>（越大越长）。也影响行内，但行内主要由「缎带拉伸强度」决定。", COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("跨行动画时长", row -> {
-                        addSlider(row, SPECS[8], null);
-                        row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    // 契约 §7.3 / §7.4：耦合提示保留在这里（它们讲的就是跨行与短跳的关系）
-                    g.row("", row -> {
-                        row.rowComment(W_ANIM_COUPLING, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("", row -> {
-                        singleMoveHint = new JLabel();
-                        row.cell(singleMoveHint);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("", row -> {
-                        crossMoveHint = new JLabel();
-                        row.cell(crossMoveHint);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
+                buildCrossGroup(panel);
 
                 // ---------- C. 颜色 ----------
-                panel.group("颜色", true, g -> {
-                    g.row("拖尾颜色", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        tailColorPanel = new ColorPanel();
-                        tailColorPanel.setSupportTransparency(false);
-                        // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
-                        // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
-                        tailColorPanel.addActionListener(e -> onColorPanelChanged());
-                        row.cell(tailColorPanel);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("拖尾不透明度", row -> {
-                        addSlider(row, SPECS[2], null);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // ---------- C2. 辉光 ----------
-                panel.group("辉光", true, g -> {
-                    g.row("启用辉光", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> pending.useShadow, v -> {
-                            pending.useShadow = v;
-                            shadowOn.set(v);
-                        });
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光颜色", row -> {
-                        shadowColorPanel = new ColorPanel();
-                        shadowColorPanel.setSupportTransparency(false);
-                        shadowColorPanel.addActionListener(e -> onColorPanelChanged());
-                        row.cell(shadowColorPanel).enabledIf(shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光峰值不透明度", row -> {
-                        addSlider(row, SPECS[3], shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光层数", row -> {
-                        addSlider(row, SPECS[4], shadowOn);
-                        row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
-                        addSlider(row, SPECS[5], shadowOn);
-                        row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    // ---------- 光标尺寸（T1 / T2）----------
+                buildColorGroup(panel);
 
                 // ---------- C3. 光标（尺寸 / 颜色效果）----------
                 //
-                // 【职责边界】只管「光标这个矩形本身」：多大、什么颜色效果。
-                // 与「辉光」（围绕矩形的光晕）和「淡出」（时间上的衰减）分开。
+                // 【调用顺序不是随意的：必须在辉光之前】
                 //
-                // 【为什么从「辉光」组移出来】
-                // 原来这三项被错放在辉光组里 —— 用户截图指出「塞到了辉光那一栏」。
-                // 光标尺寸和辉光没有因果关系，放在一起会让人以为调宽度会影响辉光。
-                panel.group("光标（尺寸 / 颜色效果）", true, cur -> {
-                    cur.row("光标宽度", row -> {
-                        // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
-                        // 那个档位看不出区别。改成纯 1-5px。
-                        addSlider(row, SPECS[11], null);
-                        row.rowComment("<b>持久配置，全局生效</b>。1~5 像素；"
-                                + "5 = IDEA 粗光标宽度（上限）。"
-                                + "<b>静止时也保持这个宽度。</b>", COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
+                // 这两组的顺序在原版里是由「谁先完成 group() 注册」决定的：
+                // 原版把光标组的 panel.group(...) 写在了辉光组的 lambda 体内部，
+                // 而 DialogPanel 的 group() 是【等回调跑完才把组挂到父容器】的，
+                // 于是内层那组先挂、外层辉光后挂 —— 实际渲染顺序是
+                //     颜色 → 光标 → 辉光
+                // 而不是源码里看起来的「辉光在前」。
+                //
+                // S3 抽成两个独立方法后，顺序改成按调用顺序走，一度变成
+                //     颜色 → 辉光 → 光标
+                // 组位置换了，所有控件的遍历索引跟着挪 —— 按索引定位的地方立刻串台
+                // （VRegr2 的 R-8 / R-11 一好一坏）。所以这里显式把光标组放在
+                // 辉光组【之前】，与 0.9.61 的渲染顺序逐位一致。
+                buildCursorGroup(panel);
 
-                    cur.row("RGB 渐变（实验性）", row -> {
-                        bindCheck(row, () -> pending.rgbGradient,
-                                v -> pending.rgbGradient = v)
-                                .comment("<b>实验性</b>。拖尾纵向颜色渐变"
-                                        + "（上端=拖尾颜色，下端=蓝紫）。"
-                                        + "2px 宽也能看出上下色差。<br/>"
-                                        + "<b>与「颜色」组的纯色填充互斥</b>："
-                                        + "开启本项时纯色被覆盖，关闭后自动恢复。"
-                                        + "默认关。", COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    cur.row("光标高度（% 行高）", row -> {
-                        addSlider(row, SPECS[12], null);
-                        row.rowComment("<b>持久配置，全局生效</b>。"
-                                + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
-                                + "<b>上限就是顶格，不能超过。</b>", COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
-                    return kotlin.Unit.INSTANCE;
-                });
+                // ---------- C2. 辉光 ----------
+                buildGlowGroup(panel);
 
                 // ---------- B. 淡出 ----------
-                panel.group("淡出", true, g -> {
-                    g.row("辉光淡出（停止后柔和熄灭）", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        bindCheck(row, () -> pending.overlayFadeOut, v -> {
-                            pending.overlayFadeOut = v;
-                            fadeOn.set(v);
-                        });
-                        return kotlin.Unit.INSTANCE;
-                    });
+                buildFadeGroup(panel);
 
-                    g.row("淡出前保持时长", row -> {
-                        addSlider(row, SPECS[0], fadeOn);
-                        row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    g.row("淡出时长", row -> {
-                        addSlider(row, SPECS[1], fadeOn);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
-
-                // ---------- F. 高级（诊断）（折叠，默认折叠）----------
-                // 从 Tools 菜单挪进来（0.9.6 / M1）：菜单只留 3 项，诊断属于「偶尔用一次」的高级项。
-                // 注意它**不持久化** —— 所以也不参与 isModified()：勾选后点「应用」才生效，重启即失效。
                 // ---------- G. 实验性（默认折叠）----------
-                //
-                // 残影模式从「总开关组」拆到这里，并明确标注「官方不建议使用」。
-                // 理由：AfterimageTrail 是单条历史轨迹模型，多光标只跟主光标；
-                // 且掉帧时残影稀疏、观感与弹簧模式差异大，容易让人误以为是 bug。
-                panel.collapsibleGroup("实验性（官方不建议使用）", false, g -> {
-                    g.row("拖尾渲染模式", row -> {
-                        Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
-                                row.comboBox(MODE_ITEMS, null),
-                                new MutableProperty<String>() {
-                                    @Override public String get() { return modeText(pending.trailMode); }
-                                    @Override public void set(String v) { pending.trailMode = textToMode(v); }
-                                });
-                        com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
-                        trailModeCombo = box;
-                        box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    g.row("", row -> {
-                        row.rowComment("⚠ 残影模式（AFTERIMAGE）为实验性功能，<b>官方不建议日常使用</b>："
-                                + "它记录真实历史位置，掉帧时残影会变稀疏；"
-                                + "且当前<b>只跟随主光标</b>，多光标下只有主光标有残影。"
-                                + "除非你在低帧率环境明确需要它，否则请保持「弹簧（拉伸）」模式。",
-                                COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
+                buildExperimentalGroup(panel);
 
-                panel.collapsibleGroup("高级（诊断）", false, g -> {
-                    g.row("性能诊断（跳过重绘，只跑计算）", row -> {
-                        row.topGap(TopGap.MEDIUM);
-                        // 【T3-2：本轮新引入的回归，medium】
-                        // 原来 getter 读字段 paintDiag，而该字段只在 apply() 里由
-                        // super.apply() 更新。本轮给 syncAllControlsFromPending() 补了
-                        // super.reset() → 它用【陈旧的字段值】覆盖控件，于是
-                        // 「勾选性能诊断 → 换预设」会静默把勾选取消（父提交 c03ea7f^ 不会）。
-                        //
-                        // 修法：让控件自己成为真相 —— getter 之后直接读组件状态，
-                        // 字段只在 apply() 那一瞬同步给 NeovideCaretManager。
-                        Cell<JBCheckBox> diagCell = bindCheck(row, () -> paintDiag, v -> paintDiag = v);
-                        paintDiagCheck = diagCell.getComponent();
-                        paintDiagCheck.addItemListener(e ->
-                                paintDiag = paintDiagCheck.isSelected());
-                        diagCell.comment(W_PAINT_DIAG, COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-
-                    // 诊断日志开关 —— 必须【独立一行】。
-                    //
-                    // 曾经把它塞进上面「性能诊断」那一行，结果两行 label 不匹配：
-                    // 行标题写着「性能诊断（跳过重绘，只跑计算）」，下面却有两个复选框，
-                    // 用户看到「诊断那里怎么两个框框」。
-                    g.row("诊断日志（记录光标状态，供开发者排查）", row -> {
-                        row.bottomGap(BottomGap.SMALL);
-                        bindCheck(row, () -> pending.diagLogging, v -> pending.diagLogging = v)
-                                .comment("勾选后每 15 帧往 idea.log 写一条光标状态（caret / block / draw）。"
-                                                + "复现问题后把 idea.log 发给开发者；长期开着会撑大日志。",
-                                        COMMENT, NO_LINK);
-                        return kotlin.Unit.INSTANCE;
-                    });
-                    return kotlin.Unit.INSTANCE;
-                });
+                // ---------- F. 高级（诊断）（默认折叠）----------
+                buildDiagGroup(panel);
 
                 return kotlin.Unit.INSTANCE;
             });
         } finally {
             suppressDerive = false;
         }
+    }
+
+    // ==================== 分组构建（S3：从 createPanel 逐组抽出）====================
+    //
+    // 【为什么分组抽成方法】createPanel() 原本是一个 465 行的 lambda，9 个组
+    // 平铺在里面。加一个新参数要在 400 多行里找位置、改缩进、补逗号，
+    // 每次都要重新读一遍上下文 —— 这是「加功能容易坏」的真正原因，
+    // 不是代码量本身。
+    //
+    // 现在每组一个方法，签名统一为 (Panel panel)。组内顺序、注释、字段赋值
+    // 原样保留，只是搬了个位置。新增一组 = 写一个方法 + 在 createPanel 里加一行。
+    //
+    // 【纪律】抽组必须手工逐个进行，每抽一个编译一次 —— 机械切行会破坏
+    // panel.group(..., g -> { 的闭合括号（已经因此回滚过两次）。
+
+    /**
+     * 0a. 顶行 —— 左边版本号 + 使用提示，右边插件信息条（GitHub / 检查更新）。
+     *
+     * <p>【用户要求】「顶行右边有点空 建议这边打个广告 简单介绍一下插件
+     * 然后弄个 github 跳转 检查更新」。
+     *
+     * <p>用 BorderLayout：WEST 放版本说明，EAST 放 PluginInfoBar ——
+     * 这样右侧空白被利用起来，且不挤压左侧的说明文字。
+     */
+    private void buildVersionRow(Panel panel) {
+        panel.row("", row -> {
+            javax.swing.JPanel bar = new javax.swing.JPanel(new java.awt.BorderLayout(12, 0));
+            bar.setOpaque(false);
+
+            javax.swing.JLabel ver = new javax.swing.JLabel(
+                    "<html>Neovide Cursor v" + pluginVersion()
+                            + " ｜ 下方预览窗实时渲染，"
+                            + "拖动滑块/改颜色会立刻变化；"
+                            + "作用于编辑器仍需点「应用 / OK」</html>");
+            ver.setForeground(new Color(0x8A8A8A));
+            ver.setFont(ver.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
+            bar.add(ver, java.awt.BorderLayout.WEST);
+
+            bar.add(PluginInfoBar.create(pluginVersion()), java.awt.BorderLayout.EAST);
+
+            row.cell(bar);
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /**
+     * 0b/0c. 预设区 —— 两个下拉、两个「一键恢复」、三个自定义预设动作。
+     *
+     * <p>三块合成一个方法：它们操作的是同一组字段（animPresetCombo /
+     * animRestoreBtn / animNewBtn …），拆开反而要来回跳。
+     */
+    private void buildPresetRows(Panel panel) {
+        // 0b0. 预设下拉（契约 §9.1 的第一块）
+        panel.row("", row -> {
+            row.topGap(TopGap.MEDIUM);
+            row.bottomGap(BottomGap.SMALL);
+            row.label("动画预设");
+            animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
+            animPresetCombo.addActionListener(e -> onAnimPresetPicked());
+            row.label("颜色预设");
+            colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
+            colorPresetCombo.addActionListener(e -> onColorPresetPicked());
+            return kotlin.Unit.INSTANCE;
+        });
+
+        // 0b. 一键恢复：把当前预设已保存的值重新写进 pending。
+        // 只改 pending（和选预设完全同一条路径），落库仍由「应用 / OK」完成。
+        panel.row("", row -> {
+            row.bottomGap(BottomGap.SMALL);
+            animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+            animRestoreBtn.addActionListener(e -> restoreAnimPreset());
+            row.cell(animRestoreBtn);
+            colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+            colorRestoreBtn.addActionListener(e -> restoreColorPreset());
+            row.cell(colorRestoreBtn);
+            return kotlin.Unit.INSTANCE;
+        });
+
+        // 0c. 自定义预设的三个动作（0.9.9）。
+        //
+        // 【为什么「新建」不是多余的】自动派生只在「改动画字段」时发生；
+        // 用户想「把当前整套观感（含颜色/拉伸强度等）存下来」时需要一个显式出口。
+        // 「重命名」「删除」只对自定义预设可用 —— 内置预设永久只读，按钮置灰。
+        panel.row("", row -> {
+            row.bottomGap(BottomGap.SMALL);
+            animNewBtn = new javax.swing.JButton("新建预设…");
+            animNewBtn.addActionListener(e -> createCustomPreset());
+            row.cell(animNewBtn);
+            animRenameBtn = new javax.swing.JButton("重命名…");
+            animRenameBtn.addActionListener(e -> renameCustomPreset());
+            row.cell(animRenameBtn);
+            animDeleteBtn = new javax.swing.JButton("删除");
+            animDeleteBtn.addActionListener(e -> deleteCustomPreset());
+            row.cell(animDeleteBtn);
+            // 初值：内置预设选中时改名/删除置灰。之后每次 refreshPresetDisplay 会再刷。
+            animRenameBtn.setEnabled(false);
+            animDeleteBtn.setEnabled(false);
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /**
+     * A. 总开关组 —— 四项全局开关 + 耦合提示。
+     *
+     * <p>全是「影响整个插件行为」的东西，不随动画预设变化。
+     */
+    private void buildMasterGroup(Panel panel) {
+        panel.group("总开关", true, g -> {
+            g.row("启用拖尾光标（总开关）", row -> {
+                row.topGap(TopGap.MEDIUM);
+                bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("隐藏原生光标（覆盖层充当光标）", row -> {
+                bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
+                        .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("常驻刷新（永远按 8ms 调度）", row -> {
+                bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
+                        .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 【多光标不辉光】全局设置，不随预设变化
+            g.row("多光标时关闭辉光（只保留拉伸）", row -> {
+                bindCheck(row, () -> pending.multiCursorNoGlow,
+                        v -> pending.multiCursorNoGlow = v)
+                        .comment("<b>全局设置，不随预设变化</b>。"
+                                + "光标 ≥ 2 个时把辉光层数强制归零，"
+                                + "只保留拖尾拉伸形状 —— 减少多光标时的绘制开销。"
+                                + "单光标不受影响。", COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 契约 §2.2：W_COUPLING 挂在 #3/#4 下方的 rowComment
+            g.row("", row -> {
+                row.rowComment(W_COUPLING, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /**
+     * D. 单行输入输出 —— 预览窗 + 只影响行内打字/退格的三个参数。
+     *
+     * <p>【分组依据】看预览窗。用户不需要记参数名 ——
+     * 想调「打字时的感觉」就来这一组，想调「换行时的缎带」就去下一组。
+     * 预览窗和它影响的参数放在同一组，看着窗调，调的就是窗里发生的事。
+     */
+    private void buildInlineGroup(Panel panel) {
+        panel.group("单行输入输出（打字 / 退格）", true, g -> {
+            g.row("", row -> {
+                row.topGap(TopGap.MEDIUM);
+                row.cell(inlinePreview());
+                return kotlin.Unit.INSTANCE;
+            });
+            g.row("短动画时长（打字/退格）", row -> {
+                addSlider(row, SPECS[9], null);
+                row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            g.row("输入平滑（拖尾形状 · 全局）", row -> {
+                addSlider(row, SPECS[10], null);
+                row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            // 【0.9.38：从「多行缎带」移到此处】
+            //
+            // 它改的是 trailFactors，而 trailFactors 只在【短跳】分支被读
+            // （见 TrailCorner.jump 的 isShortJump 分支），跨行分支用的是
+            // trailSize + animationLength。
+            // 放在「多行缎带」下会让用户以为它管跨行 —— 调了没反应。
+            g.row("拉伸强度（行内后缘）", row -> {
+                addSlider(row, SPECS[7], springMode);
+                row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /**
+     * E. 多行缎带 —— 跨行预览窗 + 只影响换行/跳转的参数。
+     *
+     * <p>【顺序必须保持 6 → 7 → 8】探针 Probe4Bugs 的 SLIDER_NAMES /
+     * SLIDER_TARGET / tickOf() 都按【索引】硬编码。曾为了分组语义把顺序改成
+     * 8→7→6，结果 B1-1 报「7/11 跟随」—— 拖动 sliders[6] 时校验的是
+     * tickOf(6)=trailSize，而那个滑块实际是 animationLength。
+     * 语义上没坏，但索引契约被破坏。恢复原序。
+     */
+    private void buildCrossGroup(Panel panel) {
+        panel.group("多行缎带（换行 / 跳转）", true, g -> {
+            g.row("", row -> {
+                row.topGap(TopGap.MEDIUM);
+                row.cell(crossPreview());
+                return kotlin.Unit.INSTANCE;
+            });
+            g.row("拖尾密度（整体）", row -> {
+                addSlider(row, SPECS[6], springMode);
+                row.rowComment("<b>控制跨行缎带拉多长</b>（越大越长）。也影响行内，但行内主要由「缎带拉伸强度」决定。", COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            g.row("跨行动画时长", row -> {
+                addSlider(row, SPECS[8], null);
+                row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            // 契约 §7.3 / §7.4：耦合提示保留在这里（它们讲的就是跨行与短跳的关系）
+            g.row("", row -> {
+                row.rowComment(W_ANIM_COUPLING, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            g.row("", row -> {
+                singleMoveHint = new JLabel();
+                row.cell(singleMoveHint);
+                return kotlin.Unit.INSTANCE;
+            });
+            g.row("", row -> {
+                crossMoveHint = new JLabel();
+                row.cell(crossMoveHint);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /** C. 颜色 —— 拖尾纯色 + 不透明度。RGB 渐变在「光标」组，两者互斥。 */
+    private void buildColorGroup(Panel panel) {
+        panel.group("颜色", true, g -> {
+            g.row("拖尾颜色", row -> {
+                row.topGap(TopGap.MEDIUM);
+                tailColorPanel = new ColorPanel();
+                tailColorPanel.setSupportTransparency(false);
+                // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
+                // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
+                tailColorPanel.addActionListener(e -> onColorPanelChanged());
+                row.cell(tailColorPanel);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("拖尾不透明度", row -> {
+                addSlider(row, SPECS[2], null);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /** C2. 辉光 —— 围绕光标矩形的光晕。四个参数全部受「启用辉光」联动置灰。 */
+    private void buildGlowGroup(Panel panel) {
+        panel.group("辉光", true, g -> {
+            g.row("启用辉光", row -> {
+                row.topGap(TopGap.MEDIUM);
+                bindCheck(row, () -> pending.useShadow, v -> {
+                    pending.useShadow = v;
+                    shadowOn.set(v);
+                });
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("辉光颜色", row -> {
+                shadowColorPanel = new ColorPanel();
+                shadowColorPanel.setSupportTransparency(false);
+                shadowColorPanel.addActionListener(e -> onColorPanelChanged());
+                row.cell(shadowColorPanel).enabledIf(shadowOn);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("辉光峰值不透明度", row -> {
+                addSlider(row, SPECS[3], shadowOn);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("辉光层数", row -> {
+                addSlider(row, SPECS[4], shadowOn);
+                row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
+                addSlider(row, SPECS[5], shadowOn);
+                row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /**
+     * C3. 光标（尺寸 / 颜色效果）—— 只管「光标这个矩形本身」。
+     *
+     * <p>【职责边界】多大、什么颜色效果。与「辉光」（围绕矩形的光晕）
+     * 和「淡出」（时间上的衰减）分开。光标尺寸和辉光没有因果关系，
+     * 放在一起会让人以为调宽度会影响辉光 —— 用户为此专门提过。
+     *
+     * <p>这三项都是<b>持久配置</b>，不随动画预设变化。
+     */
+    private void buildCursorGroup(Panel panel) {
+        panel.group("光标（尺寸 / 颜色效果）", true, cur -> {
+            cur.row("光标宽度", row -> {
+                // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
+                // 那个档位看不出区别。改成纯 1-5px。
+                addSlider(row, SPECS[11], null);
+                row.rowComment("<b>持久配置，全局生效</b>。1~5 像素；"
+                        + "5 = IDEA 粗光标宽度（上限）。"
+                        + "<b>静止时也保持这个宽度。</b>", COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            cur.row("RGB 渐变（实验性）", row -> {
+                bindCheck(row, () -> pending.rgbGradient,
+                        v -> pending.rgbGradient = v)
+                        .comment("<b>实验性</b>。拖尾纵向颜色渐变"
+                                + "（上端=拖尾颜色，下端=蓝紫）。"
+                                + "2px 宽也能看出上下色差。<br/>"
+                                + "<b>与「颜色」组的纯色填充互斥</b>："
+                                + "开启本项时纯色被覆盖，关闭后自动恢复。"
+                                + "默认关。", COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            cur.row("光标高度（% 行高）", row -> {
+                addSlider(row, SPECS[12], null);
+                row.rowComment("<b>持久配置，全局生效</b>。"
+                        + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
+                        + "<b>上限就是顶格，不能超过。</b>", COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /** B. 淡出 —— 辉光停止后柔和熄灭。两项时长受「辉光淡出」联动置灰。 */
+    private void buildFadeGroup(Panel panel) {
+        panel.group("淡出", true, g -> {
+            g.row("辉光淡出（停止后柔和熄灭）", row -> {
+                row.topGap(TopGap.MEDIUM);
+                bindCheck(row, () -> pending.overlayFadeOut, v -> {
+                    pending.overlayFadeOut = v;
+                    fadeOn.set(v);
+                });
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("淡出前保持时长", row -> {
+                addSlider(row, SPECS[0], fadeOn);
+                row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("淡出时长", row -> {
+                addSlider(row, SPECS[1], fadeOn);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /**
+     * G. 实验性（默认折叠）—— 目前只有「拖尾渲染模式」一项。
+     *
+     * <p>残影模式从「总开关组」拆到这里，并明确标注「官方不建议使用」。
+     * 理由：AfterimageTrail 是单条历史轨迹模型，多光标只跟主光标；
+     * 且掉帧时残影稀疏、观感与弹簧模式差异大，容易让人误以为是 bug。
+     */
+    private void buildExperimentalGroup(Panel panel) {
+        panel.collapsibleGroup("实验性（官方不建议使用）", false, g -> {
+            g.row("拖尾渲染模式", row -> {
+                Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
+                        row.comboBox(MODE_ITEMS, null),
+                        new MutableProperty<String>() {
+                            @Override public String get() { return modeText(pending.trailMode); }
+                            @Override public void set(String v) { pending.trailMode = textToMode(v); }
+                        });
+                com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
+                trailModeCombo = box;
+                box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
+                return kotlin.Unit.INSTANCE;
+            });
+            g.row("", row -> {
+                row.rowComment("⚠ 残影模式（AFTERIMAGE）为实验性功能，<b>官方不建议日常使用</b>："
+                        + "它记录真实历史位置，掉帧时残影会变稀疏；"
+                        + "且当前<b>只跟随主光标</b>，多光标下只有主光标有残影。"
+                        + "除非你在低帧率环境明确需要它，否则请保持「弹簧（拉伸）」模式。",
+                        COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
+    }
+
+    /**
+     * F. 高级（诊断）（默认折叠）。
+     *
+     * <p>从 Tools 菜单挪进来（0.9.6 / M1）：菜单只留 3 项，诊断属于「偶尔用一次」
+     * 的高级项。注意「性能诊断」<b>不持久化</b> —— 所以也不参与 isModified()：
+     * 勾选后点「应用」才生效，重启即失效。「诊断日志」则写进 State，会持久化。
+     */
+    private void buildDiagGroup(Panel panel) {
+        panel.collapsibleGroup("高级（诊断）", false, g -> {
+            g.row("性能诊断（跳过重绘，只跑计算）", row -> {
+                row.topGap(TopGap.MEDIUM);
+                // 【T3-2：本轮新引入的回归，medium】
+                // 原来 getter 读字段 paintDiag，而该字段只在 apply() 里由
+                // super.apply() 更新。本轮给 syncAllControlsFromPending() 补了
+                // super.reset() → 它用【陈旧的字段值】覆盖控件，于是
+                // 「勾选性能诊断 → 换预设」会静默把勾选取消（父提交 c03ea7f^ 不会）。
+                //
+                // 修法：让控件自己成为真相 —— getter 之后直接读组件状态，
+                // 字段只在 apply() 那一瞬同步给 NeovideCaretManager。
+                Cell<JBCheckBox> diagCell = bindCheck(row, () -> paintDiag, v -> paintDiag = v);
+                paintDiagCheck = diagCell.getComponent();
+                paintDiagCheck.addItemListener(e ->
+                        paintDiag = paintDiagCheck.isSelected());
+                diagCell.comment(W_PAINT_DIAG, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 诊断日志开关 —— 必须【独立一行】。
+            //
+            // 曾经把它塞进上面「性能诊断」那一行，结果两行 label 不匹配：
+            // 行标题写着「性能诊断（跳过重绘，只跑计算）」，下面却有两个复选框，
+            // 用户看到「诊断那里怎么两个框框」。
+            g.row("诊断日志（记录光标状态，供开发者排查）", row -> {
+                row.bottomGap(BottomGap.SMALL);
+                bindCheck(row, () -> pending.diagLogging, v -> pending.diagLogging = v)
+                        .comment("勾选后每 15 帧往 idea.log 写一条光标状态（caret / block / draw）。"
+                                        + "复现问题后把 idea.log 发给开发者；长期开着会撑大日志。",
+                                COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+            return kotlin.Unit.INSTANCE;
+        });
     }
 
     // ==================== 滑块构建（缺陷 1 + 缺陷 2 + 吸附 + 输入框）====================

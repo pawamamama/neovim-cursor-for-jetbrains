@@ -163,7 +163,7 @@ eovide-cursor-diag.log}
      */
     static void frameSummary(long frameSeq, int caretCount, int trailCount,
                              boolean targetMoved, boolean anyOffsetMoved,
-                             double blockSpread) {
+                             double blockSpread, double fps) {
         if (!enabled()) {
             return;
         }
@@ -174,24 +174,22 @@ eovide-cursor-diag.log}
                 ? "NA"
                 : (blockSpread <= 1.0 ? "OK" : "BAD(差" + f(blockSpread) + "px)");
 
-        // 【fps 直接算在这里】之前 fpsTick 在 tickSpring 的另一处，
-        // 那条路径有多个早退，实测打不出来。frameSummary 已被 shouldSample
-        // 限流且确认在输出，把 fps 挂这里最稳。
-        String fpsText = "";
-        long now = System.nanoTime();
-        if (fpsWindowStart == 0) {
-            fpsWindowStart = now;
-        } else {
-            fpsFrameCount++;
-            long elapsed = now - fpsWindowStart;
-            if (elapsed > 0) {
-                fpsText = String.format(" fps=%.1f", fpsFrameCount * 1e9 / elapsed);
-            }
-            if (elapsed >= FPS_WINDOW_NANOS) {
-                fpsWindowStart = now;
-                fpsFrameCount = 0;
-            }
-        }
+        // 【fps 由调用方传入，本类不再自己数】
+        //
+        // 曾经在这里用 static 计数器自己算，连中两个坑：
+        //
+        //   ① 少算 15 倍：frameSummary 只在采样帧被调（frameSeq % 15 == 0），
+        //      计数器数的是「采样次数」而不是「帧数」。日志打 fps=6.8，
+        //      而同段日志时间戳是 145ms 一行 → 真实 103fps。用户据此
+        //      以为帧数卡死了。
+        //   ② 多编辑器串台：static 计数器被所有 animator 共用，开两个编辑器
+        //      时帧率表观翻倍。
+        //
+        // 现在是 CaretAnimator#recordFrameStats 每帧记账、每满 1 秒锁定读数，
+        // 口径干净且天然按 animator 隔离。这里只负责打印。
+        String fpsText = (fps > 0)
+                ? String.format(" fps=%.1f", fps)
+                : " fps=?";
 
         emit("[frame] #" + frameSeq
                 + " carets=" + caretCount + " trails=" + trailCount
@@ -261,64 +259,12 @@ eovide-cursor-diag.log}
         }
     }
 
-    // ==================== 帧率基线测量 ====================
+    // ==================== 帧率 ====================
 
-    /**
-     * 帧率统计窗口（纳秒）：每满 1 秒输出一次。
-     */
-    private static final long FPS_WINDOW_NANOS = 1_000_000_000L;
-
-    /** 最近一次记录的光标数 / 辉光层数（供 frameSummary 打印） */
+    /** 最近一帧的辉光层数（由绘制路径写入，供 frameSummary 打印） */
     static int glowLayersNow = 0;
 
-    private static long fpsWindowStart = 0;
-    private static int fpsFrameCount = 0;
-    private static int fpsTrailCount = 0;
-    private static int fpsGlowLayers = 0;
-
-    /**
-     * 记录一帧，每秒输出一次真实 fps —— 用于「多光标辉光该不该降级」的基线测量。
-     *
-     * <p><b>为什么需要</b>：用户要调研「辉光层数随光标数降级」，
-     * 但前提是「多光标 + 满辉光确实卡」。这个前提没人验证过。
-     * 没有基线就做优化 = 盲目优化。
-     *
-     * <p>输出格式（每秒一行）：
-     * <pre>
-     *   [fps] 118.3 帧/秒  光标=8  拖尾=8  辉光层=8
-     * </pre>
-     *
-     * <p>启用方式：设置页勾选「诊断日志」，或 {@code -Dneovide.cursor.diag=true}。
-     */
-    static void fpsTick(int trailCount, int glowLayers) {
-        if (!enabled()) {
-            return;
-        }
-        long now = System.nanoTime();
-        if (fpsWindowStart == 0) {
-            fpsWindowStart = now;
-            return;
-        }
-        fpsFrameCount++;
-        fpsTrailCount = trailCount;
-        fpsGlowLayers = glowLayers;
-
-        long elapsed = now - fpsWindowStart;
-        if (elapsed >= FPS_WINDOW_NANOS) {
-            double fps = fpsFrameCount * 1e9 / elapsed;
-            emit(String.format(
-                    "[fps] %.1f 帧/秒  光标=%d  拖尾=%d  辉光层=%d",
-                    fps, trailCount, trailCount, glowLayers));
-            fpsWindowStart = now;
-            fpsFrameCount = 0;
-        }
-    }
-
-    /** 重置帧率窗口（切换光标数时调用，避免平均值被旧数据污染） */
-    static void fpsReset() {
-        fpsWindowStart = 0;
-        fpsFrameCount = 0;
-    }
+    // 帧率不由本类计算：见 frameSummary 里关于两个坑的说明。
 
     // ==================== 覆盖性补充 ====================
 
