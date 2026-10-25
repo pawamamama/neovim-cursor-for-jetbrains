@@ -113,11 +113,56 @@ public final class CursorPresets {
          */
         private final int stretchTicks;
 
+        // ==================== 0.9.67 补齐的 4 个字段 ====================
+        //
+        // 【为什么必须补】用户实测：「拖尾透明度不随预设改变了，这触碰红线了」。
+        // 根因不是它"改坏了"，而是它<b>从来就不在预设里</b> —— 从 0.9.5 起
+        // AnimPreset 就只有 9 个字段，而 tailOpacity / 淡出两项 / 输入平滑
+        // 一直是持久级配置。
+        //
+        // 后果是两套清单不一致造成的「恢复默认值失效」：
+        //   · 自定义副本的快照存 24 个字段（SettingsField.PRESET_FIELDS）
+        //   · 内置预设只写 9 个（applyAnimPresetFields）
+        // 于是切到副本后点「恢复为默认值」，只有 9 个字段被拉回，
+        // 剩下 15 个（含 tailOpacity）停在副本值 —— 看起来就是「恢复没生效」。
+        //
+        // 【原则】预设 = 一整套观感。凡是「拖尾长什么样」的字段都该在这里；
+        // 凡是「设备/功能开关」都不该（rgbGradient / cursorWidthPx /
+        // cursorHeightRatio / enabled / hideNativeCaret / alwaysHighFps /
+        // trailMode / multiCursorNoGlow / diagLogging）。
+
+        /** 拖尾不透明度（×100，0–100）。0.9.67 补入 —— 与 glowOpacity 同级。 */
+        private final int tailOpacityTicks;
+
+        /** 淡出前保持时长（毫秒，0–500，步长 50）。 */
+        private final int disappearDelayMs;
+
+        /** 淡出时长（毫秒，0–1000，步长 25）。 */
+        private final int fadeOutMs;
+
+        /**
+         * 输入平滑（×100，0–100）。
+         *
+         * <p><b>0.9.67 补入预设</b>。此前它是「全局持久」的，理由曾是
+         * 「它影响单行打字的跟随性，属于设备/习惯级设置」。
+         *
+         * <p>但用户实测反馈推翻了这条：把 smooth 拖到 100 后，
+         * 四角系数被压成 [1, 0.94, 0.87, 0.83]，梯度只剩 1.20×，
+         * <b>切任何预设都是规整矩形</b> —— 预设等于失效一半。
+         * 所以它必须能被预设覆盖。
+         *
+         * <p>默认值仍是 0（关闭）：用户要求「其他持久化 比如平滑关闭」，
+         * 所以三个预设里「基础」「缎带」给 0，「纯平滑输入」给 20 作为它的特征。
+         */
+        private final int smoothTicks;
+
         private AnimPreset(String name, int animLengthTicks, int shortLengthTicks,
                            int trailSizeTicks, int glowLayers,
                            int blurFactorTicks, int glowOpacityTicks,
                            boolean useShadow, boolean overlayFadeOut,
-                           int stretchTicks) {
+                           int stretchTicks,
+                           int tailOpacityTicks, int disappearDelayMs, int fadeOutMs,
+                           int smoothTicks) {
             this.name = name;
             this.animLengthTicks = animLengthTicks;
             this.shortLengthTicks = shortLengthTicks;
@@ -128,6 +173,38 @@ public final class CursorPresets {
             this.useShadow = useShadow;
             this.overlayFadeOut = overlayFadeOut;
             this.stretchTicks = stretchTicks;
+            this.tailOpacityTicks = tailOpacityTicks;
+            this.disappearDelayMs = disappearDelayMs;
+            this.fadeOutMs = fadeOutMs;
+            this.smoothTicks = smoothTicks;
+        }
+
+        /** 拖尾不透明度（0–1）。 */
+        public float tailOpacity() {
+            return tailOpacityTicks / 100f;
+        }
+
+        public int tailOpacityTicksValue() {
+            return tailOpacityTicks;
+        }
+
+        /** 淡出前保持时长（毫秒）。 */
+        public int cursorDisappearDelay() {
+            return disappearDelayMs;
+        }
+
+        /** 淡出时长（秒，State 里以秒存储）。 */
+        public float cursorFadeOutDuration() {
+            return fadeOutMs / 1000f;
+        }
+
+        /** 输入平滑（0–1）。 */
+        public float typingSmoothness() {
+            return smoothTicks / 100f;
+        }
+
+        public int typingSmoothnessTicks() {
+            return smoothTicks;
         }
 
         /** 拉伸强度（1.0–8.0）。见 {@link #stretchTicks} 的注释。 */
@@ -229,11 +306,15 @@ public final class CursorPresets {
      * 所以「快/平滑/柔和/高比对观感」这一层语义没有被抹平。
      */
     public static final AnimPreset[] ANIM_PRESETS = {
-            //                        名称          anim short trail layers blur opacity 辉光   淡出   平滑
-            // ① 基础：= NeovideConfig 默认值。日常用这个。
-            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,   45),
+            //  名称            anim short trail layers blur opacity 辉光   淡出   k     alpha 淡出前 淡出时长 平滑
+            // ① 基础：= State 默认值。日常用这个。
+            //   【用户要求 2026-10-25】首次安装 = 基础 + 粉色 + 2px + 顶格 100%，
+            //   总开关除「多光标关闭辉光」外全开，其余持久化项取默认（含平滑关闭 = 0）。
+            //   所以这里 tailOpacity=100（全不透明）、淡出前 50ms、淡出 75ms、平滑 0，
+            //   与 State 的默认值逐位一致 —— 保证「首次安装的观感 == 点『基础』的观感」。
+            new AnimPreset("基础",              10,  11,  100,  8,   20,  55,  true,  true,   45, 100,  50,  75,  0),
             // ② 缎带：跨行动画拉长，斜缎带最明显。
-            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,   80),
+            new AnimPreset("缎带",              28,  11,  100,  8,   20,  55,  true,  true,   80, 100,  50,  75,  0),
             // ③ 纯平滑输入：对齐 VS Code 原版的拖尾观感 —— 无辉光扩散、无淡出。
             //
             // 【blur 必须填 60 而不是 0（第二轮审查 F2，high）】
@@ -244,7 +325,7 @@ public final class CursorPresets {
             // → 下拉显示「基准项」但实际已经不是那个预设（显示层撒谎）。
             //
             // 60 = 0.60 = 最柔端。这是「万一用户手动开回辉光时得到柔和光雾」的正确取值。
-            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   20),
+            new AnimPreset("纯平滑输入",        10,  11,  100,  8,   60,  30,  false, false,   20, 100,  50,  75,  20),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */

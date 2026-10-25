@@ -69,7 +69,10 @@ Step "javac V 探针（$($vprobes.Count) 个）"
 if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
-$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive'
+$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime'
+# VPreviewRealtime 是「实时预览必须真生效」的守门探针 —— 它验的是几何/像素，
+# 不是字段赋值。0.9.66 的 VPreviewSizeLive 只验字段，因此漏掉了真 bug
+# （onConfigChanged 不重算尺寸，必须关掉面板再打开才生效）。
 # VPreviewSizeLive 锁「光标宽/高必须实时传到预览窗」——
 # 0.9.66 之前预览自己算尺寸（fontSize/16、lineH×0.8），完全不看用户设置。
 # VPreviewBranch 锁「预览窗必须显式设 charsMoved，不依赖像素判据」。

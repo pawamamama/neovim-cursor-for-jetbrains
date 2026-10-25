@@ -141,6 +141,11 @@ public class CaretTrailPanel extends JComponent {
         this.rgbEnabled = on;
     }
 
+    /** 当前 RGB 开关（供预览初始化与探针读取） */
+    public boolean isRgbEnabled() {
+        return rgbEnabled;
+    }
+
     /** RGB 渐变的终止色（硬编码，可调版明天做） */
     private static final java.awt.Color RGB_END_COLOR = new java.awt.Color(0x7B68EE);
 

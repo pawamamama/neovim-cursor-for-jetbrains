@@ -191,6 +191,35 @@ public final class AnimationPreview extends JComponent {
     private float userCursorHeightRatio = -1f;
 
     /**
+     * RGB 渐变开关（由面板推送）。
+     *
+     * <p><b>为什么不从 {@code config} 读</b>：{@code rgbGradient} 是
+     * <b>持久化配置</b>，只存在于 {@code State} 里，{@code NeovideConfig}
+     * 里根本没有这个字段（SettingsField 的 CONFIG 映射传的是 null）。
+     * 所以预览必须由面板显式推送，与 {@code CaretAnimator} 的做法一致
+     * （它在每帧 {@code panel.setRgbEnabled(rgbGradient)}）。
+     *
+     * <p><b>原来的 bug</b>：只推给了真实编辑器的 panel，预览的 panel 从没收到过，
+     * 所以勾 RGB 预览毫无反应。
+     */
+    private boolean rgbGradient;
+
+    /** 设置 RGB 渐变（面板在 refreshPreviews 里推送） */
+    public void setRgbGradient(boolean on) {
+        if (rgbGradient == on) {
+            return;
+        }
+        rgbGradient = on;
+        panel.setRgbEnabled(on);
+        repaint();
+    }
+
+    /** 供探针断言 */
+    public boolean rgbGradientForProbe() {
+        return rgbGradient;
+    }
+
+    /**
      * 设置用户的光标尺寸，并立即重排。
      *
      * @param widthPx     1~5；传 -1 表示沿用自动值
@@ -258,6 +287,8 @@ public final class AnimationPreview extends JComponent {
         actionInterval = (mode == Mode.INLINE) ? TYPE_MS : CROSS_MS;
         // 初值：单行模式按 1（短跳），跨行模式按跨行值 —— 与各自的第一帧一致。
         pendingCharsMoved = (mode == Mode.INLINE) ? 1 : CROSS_CHARS_MOVED;
+        // RGB 初值从 panel 读（config 里没有这个字段，panel 持有启动参数兜底值）
+        rgbGradient = panel.isRgbEnabled();
     }
 
     public static AnimationPreview inline(NeovideConfig c) { return new AnimationPreview(c, Mode.INLINE); }
@@ -265,6 +296,21 @@ public final class AnimationPreview extends JComponent {
 
     public void onConfigChanged() {
         panel.refreshStyles();
+        // 【0.9.67 修复：尺寸必须在这里重算】
+        //
+        // Bug 现象（用户实测）：「实时预览没弄好，必须关闭设置切换回来才可以看见变化」。
+        //
+        // 根因：applyCursorSize() 原来只在 remeasure() 的
+        //     if (size != fontSize || codeFont == null) { ... }
+        // 分支里被调用。字号没变就进不去 —— 于是 setUserCursorSize() 改了字段、
+        // 也 repaint() 了，但**尺寸从未按新值重算**，画面当然不变。
+        // 只有关掉设置页再打开（重建组件、字号重新测量）才生效。
+        //
+        // 修法：在这里直接调。lineH 若还没测过（<=0）就跳过，首帧 remeasure 会补。
+        if (lineH > 0) {
+            applyCursorSize();
+            placed = false;         // 尺寸变了要重新摆位，否则角点还在旧位置
+        }
         glowSized = false;
         repaint();
     }

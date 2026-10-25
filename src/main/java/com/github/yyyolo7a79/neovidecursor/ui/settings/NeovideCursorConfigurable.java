@@ -575,9 +575,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private void syncPreviewCursorSize() {
         if (inlinePreview != null) {
             inlinePreview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
+            // RGB 是持久化配置（只在 State 里，NeovideConfig 没这个字段），
+            // 所以必须由面板显式推送 —— 原来只推给了真实编辑器，预览收不到。
+            inlinePreview.setRgbGradient(pending.rgbGradient);
         }
         if (crossPreview != null) {
             crossPreview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
+            crossPreview.setRgbGradient(pending.rgbGradient);
         }
     }
 
@@ -2041,20 +2045,29 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 p.glowLayers(), p.shadowBlurFactor(), p.glowOpacity()});
         s.useShadow = p.useShadow();
         s.overlayFadeOut = p.overlayFadeOut();
-        // 【0.9.47：输入平滑不再属于预设】
-        //
-        // 用户决定：「平滑做成全局不随预设变化的」。
-        // 理由：它影响「单行连续打字的跟随性」，属于设备/习惯级设置，
-        // 不是「观感风格」。放预设里每次切换都被重置，反而烦。
-        //
-        // 三个预设原本 smoothTicks 全是 0 —— 本来就是死字段。
-        //
-        // 【拉伸强度】
-        //
-        // 【2026-10-24 用户实测 bug】只让 smooth 进预设、k 不进 →
-        // 切任何预设 k 都保持用户上次拖出来的值 → 三个预设手感实际完全相同。
-        // 用户原话：「切换预设手感动效没回来」「怎么切换都覆盖不了」。
+        // 【拉伸强度必须进预设】2026-10-24 实测：只让 smooth 进、k 不进，
+        // 则切任何预设 k 都保持用户上次拖的值 → 三个预设手感完全相同。
         s.stretchRatioK = p.stretchRatioK();
+        // ==================== 0.9.67 补入的 4 项 ====================
+        //
+        // 【为什么必须补】用户实测：「拖尾透明度不随预设改变了，这触碰红线了」。
+        // 根因不是改坏了，而是这 4 项【从来就不在预设里】—— 从 0.9.5 起
+        // AnimPreset 只有 9 个字段，tailOpacity / 淡出两项 / 输入平滑
+        // 一直是持久级配置。
+        //
+        // 这造成了「副本恢复默认值失效」：
+        //   副本快照存 24 个字段（SettingsField.PRESET_FIELDS）→ 切到副本全被覆盖
+        //   内置预设只写 9 个                                    → 恢复只拉回 9 个
+        //   剩下 15 个停在副本值 → 看起来「恢复没生效」。
+        //
+        // 【输入平滑为何改回预设域】用户 2026-10-23 实测：smooth 拖到 100 后
+        // 四角系数被压成 [1, 0.94, 0.87, 0.83]，梯度只剩 1.20×，
+        // 切任何预设都是规整矩形 —— 预设等于失效一半。它必须能被预设覆盖。
+        // 但默认值仍是 0（关闭），符合用户「其他持久化 比如平滑关闭」的要求。
+        s.tailOpacity = p.tailOpacity();
+        s.cursorDisappearDelay = p.cursorDisappearDelay();
+        s.cursorFadeOutDuration = p.cursorFadeOutDuration();
+        s.typingSmoothness = p.typingSmoothness();
         com.github.yyyolo7a79.neovidecursor.ui.CursorDiag.presetApplied(
                 p.name(), s.stretchRatioK, s.animationLength, s.shortAnimationLength);
     }
