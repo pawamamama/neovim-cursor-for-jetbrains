@@ -270,10 +270,22 @@ final class SpringTrail {
         Integer[] order = idxScratch;
         if (order == null || order.length != n) {
             order = new Integer[n];
-            for (int i = 0; i < n; i++) {
-                order[i] = i;
-            }
             idxScratch = order;
+        }
+        // 【必须每次重置为 0..n-1】
+        //
+        // 复用数组时如果只建一次、之后不清，order 里留着上一次的排列。
+        // 稳定排序的 tiebreak 语义是「保持输入相对顺序」——
+        // 输入顺序变成上一次的结果，tiebreak 就依赖历史状态。
+        //
+        // 实测（ZzScratchTest）：斜跳后 order = [0,1,3,2]，
+        // 下一次打字时输入已是 [0,1,3,2] 而非 [0,1,2,3]。
+        // 该场景下最终 rank 恰好仍收敛到 0/2/3/1（因为排序本身稳定），
+        // 但这是**巧合**，不是保证：换一个对齐度组合就可能给出不同的并列拆法。
+        //
+        // 重置成本 = 4 次数组写入，可忽略。
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
         }
         // 三路手写稳定排序（n=4，避免 Arrays.sort 的装箱 Comparator 开销）
         for (int i = 1; i < n; i++) {

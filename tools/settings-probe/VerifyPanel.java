@@ -102,7 +102,9 @@ public final class VerifyPanel {
         check("U8 9 个复选框（含 0.9.58 新增的 RGB 渐变）",
                 checks == 9, "实际 " + checks);
         // 0.9.5 的 t3 新增两个预设下拉（动画 / 颜色），加上 trailMode = 3 个。
-        check("U9 3 个下拉（trailMode + 动画预设 + 颜色预设）", combos == 3, "实际 " + combos);
+        // 0.9.78 新增「目标帧率」下拉 = 4 个。
+        check("U9 4 个下拉（trailMode + 动画预设 + 颜色预设 + 目标帧率）",
+                combos == 4, "实际 " + combos);
         check("U10 2 个 ColorPanel（tailColor / shadowColor）", colors == 2, "实际 " + colors);
 
         // reset 回显

@@ -418,6 +418,27 @@ public class CaretAnimator implements Disposable, CaretListener {
     private volatile int currentDelayMs = IDLE_DELAY_MS;
 
     /**
+     * 用户选择的目标帧率（125 / 144）。
+     *
+     * <p><b>【审查发现：0.9.76 加了这个字段却没接进调度】</b>
+     * 它被声明、被持久化、被 SettingsField 白名单校验，但 {@link #computeNextDelayNs}
+     * 读的是常量 {@link #ACTIVE_DELAY_NS} —— 用户选 144 完全没有效果，
+     * 是纯死字段。探针 VLoadState 只验「往返不丢」，查不出「没人读」。
+     *
+     * <p>现在接进 {@code computeNextDelayNs}：125 → 8.00ms，144 → 6.94ms。
+     */
+    private volatile int targetFps = 125;
+
+    /** 由 targetFps 换算的活跃档间隔（纳秒）。125fps=8ms / 144fps=6.944ms。 */
+    private long activeDelayNsForTarget() {
+        int fps = targetFps;
+        if (fps <= 0) {
+            return ACTIVE_DELAY_NS;
+        }
+        return 1_000_000_000L / fps;
+    }
+
+    /**
      * 下一次希望被 tick 的时刻（{@code System.nanoTime()}）：<b>EDT 写、调度线程读</b>。
      *
      * <p><b>T1-1</b>：原来是"每个 animator 一条调度线程，各自 sleep 到自己的下一个到期
@@ -712,8 +733,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         //   false → 刚才已在活跃档，说明这是打字／移动光标过程中的普通唤醒
         final boolean fromIdleTier = currentDelayNs > MAX_ADAPTIVE_DELAY_MS * 1_000_000L;
 
-        currentDelayNs = ACTIVE_DELAY_NS;
-        currentDelayMs = ACTIVE_DELAY_MS;
+        currentDelayNs = activeDelayNsForTarget();
+        currentDelayMs = (int) (currentDelayNs / 1_000_000L);
 
         // 从空闲档唤醒时，{@link #smoothedIntervalMs} 已被空闲间隔喂大
         // （最坏接近 IDLE_UNFOCUSED_DELAY_MS = 600），而它只在 tick() 内更新。
@@ -966,7 +987,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 这样停手后第一次操作也不会"冷启动"—— 下一帧最多 8ms 就到。
         // 代价见 NeovideConfig#alwaysHighFps（会持续占用 EDT）。
         if (config.alwaysHighFps) {
-            return ACTIVE_DELAY_NS;
+            // 0.9.78：跟随用户选的目标帧率（原来恒返回 ACTIVE_DELAY_NS，
+            // 导致 targetFps 字段完全没被读取 —— 审查抓到的死字段）
+            return activeDelayNsForTarget();
         }
 
         if (active) {
@@ -2218,11 +2241,13 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorWidthPx = s.cursorWidthPx;
             cursorHeightRatio = s.cursorHeightRatio;
             rgbGradient = s.rgbGradient;
+            targetFps = s.targetFps;
         } catch (Throwable ignored) {
             multiCursorNoGlow = false;
             cursorWidthPx = 2;
             cursorHeightRatio = 1.0f;
             rgbGradient = false;
+            targetFps = 125;
         }
     }
 

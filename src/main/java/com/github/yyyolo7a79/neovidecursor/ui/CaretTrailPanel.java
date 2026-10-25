@@ -201,6 +201,15 @@ public class CaretTrailPanel extends JComponent {
     /** 色相循环起始时刻（纳秒）；-1 = 尚未初始化 */
     private long rgbPhaseStartNanos = -1L;
 
+    /** 色相循环的色标段数（16 段 = 每 1/8 圈一个点） */
+    private static final int RGB_WASH_STEPS = 16;
+
+    /** 色标数组（复用，避免每帧分配） */
+    private final float[] rgbFractions = new float[RGB_WASH_STEPS + 1];
+
+    /** 色标颜色数组（复用，避免每帧分配） */
+    private final java.awt.Color[] rgbColors = new java.awt.Color[RGB_WASH_STEPS + 1];
+
     /**
      * 生成沿长度方向的色相循环渐变。
      *
@@ -216,6 +225,15 @@ public class CaretTrailPanel extends JComponent {
      * @return 渐变画笔；边界退化时返回 null（调用方回退纯色）
      */
     private java.awt.Paint buildRgbWashPaint(float top, float bottom) {
+        // 【0.9.78 修复：非有限值会让 paintComponent 整体中断】
+        //
+        // 如果 quadY 里混进 NaN/Infinity（几何计算异常时可能），
+        // bottom - top 得到 NaN，而 `NaN <= 1.0f` 为 false —— 于是直接构造 paint。
+        // 一旦 LinearGradientPaint 抛 IllegalArgumentException，
+        // **整个 paintComponent 中断**，表现为「光标消失」而不是「少画一帧」。
+        if (!Float.isFinite(top) || !Float.isFinite(bottom)) {
+            return null;
+        }
         float len = bottom - top;
         if (len <= 1.0f) {
             return null;
@@ -229,23 +247,34 @@ public class CaretTrailPanel extends JComponent {
 
         // 色标：沿长度每 1/8 圈一个点，跨度 2 圈 -> 16 段 + 首尾。
         // 少于 8 段时色带有明显分段（肉眼看得出格子）。
-        final int steps = 16;
-        float[] fractions = new float[steps + 1];
-        java.awt.Color[] colors = new java.awt.Color[steps + 1];
+        // 【0.9.78 修复：消除每帧分配】
+        //
+        // 原来每次调用都 new float[17] + new Color[17] + 17 个 Color，
+        // 8 光标 × 125fps = 每秒约 19000 个短命对象。
+        // 这与本类「零分配热路径」的承诺直接冲突，会给 GC 制造
+        // 周期性压力（体感是偶发的微顿）。
+        //
+        // 现在：fractions 与 colors 都复用成员数组；
+        // Color 复用成员数组，只在 alpha 变化时才重建（alpha 极少变）。
         int userAlpha = fillColor == null ? 255 : fillColor.getAlpha();
-        for (int i = 0; i <= steps; i++) {
-            float t = i / (float) steps;
-            fractions[i] = t;
-            double hue = (phase + t * RGB_HUE_SPAN) % 1.0;
+        for (int i = 0; i <= RGB_WASH_STEPS; i++) {
+            rgbFractions[i] = i / (float) RGB_WASH_STEPS;
+            double hue = (phase + rgbFractions[i] * RGB_HUE_SPAN) % 1.0;
             if (hue < 0) {
                 hue += 1.0;
             }
             java.awt.Color c = java.awt.Color.getHSBColor(
                     (float) hue, RGB_HUE_SATURATION, RGB_HUE_BRIGHTNESS);
-            colors[i] = new java.awt.Color(c.getRed(), c.getGreen(), c.getBlue(), userAlpha);
+            // 【为什么仍要 new Color】
+            //
+            // Color 是不可变的，色相每帧都在变，所以这 17 个对象躲不掉。
+            // 真正省下的是**数组本身**（原来每帧 2 个新数组）。
+            // 想彻底零分配得上 int[] ARGB + 自定义 Paint，收益不足以抵消复杂度，
+            // 这里做到「不分配数组」为止。
+            rgbColors[i] = new java.awt.Color(c.getRed(), c.getGreen(), c.getBlue(), userAlpha);
         }
         return new java.awt.LinearGradientPaint(
-                0f, top, 0f, bottom, fractions, colors);
+                0f, top, 0f, bottom, rgbFractions, rgbColors);
     }
 
     private float glowWidth = 12f;

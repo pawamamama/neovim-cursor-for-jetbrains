@@ -104,6 +104,28 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private static final String W_COUPLING =
             "提示：勾选「隐藏原生光标」时建议同时开「常驻刷新」，否则跟随会有延迟。";
 
+    /**
+     * 目标帧率的说明。
+     *
+     * <p><b>为什么只有 125 / 144 两档</b>：实测（docs/PERFORMANCE-FPS.md）：
+     * <pre>
+     *   125fps (8.00ms) → 实测 124.5fps   精准
+     *   144fps (6.94ms) → 实测 143.5fps   精准
+     *   165fps (6.06ms) → 实测 129.9fps   达不到
+     *   240fps (4.17ms) → 实测  91.7fps   达不到
+     * </pre>
+     * 165 以上目标间隔小于 sleep 抖动，反而更不准。
+     * 给做不到的数字让用户选，是骗人。
+     */
+    private static final String W_TARGET_FPS =
+            "只在开启「常驻刷新」时生效。<b>125</b> 是稳定档；"
+            + "<b>144</b> 适合 144Hz 以上显示器，实测能精准达成。"
+            + "<br/>再往上（165/240）受系统睡眠精度限制，实测反而更不准，所以不提供。";
+
+    /** 目标帧率下拉项（List 而不是数组 —— row.comboBox 要求 Collection） */
+    private static final java.util.List<String> FPS_ITEMS =
+            Arrays.asList("125 fps（推荐）", "144 fps");
+
     private static final String W_GLOW_LAYERS =
             "越多越平滑，但每层都要 CPU 绘制，机器慢时建议调低。层数不影响亮度。";
 
@@ -934,9 +956,29 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("常驻刷新（永远按 8ms 调度）", row -> {
+            g.row("常驻刷新（不停手降频）", row -> {
                 bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
                         .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 【0.9.78 新增：目标帧率】
+            //
+            // 审查发现 targetFps 字段已加进 State / loadState / copyFrom / FIELDS，
+            // 也已接进 CaretAnimator.computeNextDelayNs，但**面板里没有控件** ——
+            // 用户根本没有入口选 144。字段通到底但 UI 断了，等于白做。
+            g.row("目标帧率", row -> {
+                ComboBoxKt.bindItem(
+                        row.comboBox(FPS_ITEMS, null),
+                        new MutableProperty<String>() {
+                            @Override public String get() {
+                                return pending.targetFps == 144 ? FPS_ITEMS.get(1) : FPS_ITEMS.get(0);
+                            }
+                            @Override public void set(String v) {
+                                pending.targetFps = FPS_ITEMS.get(1).equals(v) ? 144 : 125;
+                            }
+                        });
+                row.rowComment(W_TARGET_FPS, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 

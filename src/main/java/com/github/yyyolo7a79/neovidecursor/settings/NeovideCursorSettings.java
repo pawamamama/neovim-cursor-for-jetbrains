@@ -862,7 +862,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             trailMode = from.trailMode;
             hideNativeCaret = from.hideNativeCaret;
             alwaysHighFps = from.alwaysHighFps;
-        targetFps = from.targetFps;
+            targetFps = from.targetFps;
             overlayFadeOut = from.overlayFadeOut;
             cursorDisappearDelay = from.cursorDisappearDelay;
             cursorFadeOutDuration = from.cursorFadeOutDuration;

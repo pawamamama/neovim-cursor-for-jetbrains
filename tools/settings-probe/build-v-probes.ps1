@@ -71,7 +71,11 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 # ---------- 3. 跑探针 ----------
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
         'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState',
-        'VReviewFixes', 'VQuadProbeTruth', 'VRgbWash', 'VRankCollapse'
+        'VReviewFixes', 'VQuadProbeTruth', 'VRgbWash', 'VRankCollapse', 'VDeadField'
+# VDeadField 锁「字段必须被真正消费」：
+# 0.9.76 加了 targetFps（声明+loadState+copyFrom+FIELDS 白名单全有），
+# 但 CaretAnimator 读的仍是常量 —— 用户选 144 完全没效果。
+# VLoadState/VDefaultFreeze/VAddSetting 三条探针都只验持久化链路，查不出没人读。
 # VRankCollapse 锁「rank 必须是 4 个互不相同的值」：
 # 原实现用「比它小的有几个」计数，并列时不计数 -> 纯轴向移动塌成 2 档 ->
 # 同侧上下角同速 -> 四边形永远矩形，斜缎带出不来。
