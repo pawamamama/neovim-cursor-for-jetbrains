@@ -44,10 +44,12 @@ public final class VCursorSize {
                 Math.abs(to.cursorHeightRatio - 0.6f) < 0.001f,
                 "copy 后 = " + to.cursorHeightRatio);
 
-        // ---- S-5: 默认值是「跟随 IDEA / 顶格」----
+        // ---- S-5: 默认值 ----
+        // 0.9.59 取消了「0 = 跟随 IDEA」这一档（用户实测看不出区别），改成 1–5，
+        // 默认 2。这里跟着改，否则探针锁的是已经删掉的行为。
         NeovideCursorSettings.State def = new NeovideCursorSettings.State();
-        check("S-5 默认 cursorWidthPx=0（跟随 IDEA）",
-                def.cursorWidthPx == 0, "默认 = " + def.cursorWidthPx);
+        check("S-5 默认 cursorWidthPx=2（1–5 档位的中间值）",
+                def.cursorWidthPx == 2, "默认 = " + def.cursorWidthPx);
         check("S-6 默认 cursorHeightRatio=1.0（顶格）",
                 Math.abs(def.cursorHeightRatio - 1.0f) < 0.001f,
                 "默认 = " + def.cursorHeightRatio);
@@ -79,6 +81,33 @@ public final class VCursorSize {
         check("S-8 CaretAnimator 里有 5px 硬上限", hardCap,
                 hardCap ? "存在" : "缺失");
 
+        // ---- S-9~S-11：0.9.61 两个实测 Bug 的回归锚 ----
+
+        // Bug 1：新打开的编辑器不同步全局设置 → 勾了 RGB 新文件又变回没 RGB。
+        // 判据：构造函数里必须调 syncGlobalSettings()，且该方法独立存在。
+        boolean hasSyncMethod = src.contains("private void syncGlobalSettings()");
+        check("S-9 存在独立的 syncGlobalSettings()（四项全局设置只有一份读取逻辑）",
+                hasSyncMethod, hasSyncMethod ? "存在" : "缺失 → 两份拷贝必然漂移");
+
+        int ctorAt = src.indexOf("public CaretAnimator(");
+        int ctorEnd = ctorAt < 0 ? -1 : src.indexOf("startScheduler();", ctorAt);
+        boolean ctorSyncs = ctorAt >= 0 && ctorEnd > ctorAt
+                && src.substring(ctorAt, ctorEnd).contains("syncGlobalSettings()");
+        check("S-10 构造函数调用 syncGlobalSettings()（Bug：新文件 RGB 丢失）",
+                ctorSyncs, ctorSyncs ? "已调用" : "未调用 → 新编辑器退回 Java 默认值");
+
+        // Bug 2：高度变小后光标不在行内居中（顶在上边、从下往上被砍）。
+        // 判据：垂直锚点必须是 cp.y + lineHeight / 2.0，不能是 height / 2.0。
+        // 只查代码，不查注释 —— 注释里刻意保留了「原本写成 cp.y + height / 2.0」
+        // 这句解释，直接 substring 匹配会把它当成残留。
+        String srcCode = stripComments(src);
+        boolean centerByLine = srcCode.contains("cp.y + lineHeight / 2.0");
+        boolean centerByHeight = srcCode.contains("cp.y + height / 2.0");
+        check("S-11 垂直锚点用整行高中心（cp.y + lineHeight/2）",
+                centerByLine && !centerByHeight,
+                centerByLine ? (centerByHeight ? "新旧两种都在 → 有残留" : "正确")
+                        : "仍按光标自身高度居中 → 缩短时不居中");
+
         System.out.println();
         System.out.printf("=== V-CURSOR-SIZE 结果：PASS %d，FAIL %d ===%n", pass, fail);
         if (fail > 0) {
@@ -86,6 +115,31 @@ public final class VCursorSize {
             System.exit(1);
         }
         System.out.println("V-CURSOR-SIZE RESULT: ALL PASS");
+    }
+
+    /** 去掉行注释与块注释，用于「只查代码不查注释」的判据 */
+    private static String stripComments(String s) {
+        StringBuilder out = new StringBuilder(s.length());
+        int i = 0;
+        int n = s.length();
+        while (i < n) {
+            char c = s.charAt(i);
+            if (c == '/' && i + 1 < n && s.charAt(i + 1) == '/') {
+                while (i < n && s.charAt(i) != '\n') {
+                    i++;
+                }
+            } else if (c == '/' && i + 1 < n && s.charAt(i + 1) == '*') {
+                i += 2;
+                while (i + 1 < n && !(s.charAt(i) == '*' && s.charAt(i + 1) == '/')) {
+                    i++;
+                }
+                i += 2;
+            } else {
+                out.append(c);
+                i++;
+            }
+        }
+        return out.toString();
     }
 
     private static void check(String n, boolean ok, String d) {

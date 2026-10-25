@@ -218,8 +218,8 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 多光标不辉光（全局设置，来自 State，不随预设变化） */
     private boolean multiCursorNoGlow;
 
-    /** 光标宽度像素（0 = 跟随 IDEA）；来自 State，不随预设变化 */
-    private int cursorWidthPx;
+    /** 光标宽度像素（1–5）；来自 State，不随预设变化 */
+    private int cursorWidthPx = 2;
 
     /** 光标高度占行高比例（1.0 = 顶格）；来自 State，不随预设变化 */
     private float cursorHeightRatio = 1.0f;
@@ -538,6 +538,20 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 控制台类编辑器（Build / Run / Services / Problems 的输出区）只补画静止光标，
         // 不做拖尾 —— 它们的光标被全局隐藏了，必须有人补上，原因见 staticCaret 字段说明。
         this.staticCaret = editor.getEditorKind() == EditorKind.CONSOLE;
+
+        // 【新编辑器必须立刻同步一次全局设置】
+        //
+        // 用户实测 Bug（0.9.61）：「勾选 RGB 之后，新打开的文件光标坍缩回没 RGB 的时候了」。
+        //
+        // 根因：global 三项（宽度 / 高度比例 / RGB）此前**只在 onModeChanged() 里读**，
+        // 而 onModeChanged() 只由 applyConfig() / setTrailMode() 触发 ——
+        // 都是「用户点完设置面板」这条路径。新打开的编辑器直接 new CaretAnimator，
+        // 一个字段都没读过，于是停在 Java 默认值：cursorWidthPx = 0、
+        // cursorHeightRatio = 0f、rgbGradient = false。
+        //
+        // 后果正是用户看到的样子：高度比例 0 → clamp 到 0.3 → 光标只剩 30% 高的短棒；
+        // 宽度 0 → clamp 到 1px；RGB 没开。整体看起来就是「坍缩」。
+        syncGlobalSettings();
 
         // 多光标：四角不再在这里创建，而是每个 Caret 各自一个 SpringTrail
         // （见 refreshTarget）。这里只保留 panel 与调度初始化。
@@ -1527,22 +1541,24 @@ public class CaretAnimator implements Disposable, CaretListener {
                     //
                     // 曾改成整块包围盒 → 多光标变成一整块矩形、退回 1 行不坍缩。
                     // 恢复为每行一条线。
-                    double cx;
-                    double cy;
-                    double w;
-                    double h;
-                    if (useBlock) {
-                        // 块选区每行：用该行起点的像素坐标 + 单字符尺寸
-                        cx = cp.x + width / 2.0;
-                        cy = cp.y + height / 2.0;
-                        w = width;
-                        h = height;
-                    } else {
-                        cx = cp.x + width / 2.0;
-                        cy = cp.y + height / 2.0;
-                        w = width;
-                        h = height;
-                    }
+                    // 【垂直锚点必须用整行高的中心，不能用光标自身高度的中心】
+                    //
+                    // 用户实测（0.9.61）：「光标长度变小后不在中间，很怪，
+                    // 不是上下缩减的」。
+                    //
+                    // 原本写的是 cy = cp.y + height / 2.0。height 缩小后这个中心
+                    // 跟着往上跑，而 cp.y（行顶）不动 —— 于是四角算出来的矩形
+                    // 上边界恒在 cp.y、下边界随高度上移，看起来就是
+                    // 「顶在行首、从下往上被砍掉」，不是以行中线对称收缩。
+                    //
+                    // 正确锚点：整行的垂直中心 cp.y + lineHeight / 2.0。
+                    // 这样 height 变化时上下各让一半，视觉上是「从中间往两头缩」。
+                    // 水平方向仍锚在 cp.x（左边缘），与 IDEA 原生光标对齐
+                    // —— 宽度缩小时靠左，这是正确的，不能改成居中。
+                    double cx = cp.x + width / 2.0;
+                    double cy = cp.y + lineHeight / 2.0;
+                    double w = width;
+                    double h = height;
                     if (trail.setTarget(cx, cy, w, h)) {
                         changed = true;
                     }
@@ -1726,6 +1742,8 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private boolean tickStaticCaret() {
         // 多光标：每个光标都要补画（原生光标被全局隐藏，不补画就彻底不可见）
+        // RGB 开关与弹簧路径保持同一语义：控制台光标也是我们画的，配色要一致
+        panel.setRgbEnabled(rgbGradient);
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
             trail.snapToTarget();
@@ -2059,36 +2077,45 @@ public class CaretAnimator implements Disposable, CaretListener {
                 (int) Math.ceil(maxY - minY) + pad * 2);
     }
 
-    /** 渲染模式切换后调用：清空两种模型的内部状态，避免残留 */
-    public void onModeChanged() {
-        // 【同步全局设置】多光标不辉光 —— 从 State 读，不随预设变化
+    /**
+     * 从持久化 State 读取四项「全局生效」的设置。
+     *
+     * <p><b>为什么单独抽一个方法</b>：这四项此前只写在 {@link #onModeChanged()} 里，
+     * 而那是「用户点完设置面板」的路径。新打开的编辑器走构造函数，
+     * 一条都没读 —— 于是 RGB / 宽度 / 高度比例在新文件里全部退回 Java 默认值。
+     * 构造函数与 onModeChanged 现在都调这里，只有一份读取逻辑。
+     *
+     * <p><b>为什么用 getState() 而不是 CONFIG</b>：这四项是持久级配置，
+     * 不属于任何动画预设（用户明确要求「改预设不该动这些」），
+     * 所以运行期直接从 State 取，不经过 {@code NeovideConfig} 这个预设快照。
+     *
+     * <p>失败时退回一组明确的默认值 —— 不能留 0：高度比例 0 会被 clamp 到 0.3，
+     * 光标只剩 30% 高的短棒；宽度 0 会被 clamp 到 1px。
+     */
+    private void syncGlobalSettings() {
         try {
-            multiCursorNoGlow = com.intellij.openapi.application.ApplicationManager
-                    .getApplication()
-                    .getService(com.github.yyyolo7a79.neovidecursor.settings
-                            .NeovideCursorSettings.class)
-                    .getState().multiCursorNoGlow;
-            cursorWidthPx = com.intellij.openapi.application.ApplicationManager
-                    .getApplication()
-                    .getService(com.github.yyyolo7a79.neovidecursor.settings
-                            .NeovideCursorSettings.class)
-                    .getState().cursorWidthPx;
-            cursorHeightRatio = com.intellij.openapi.application.ApplicationManager
-                    .getApplication()
-                    .getService(com.github.yyyolo7a79.neovidecursor.settings
-                            .NeovideCursorSettings.class)
-                    .getState().cursorHeightRatio;
-            rgbGradient = com.intellij.openapi.application.ApplicationManager
-                    .getApplication()
-                    .getService(com.github.yyyolo7a79.neovidecursor.settings
-                            .NeovideCursorSettings.class)
-                    .getState().rgbGradient;
+            com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings.State s =
+                    com.intellij.openapi.application.ApplicationManager
+                            .getApplication()
+                            .getService(com.github.yyyolo7a79.neovidecursor.settings
+                                    .NeovideCursorSettings.class)
+                            .getState();
+            multiCursorNoGlow = s.multiCursorNoGlow;
+            cursorWidthPx = s.cursorWidthPx;
+            cursorHeightRatio = s.cursorHeightRatio;
+            rgbGradient = s.rgbGradient;
         } catch (Throwable ignored) {
             multiCursorNoGlow = false;
             cursorWidthPx = 2;
             cursorHeightRatio = 1.0f;
             rgbGradient = false;
         }
+    }
+
+    /** 渲染模式切换后调用：清空两种模型的内部状态，避免残留 */
+    public void onModeChanged() {
+        // 【同步全局设置】宽度 / 高度比例 / RGB / 多光标不辉光 —— 从 State 读，不随预设变化
+        syncGlobalSettings();
 
         afterimageTrail.clear();
         afterimageTrail.setLifetime(config.afterimageLifetime);
