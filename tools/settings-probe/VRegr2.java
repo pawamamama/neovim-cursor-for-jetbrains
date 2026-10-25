@@ -301,7 +301,7 @@ public final class VRegr2 {
             check("R-8 定位到「启用辉光」复选框", false, "复选框=" + ui.checkBoxes.size());
             return;
         }
-        javax.swing.JCheckBox shadowBox = ui.checkBoxes.get(4);
+        javax.swing.JCheckBox shadowBox = ui.checkBoxByLabel("启用辉光");
         shadowBox.setSelected(false);               // 用户在「基础」预设上关掉辉光
         conf.apply();
 
@@ -392,26 +392,46 @@ public final class VRegr2 {
         NeovideCursorSettings.State p = conf.pendingForProbe();
         CursorPresets.AnimPreset expect = CursorPresets.ANIM_PRESETS[last];
 
-        // 逐个复选框核对：控件勾选态必须与 pending 的对应字段一致。
-        // 面板顺序：enabled / hideNativeCaret / alwaysHighFps / overlayFadeOut / useShadow / 性能诊断
+        // 【0.9.71：定位与顺序契约分开写】
+        //
+        // 原来这里用 get(3)/get(4) 取「辉光淡出」「启用辉光」。
+        // 那是**用索引定位**，一旦组顺序变化，取到的是别的控件，
+        // 断言会红在「复选框与 pending 不一致」—— 报症状不报病因。
+        //
+        // 现在分两步：
+        //   ① 显式断言顺序契约（变了就红得明白）
+        //   ② 按文案定位，与顺序解耦
+        boolean orderOk = ui.assertCheckBoxAt(3, "辉光淡出")
+                && ui.assertCheckBoxAt(4, "启用辉光");
+        check("R-10a 复选框顺序契约：第 4 个是「辉光淡出」、第 5 个是「启用辉光」",
+                orderOk,
+                orderOk ? "顺序符合预期"
+                        : "顺序已变！实际=" + ui.describeCheckBoxes());
+
         int mismatch = 0;
-        if (ui.checkBoxes.size() >= 5) {
-            if (ui.checkBoxes.get(3).isSelected() != p.overlayFadeOut) {
+        javax.swing.JCheckBox fadeBox = ui.checkBoxByLabel("辉光淡出");
+        javax.swing.JCheckBox shadowBox2 = ui.checkBoxByLabel("启用辉光");
+        if (fadeBox == null || shadowBox2 == null) {
+            check("R-10b 能按文案定位到辉光/淡出复选框", false,
+                    "fadeBox=" + fadeBox + " shadowBox=" + shadowBox2
+                            + "  全部复选框=" + ui.describeCheckBoxes());
+        } else {
+            if (fadeBox.isSelected() != p.overlayFadeOut) {
                 mismatch++;
-                System.out.println("    FAIL 辉光淡出复选框=" + ui.checkBoxes.get(3).isSelected()
+                System.out.println("    FAIL 辉光淡出复选框=" + fadeBox.isSelected()
                         + " pending=" + p.overlayFadeOut);
             }
-            if (ui.checkBoxes.get(4).isSelected() != p.useShadow) {
+            if (shadowBox2.isSelected() != p.useShadow) {
                 mismatch++;
-                System.out.println("    FAIL 启用辉光复选框=" + ui.checkBoxes.get(4).isSelected()
+                System.out.println("    FAIL 启用辉光复选框=" + shadowBox2.isSelected()
                         + " pending=" + p.useShadow);
             }
+            check("R-10b 【T3-2 连带】换预设后辉光/淡出复选框与 pending 一致（super.reset 覆盖到了）",
+                    mismatch == 0,
+                    mismatch + " 个不一致 复选框数=" + ui.checkBoxes.size()
+                            + " pending.useShadow=" + p.useShadow
+                            + " 预设声明=" + expect.useShadow());
         }
-        check("R-10 【T3-2 连带】换预设后辉光/淡出复选框与 pending 一致（super.reset 覆盖到了）",
-                mismatch == 0 && ui.checkBoxes.size() >= 5,
-                mismatch + " 个不一致 复选框数=" + ui.checkBoxes.size()
-                        + " pending.useShadow=" + p.useShadow
-                        + " 预设声明=" + expect.useShadow());
 
         // 第 9 字段的滑块也必须跟着回灌
         int idx = VUi.indexOfKey("typingSmoothness");
@@ -433,12 +453,18 @@ public final class VRegr2 {
         conf.reset();
         NeovideCaretManager_setPaintDisabled(false);
 
-        if (ui.checkBoxes.size() < 6) {
-            check("R-11 定位到「性能诊断」复选框", false,
-                    "复选框只有 " + ui.checkBoxes.size() + " 个");
+        // 【0.9.71：顺序契约 + 文案定位分开】
+        boolean diagOrderOk = ui.assertCheckBoxAt(5, "性能诊断");
+        check("R-11a 复选框顺序契约：第 6 个是「性能诊断」",
+                diagOrderOk,
+                diagOrderOk ? "顺序符合预期" : "顺序已变！实际=" + ui.describeCheckBoxes());
+
+        javax.swing.JCheckBox diag = ui.checkBoxByLabel("性能诊断");
+        if (diag == null) {
+            check("R-11b 能按文案定位到「性能诊断」", false,
+                    "全部复选框=" + ui.describeCheckBoxes());
             return;
         }
-        javax.swing.JCheckBox diag = ui.checkBoxes.get(5);
         diag.setSelected(true);
         boolean afterClick = diag.isSelected();
 

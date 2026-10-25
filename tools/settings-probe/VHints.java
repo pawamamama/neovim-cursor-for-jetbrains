@@ -80,7 +80,7 @@ public final class VHints {
         // 改 shortAnimationLength → 单行提示必须变
         conf.reset();
         ui = VUi.build(conf);
-        ui.sliders.get(9).setValue(4);                 // shortAnimationLength = 0.04
+        ui.sliderByKey("shortAnimationLength").setValue(4);   // = 0.04s
         hints = conf.couplingHintsForProbe();
         String single1 = hints[0].getText();
         System.out.println("    改 shortAnimationLength=0.04 后单行提示： " + single1);
@@ -93,7 +93,7 @@ public final class VHints {
         // 改 trailSize → 跨行提示的「前缘」必须变
         conf.reset();
         ui = VUi.build(conf);
-        ui.sliders.get(6).setValue(30);                // trailSize = 0.30
+        ui.sliderByKey("trailSize").setValue(30);             // = 0.30
         hints = conf.couplingHintsForProbe();
         String cross2 = hints[1].getText();
         System.out.println("    改 trailSize=0.30 后跨行提示： " + cross2);
@@ -104,7 +104,7 @@ public final class VHints {
         // 改 stretchRatioK → 单行提示的系数必须变
         conf.reset();
         ui = VUi.build(conf);
-        ui.sliders.get(7).setValue(80);                // 8.0×
+        ui.sliderByKey("stretchRatioK").setValue(80);         // = 8.0×
         hints = conf.couplingHintsForProbe();
         String single2 = hints[0].getText();
         System.out.println("    改 stretchRatioK=8.0 后单行提示： " + single2);

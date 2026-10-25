@@ -195,7 +195,7 @@ public final class VDefects {
 
         // 用户拖过的字段必须以用户为准（不能反向变成「谁都不写」）
         conf.reset();
-        ui.sliders.get(4).setValue(4);                  // 辉光层数 8 → 4
+        ui.sliderByKey("glowLayers").setValue(4);          // 辉光层数 8 → 4
         st.overlayFadeOut = false;                      // Tools 同时改另一个字段
         conf.apply();
         check("D3-3 用户拖过的 glowLayers 生效（=4）", svc.getState().glowLayers == 4,
@@ -205,7 +205,7 @@ public final class VDefects {
 
         // 连续两次 apply：第二次不得把第一次的值判成「非脏」而丢弃（baseline 必须前移）
         conf.reset();
-        ui.sliders.get(4).setValue(6);
+        ui.sliderByKey("glowLayers").setValue(6);
         conf.apply();
         conf.apply();
         check("D3-5 连续两次 apply 后 glowLayers 仍为 6", svc.getState().glowLayers == 6,
@@ -225,7 +225,7 @@ public final class VDefects {
         check("V11-0 reset() 后 isModified()=false", !conf.isModified(), String.valueOf(conf.isModified()));
 
         conf.reset();
-        ui.sliders.get(0).setValue(250);
+        ui.sliderByKey("cursorDisappearDelay").setValue(250);
         boolean m1 = conf.isModified();
         check("V11-1 【防 B-1】拖滑块后 isModified()=true", m1, String.valueOf(m1));
 
@@ -246,7 +246,7 @@ public final class VDefects {
         st.cursorDisappearDelay = 333;
         conf.reset();
         VUi ui3 = VUi.build(conf);
-        int shown = ui3.sliders.get(0).getValue();
+        int shown = ui3.sliderByKey("cursorDisappearDelay").getValue();
         String text = ui3.textFields.get(0) == null ? "" : ui3.textFields.get(0).getText();
         String label = ui3.valueLabels.get(0) == null ? "" : ui3.valueLabels.get(0).getText();
         boolean m3 = conf.isModified();

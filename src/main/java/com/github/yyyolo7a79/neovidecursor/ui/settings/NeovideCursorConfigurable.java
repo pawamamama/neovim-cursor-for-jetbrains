@@ -441,6 +441,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 预览专用配置副本（与 pending 同步，不碰全局 CONFIG） */
     private NeovideConfig previewConfig;
 
+    /**
+     * 颜色面板绑定组 —— 三个方向的同步都收在这里。
+     *
+     * <p><b>为什么需要它</b>：{@code ColorPanel} 不是 DialogPanel 的绑定控件，
+     * 平台不追踪。原来每个面板要在 reset/apply/isModified 各写一遍手工同步，
+     * 加第三个颜色面板时要再写 3 处，漏一个就静默失效（详见 ColorPanelBinding 的注释）。
+     *
+     * <p>现在只需在 {@link #initColorBindings()} 里登记一次。
+     * 探针 {@code VColorBinding} 断言「登记数 == 面板上的 ColorPanel 数」。
+     */
+    private final ColorPanelBinding.Group colorBindings = new ColorPanelBinding.Group();
+
     private ColorPanel tailColorPanel;
     private ColorPanel shadowColorPanel;
 
@@ -496,8 +508,35 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p>父类构造器是<b>两个 String</b>：{@code BoundConfigurable(String displayName, String helpTopic)}。
      * 官方 Kotlin 示例是单参数（带默认值），照抄到 Java 会编译失败。
      */
+    /**
+     * 登记颜色面板绑定 —— 加新颜色面板时只需在这里加一行。
+     *
+     * <p>用 Supplier 而不是直接传控件：控件在 {@code createPanel()} 里才创建，
+     * 而绑定必须在面板创建前就登记好（reset 可能先于 createPanel 被调）。
+     */
+    private void initColorBindings() {
+        if (colorBindings.size() > 0) {
+            return;                     // 幂等：只登记一次
+        }
+        colorBindings.add(new ColorPanelBinding("tailColor",
+                () -> tailColorPanel,
+                s -> s.tailColor,
+                (s, v) -> s.tailColor = v));
+        colorBindings.add(new ColorPanelBinding("shadowColor",
+                () -> shadowColorPanel,
+                s -> s.shadowColor,
+                (s, v) -> s.shadowColor = v));
+    }
+
+    /** 供探针：已登记的颜色绑定数 */
+    public int colorBindingCountForProbe() {
+        initColorBindings();
+        return colorBindings.size();
+    }
+
     public NeovideCursorConfigurable() {
         super(DISPLAY_NAME, null);
+        initColorBindings();
     }
 
     @Override
@@ -1467,12 +1506,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 }
                 b.valueLabel.setText(b.spec.valueText.apply(this, exact));
             }
-            if (tailColorPanel != null) {
-                tailColorPanel.setSelectedColor(parseHex(pending.tailColor));
-            }
-            if (shadowColorPanel != null) {
-                shadowColorPanel.setSelectedColor(parseHex(pending.shadowColor));
-            }
+            // 颜色面板：State → 控件（三个方向的同步统一走 ColorPanelBinding）
+            colorBindings.pullAll(pending);
 
             // ---- ③ 派生显示 ----
             refreshDerivedHints();
@@ -1568,12 +1603,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         if (syncingControls) {
             return;
         }
-        if (tailColorPanel != null && tailColorPanel.getSelectedColor() != null) {
-            pending.tailColor = toHex(tailColorPanel.getSelectedColor());
-        }
-        if (shadowColorPanel != null && shadowColorPanel.getSelectedColor() != null) {
-            pending.shadowColor = toHex(shadowColorPanel.getSelectedColor());
-        }
+        // 颜色面板：控件 → State（统一走 ColorPanelBinding）
+        colorBindings.pushAll(pending);
         refreshPresetDisplay();
     }
 
@@ -2261,13 +2292,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     @Override
     public void apply() {
-        // A1：非绑定控件回读（DialogPanel 追踪不到 ColorPanel）
-        if (tailColorPanel != null && tailColorPanel.getSelectedColor() != null) {
-            pending.tailColor = toHex(tailColorPanel.getSelectedColor());
-        }
-        if (shadowColorPanel != null && shadowColorPanel.getSelectedColor() != null) {
-            pending.shadowColor = toHex(shadowColorPanel.getSelectedColor());
-        }
+        // A1：非绑定控件回读（DialogPanel 追踪不到 ColorPanel）—— 统一走 ColorPanelBinding
+        colorBindings.pushAll(pending);
 
         // A2：DialogPanel 把绑定控件的值写进 pending（滑块先、输入框后 —— 见 addSlider 的注释）
         syncingControls = true;
@@ -2458,12 +2484,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     /** ColorPanel 与 state 的颜色是否不同（不是 DialogPanel 的绑定控件，必须单独比）。 */
     private boolean colorPanelModified(NeovideCursorSettings.State cur) {
-        if (tailColorPanel != null && tailColorPanel.getSelectedColor() != null
-                && !toHex(tailColorPanel.getSelectedColor()).equalsIgnoreCase(cur.tailColor)) {
-            return true;
-        }
-        return shadowColorPanel != null && shadowColorPanel.getSelectedColor() != null
-                && !toHex(shadowColorPanel.getSelectedColor()).equalsIgnoreCase(cur.shadowColor);
+        return colorBindings.anyDiffers(cur);
     }
 
     @Override

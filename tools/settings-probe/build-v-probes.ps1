@@ -70,7 +70,11 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
-        'VRestoreDefault', 'VDefaultFreeze'
+        'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding'
+# VColorBinding 锁「ColorPanel 三向同步登记一次即全有」：
+# C-1 登记数 == 面板上 ColorPanel 数（漏登记就红）、
+# C-3~C-7 pull/push/differs 三个方向各自真的工作。
+# 已用变异测试证明抓得住（删掉一个登记 → C-1 报 登记=1 实际=2）。
 # VDefaultFreeze 是发布安全的第二道防线：锁住 State 的 28 个默认值。
 # 风险背景：平台自 2026.x 起 Storage 注解已无 skipDefaults（会写全部字段），
 # 一旦改了某字段的默认值，老用户（XML 里没有该值）与新用户（拿到新默认）

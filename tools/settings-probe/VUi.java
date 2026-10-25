@@ -120,11 +120,18 @@ public final class VUi {
     // 用被测方的值去校验被测方，等于自证。
     // ==================================================================
 
-    /** 面板从上到下的 11 个滑块字段名（顺序 = 契约 §6.2 + M4 增补的书写顺序）。 */
+    /**
+     * 面板从上到下的 13 个滑块字段名。
+     *
+     * <p><b>0.9.71 补了 2 项</b>：{@code cursorWidthPx} / {@code cursorHeightRatio}
+     * 在 0.9.57 加入面板时本表没跟上 —— 那份「第 11 个滑块走兜底」的旧注释说的问题
+     * 又重演了一次。现在 13 项与面板实际一致。
+     */
     public static final String[] KEYS = {
             "cursorDisappearDelay", "cursorFadeOutDuration", "tailOpacity", "glowOpacity",
             "glowLayers", "shadowBlurFactor", "trailSize", "stretchRatioK",
-            "animationLength", "shortAnimationLength", "typingSmoothness"};
+            "animationLength", "shortAnimationLength", "typingSmoothness",
+            "cursorWidthPx", "cursorHeightRatio"};
 
     /** {min, max, step}，下标与 {@link #KEYS} 一一对应。 */
     private static final int[][] SPEC = {
@@ -138,7 +145,9 @@ public final class VUi {
             {10, 80, 5},       // stretchRatioK          —— 0.5 倍一档
             {5, 35, 1},        // animationLength        —— 10ms 一档
             {2, 25, 1},        // shortAnimationLength   —— 10ms 一档
-            {0, 100, 5},       // typingSmoothness       —— 5% 一档（M4 新增，第 11 个）
+            {0, 100, 5},       // typingSmoothness       —— 5% 一档
+            {1, 5, 1},         // cursorWidthPx          —— 1px 一档（0.9.71 补）
+            {30, 100, 10},     // cursorHeightRatio      —— 10% 一档（0.9.71 补）
     };
 
     /** 滑块字段名（按面板从上到下的顺序）。 */
@@ -165,5 +174,95 @@ public final class VUi {
             }
         }
         return -1;
+    }
+
+    // ==================================================================
+    // 按【文案】定位 —— 把「定位」与「验证顺序」两件事分开
+    //
+    // 【为什么需要这一组】0.9.71 之前探针普遍写成：
+    //     JCheckBox diag = ui.checkBoxes.get(5);       // 用索引定位
+    //     check("勾选后换预设，勾选仍在", ...);
+    //
+    // 这句话其实混了两个意图：
+    //     ① 我想拿到「性能诊断」这个复选框          ← 定位
+    //     ② 我想验证"第 6 个复选框就是性能诊断"    ← 顺序契约
+    //
+    // 混在一起的后果：S3 重构把组顺序改了，get(5) 从 paintDiag 变成 rgbGradient，
+    // 于是断言红在「勾选后变了」——**报的是症状，不是病因**。
+    // 我被这条错误信息误导，先怀疑了自己的下拉逻辑，浪费了一轮。
+    //
+    // 正确做法是分开写：
+    //     assertIndex(ui, 5, "性能诊断");               // ① 顺序契约，变了就红得明白
+    //     JCheckBox diag = ui.checkBoxByLabel("性能诊断"); // ② 定位，与顺序解耦
+    //
+    // 这样顺序一变，第一条报「第 6 个不再是性能诊断」，一眼知道病因。
+    // ==================================================================
+
+    /**
+     * 按文案找复选框（包含匹配，忽略空白）。
+     *
+     * @return 找到的复选框；找不到返回 {@code null}（调用方必须据此判 FAIL）
+     */
+    public JCheckBox checkBoxByLabel(String labelPart) {
+        for (JCheckBox cb : checkBoxes) {
+            if (labelContains(cb.getText(), labelPart)) {
+                return cb;
+            }
+        }
+        return null;
+    }
+
+    /** 按文案找复选框的下标；找不到返回 -1。 */
+    public int checkBoxIndexOf(String labelPart) {
+        for (int i = 0; i < checkBoxes.size(); i++) {
+            if (labelContains(checkBoxes.get(i).getText(), labelPart)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 断言「第 {@code expectedIndex} 个复选框的文案包含 {@code labelPart}」。
+     *
+     * <p>这是顺序契约的显式表达 —— 与 {@link #checkBoxIndexOf} 分开用，
+     * 前者验顺序、后者做定位。
+     *
+     * @return {@code true} 表示顺序符合预期
+     */
+    public boolean assertCheckBoxAt(int expectedIndex, String labelPart) {
+        if (expectedIndex < 0 || expectedIndex >= checkBoxes.size()) {
+            return false;
+        }
+        return labelContains(checkBoxes.get(expectedIndex).getText(), labelPart);
+    }
+
+    /** 按字段 key 找滑块（用 {@link #indexOfKey} + {@link #sliders}）；找不到返回 null。 */
+    public JSlider sliderByKey(String key) {
+        int i = indexOfKey(key);
+        return (i >= 0 && i < sliders.size()) ? sliders.get(i) : null;
+    }
+
+    /** 文案包含判断：忽略 null、忽略首尾空白。 */
+    private static boolean labelContains(String text, String part) {
+        if (text == null || part == null) {
+            return false;
+        }
+        return text.replaceAll("\\s+", "").contains(part.replaceAll("\\s+", ""));
+    }
+
+    /**
+     * 面板里所有复选框的文案（供探针在失败时打印全表，便于一眼看出顺序）。
+     */
+    public String describeCheckBoxes() {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < checkBoxes.size(); i++) {
+            if (i > 0) {
+                sb.append(" | ");
+            }
+            String t = checkBoxes.get(i).getText();
+            sb.append(i).append(":").append(t == null || t.isEmpty() ? "(空)" : t);
+        }
+        return sb.toString();
     }
 }

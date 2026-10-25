@@ -213,8 +213,8 @@ public final class VSnap {
         conf.reset();
         ui = VUi.build(conf);
 
-        JSlider a = ui.sliders.get(8);
-        JSlider b = ui.sliders.get(9);
+        JSlider a = ui.sliderByKey("animationLength");
+        JSlider b = ui.sliderByKey("shortAnimationLength");
         check("BND-0 滑块量程：cross=[5,35] short=[2,25]",
                 a.getMinimum() == 5 && a.getMaximum() == 35
                         && b.getMinimum() == 2 && b.getMaximum() == 25,
@@ -229,7 +229,7 @@ public final class VSnap {
 
         conf.reset();
         ui = VUi.build(conf);
-        ui.sliders.get(8).setValue(35);
+        ui.sliderByKey("animationLength").setValue(35);
         conf.apply();
         check("BND-2 animationLength 上端点 0.35 落库",
                 Float.compare(svc.getState().animationLength, 0.35f) == 0,
@@ -237,7 +237,7 @@ public final class VSnap {
 
         conf.reset();
         ui = VUi.build(conf);
-        ui.sliders.get(9).setValue(2);
+        ui.sliderByKey("shortAnimationLength").setValue(2);
         conf.apply();
         check("BND-3 shortAnimationLength 下端点 0.02 落库",
                 Float.compare(svc.getState().shortAnimationLength, 0.02f) == 0,
@@ -245,7 +245,7 @@ public final class VSnap {
 
         conf.reset();
         ui = VUi.build(conf);
-        ui.sliders.get(9).setValue(25);
+        ui.sliderByKey("shortAnimationLength").setValue(25);
         conf.apply();
         check("BND-4 shortAnimationLength 上端点 0.25 落库",
                 Float.compare(svc.getState().shortAnimationLength, 0.25f) == 0,
@@ -258,9 +258,9 @@ public final class VSnap {
         conf.reset();
         ui = VUi.build(conf);
         check("BND-5 state 里 animationLength=9.99 时滑块被 clamp 到 35",
-                ui.sliders.get(8).getValue() == 35, "slider=" + ui.sliders.get(8).getValue());
+                ui.sliderByKey("animationLength").getValue() == 35, "slider=" + ui.sliderByKey("animationLength").getValue());
         check("BND-6 state 里 shortAnimationLength=-5 时滑块被 clamp 到 2",
-                ui.sliders.get(9).getValue() == 2, "slider=" + ui.sliders.get(9).getValue());
+                ui.sliderByKey("shortAnimationLength").getValue() == 2, "slider=" + ui.sliderByKey("shortAnimationLength").getValue());
 
         // 越界值在键入 + 失焦后必须被 clamp 到量程内并落库
         conf.reset();
