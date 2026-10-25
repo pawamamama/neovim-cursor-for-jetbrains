@@ -46,7 +46,7 @@ Video files live in [`docs/media/`](docs/media/) in this repo.
 
 [📹 docs/media/04-settings-panel.mp4](docs/media/04-settings-panel.mp4) · 39s · 1722×1074 · 60fps
 
-> **This is the biggest difference from the original** — 11 sliders + 7 checkboxes, all live and persisted.
+> **This is the biggest difference from the original** — 14 sliders + 9 checkboxes + 4 dropdowns, all live and persisted.
 
 ---
 
@@ -59,12 +59,13 @@ Built on [yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyy
 | Trail / glow / afterimage | ✅ | ✅ |
 | Multi-cursor | ✅ | ✅ **supported since 0.9.32** |
 | Keep native caret | ✅ | ⚠️ off by default (issue 2) |
-| **Settings panel** | ❌ edit code | ✅ **11 sliders + 7 checkboxes** |
+| **Settings panel** | ❌ edit code | ✅ **14 sliders + 9 checkboxes** |
 | **Persistence** | ❌ | ✅ saved into IDE config |
 | **Animation presets** | ❌ | ✅ 3 |
-| **Color presets** | ❌ | ✅ 5 |
+| **Color presets** | ❌ | ✅ 6 (incl. animated rainbow) |
 | **Custom presets** | ❌ | ✅ up to 50 |
 | **Tools menu entries** | 4 | ✅ **8** |
+| **Slant control (prev/next frame asymmetry)** | ❌ | ✅ **0–100, preset-aware** |
 | **Live preview in panel** | ❌ | ✅ |
 
 ### Core contribution: character-based input detection
@@ -103,16 +104,57 @@ isShortJump = sameLine && charsMoved <= typingMaxChars(3);
 
 Upstream's `trailFactors` is a **hard-coded array** `{1.0, 0.9, 0.5, 0.3}` — changing it needs a rebuild.
 
-This project splits it into two **continuously adjustable** parameters:
+This project splits it into **three continuously adjustable** parameters:
 
 | Parameter | Effect | Range |
 |---|---|---|
 | **Stretch strength** (`stretchRatioK`) | Derives the four-corner gradient | 1–8, continuous |
 | **Typing smoothness** (`typingSmoothness`) | Flattens the gradient toward 1 | 0–100 |
+| **Slant** (`slopeTicks`) | Pure rectangle → fully slanted | 0–100 |
 
-Computed by the pure function `deriveTrailFactors(k, smooth)`.
+Computed by the pure function `deriveTrailFactors(k, smooth, slope)`.
 **The number shown in the panel and the value used at runtime share the same formula**
 (this fixed a bug where the panel over-reported by 6.4×).
+
+#### Slant (0–100) — the newest parameter
+
+Controls **how much the quad leans**, independent of how far it stretches:
+
+| Slant | Four-corner factors | Stretch | Lean |
+|---|---|---|---|
+| **0** | `0.86/0.86/0.32/0.32` | 5.84px | **0.00px** ← pure rectangle |
+| 50 | `0.93/0.79/0.37/0.27` | 7.10px | 2.02px |
+| **100** | `1.00/0.72/0.42/0.22` | 8.26px | 4.06px ← upstream original |
+
+**Slant 0 still stretches** (5.84px) — it only removes the lean, not the deformation.
+The math: lean comes from the *same-side* top/bottom corner time difference,
+so averaging those pairs removes the lean while the top-vs-bottom gradient
+(which produces stretch) survives.
+
+Slant is **preset-scoped**: changing it derives a custom preset copy;
+switching presets restores that preset's value.
+
+#### Why single-line typing could never produce a slanted ribbon (fixed in v0.9.82)
+
+The four-corner ranking used a "how many are smaller than me" count:
+
+```java
+for (j) if (alignment[j] < alignment[i]) rank++;   // ties are never counted
+```
+
+Typing right gives alignments `-0.71 / 0.71 / 0.71 / -0.71` — the left pair and
+the right pair are tied, so both corners get the *same* rank:
+
+```
+before: TL=0  TR=2  BR=2  BL=0    only 2 distinct ranks
+after:  TL=0  TR=2  BR=3  BL=1    4 distinct ranks
+```
+
+Same rank → same duration → same speed → both side edges stay vertical →
+the quad can only be a rectangle. **Lean is always 0.**
+
+Fixed with a stable sort plus index tiebreak (what all four upstream JS versions do).
+Result matches upstream bit-for-bit: typing `0 2 3 1`, deleting `2 0 1 3`.
 
 ### Fixes contributed back upstream (merged into v0.5.1 / PR #10)
 
@@ -136,8 +178,8 @@ Computed by the pure function `deriveTrailFactors(k, smooth)`.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 `
-  -Version 0.9.32 `
-  -OutName neovide-cursor-0.9.32.jar `
+  -Version 0.9.83 `
+  -OutName neovide-cursor-0.9.83.jar `
   -BaseJar "<path-to-any-idea-plugin-jar>"
 ```
 

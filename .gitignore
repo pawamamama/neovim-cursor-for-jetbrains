@@ -38,3 +38,7 @@ diag/
 _backup-*/
 _probe/
 
+
+# 探针运行留下的测试产物（VerifyPersistence 等会写这些）
+verify-state.xml
+*-state.xml
