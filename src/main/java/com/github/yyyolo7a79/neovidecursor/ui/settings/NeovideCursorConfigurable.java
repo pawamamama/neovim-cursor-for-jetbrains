@@ -356,6 +356,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     (s, v) -> s.typingSmoothness = v / 100f,
                     (c, v) -> v + " %",
                     v -> v + "%"),
+
+            // ---- 12. 光标宽度（1–5 px）----
+            new SliderSpec("cursorWidthPx", 1, 5, 1, " px",
+                    s -> s.cursorWidthPx,
+                    (s, v) -> s.cursorWidthPx = v,
+                    (c, v) -> v + " px",
+                    v -> String.valueOf(v)),
+
+            // ---- 13. 光标高度（30–100 % 行高）----
+            new SliderSpec("cursorHeightRatio", 30, 100, 10, " %",
+                    s -> Math.round(s.cursorHeightRatio * 100f),
+                    (s, v) -> s.cursorHeightRatio = v / 100f,
+                    (c, v) -> v + " %",
+                    v -> v + "%"),
     };
 
     // ==================== 预览副本 + 基线 + 抑制标志 ====================
@@ -880,20 +894,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     cur.row("光标宽度", row -> {
                         // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
                         // 那个档位看不出区别。改成纯 1-5px。
-                        Cell<JSlider> c = row.slider(1, 5, 1, 1);
-                        JSlider s = c.getComponent();
-                        int initW = Math.max(1, Math.min(5, pending.cursorWidthPx));
-                        s.setValue(initW);
-                        javax.swing.JLabel lab = new javax.swing.JLabel(initW + " px");
-                        row.cell(lab);
-                        s.addChangeListener(e -> {
-                            if (syncingControls) {
-                                return;
-                            }
-                            pending.cursorWidthPx = s.getValue();
-                            lab.setText(s.getValue() + " px");
-                            afterPendingEdited();
-                        });
+                        addSlider(row, SPECS[11], null);
                         row.rowComment("<b>持久配置，全局生效</b>。1~5 像素；"
                                 + "5 = IDEA 粗光标宽度（上限）。"
                                 + "<b>静止时也保持这个宽度。</b>", COMMENT, NO_LINK);
@@ -913,20 +914,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
 
                     cur.row("光标高度（% 行高）", row -> {
-                        Cell<JSlider> c = row.slider(30, 100, 5, 10);
-                        JSlider s = c.getComponent();
-                        int init = Math.round(pending.cursorHeightRatio * 100);
-                        s.setValue(init);
-                        javax.swing.JLabel lab = new javax.swing.JLabel(init + " %");
-                        row.cell(lab);
-                        s.addChangeListener(e -> {
-                            if (syncingControls) {
-                                return;
-                            }
-                            pending.cursorHeightRatio = s.getValue() / 100f;
-                            lab.setText(s.getValue() + " %");
-                            afterPendingEdited();
-                        });
+                        addSlider(row, SPECS[12], null);
                         row.rowComment("<b>持久配置，全局生效</b>。"
                                 + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
                                 + "<b>上限就是顶格，不能超过。</b>", COMMENT, NO_LINK);

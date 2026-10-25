@@ -107,11 +107,11 @@ public final class ProbeSettingsV2 {
                 "实际 " + conf.colorPresetComboForProbe().getItemCount());
 
         // L5：10 个滑块（8 既有 + 2 新增）
-        check("L5 面板里有 11 个滑块（8 既有 + animationLength/shortAnimationLength + typingSmoothness）",
-                conf.slidersForProbe().size() == 11, "实际 " + conf.slidersForProbe().size());
-        check("L6 面板里有 11 个输入框（与滑块一一对应）",
-                conf.textFieldsForProbe().size() == 11, "实际 " + conf.textFieldsForProbe().size());
-
+        // 0.9.60：SPECS 11 → 13（新增 cursorWidthPx / cursorHeightRatio）
+        check("L5 面板里有 13 个滑块（含光标宽/高）",
+                conf.slidersForProbe().size() == 13, "实际 " + conf.slidersForProbe().size());
+        check("L6 面板里有 13 个输入框（与滑块一一对应）",
+                conf.textFieldsForProbe().size() == 13, "实际 " + conf.textFieldsForProbe().size());
         // L7：折叠组存在（CollapsibleRow 会带一个「展开箭头」按钮，标题文字可查）
         StringBuilder text = new StringBuilder();
         for (JComponent c : all) {
@@ -386,8 +386,9 @@ public final class ProbeSettingsV2 {
                         .append("->").append(got).append(") ");
             }
         }
-        check("S1 11/11 滑块拖到非刻度值都会自动落到刻度上（M4 起含输入平滑）", snapOk == 11,
-                snapOk + "/10" + (detail.length() > 0 ? "  违规: " + detail : ""));
+        check("S1 " + sliders.size() + "/" + sliders.size() + " 滑块拖到非刻度值都会自动落到刻度上",
+                snapOk == sliders.size(),
+                snapOk + "/" + sliders.size() + (detail.length() > 0 ? "  违规: " + detail : ""));
 
         // S2：标签实时跟随（t2 的 8/8 → t3 的 10/10 → M4 的 11/11）
         resetState();
@@ -405,7 +406,8 @@ public final class ProbeSettingsV2 {
                 follow++;
             }
         }
-        check("S2 11/11 滑块拖动时数值标签实时跟随", follow == 11, follow + "/11");
+        check("S2 " + sliders.size() + "/" + sliders.size() + " 滑块拖动时数值标签实时跟随",
+                follow == sliders.size(), follow + "/" + sliders.size());
 
         // S3：每个滑块恰好 1 个 ChangeListener
         int one = 0;
@@ -414,7 +416,8 @@ public final class ProbeSettingsV2 {
                 one++;
             }
         }
-        check("S3 11/11 滑块 ChangeListener 数恰为 1", one == 11, one + "/11");
+        check("S3 " + sliders.size() + "/" + sliders.size() + " 滑块 ChangeListener 数恰为 1",
+                one == sliders.size(), one + "/" + sliders.size());
 
         // S4：输入框 → 滑块位置同步，但标签显示用户输入的精确值
         resetState();
@@ -896,8 +899,9 @@ public final class ProbeSettingsV2 {
 
         svc.getState().typingSmoothness = 0f;
         svc.syncStateToConfig();
-        check("S-7 面板上确有第 11 个滑块（输入平滑）且量程 0–100",
-                conf.slidersForProbe().size() == 11
+        // 0.9.60：SPECS 13 项，typingSmoothness 仍在索引 10
+        check("S-7 第 11 个滑块（输入平滑）量程 0–100",
+                conf.slidersForProbe().size() >= 11
                         && conf.slidersForProbe().get(10).getMinimum() == 0
                         && conf.slidersForProbe().get(10).getMaximum() == 100,
                 conf.slidersForProbe().size() > 10
