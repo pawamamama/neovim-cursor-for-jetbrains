@@ -564,12 +564,40 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 pending.stretchRatioK, pending.typingSmoothness);
     }
 
-    /** 刷新两个预览窗（动画参数 + 颜色样式） */
+    /**
+     * 把光标宽高推给两个预览窗 —— 拖动滑块时立即生效，不需要点「应用」。
+     *
+     * <p><b>为什么预览可以实时、编辑器不行</b>：预览是面板内部的 Swing 组件，
+     * 改它不涉及任何持久化状态；而真实编辑器的光标尺寸是持久级配置，
+     * 必须在点「应用 / OK」后才写进 State —— 这是面板的语义边界，不能被预览带偏。
+     * 所以「实时」只到这里为止。
+     */
+    private void syncPreviewCursorSize() {
+        if (inlinePreview != null) {
+            inlinePreview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
+        }
+        if (crossPreview != null) {
+            crossPreview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
+        }
+    }
+
+    /**
+     * 刷新两个预览窗（动画参数 + 光标尺寸 + 颜色样式）。
+     *
+     * <p><b>0.9.66：加入光标尺寸实时同步</b>。原来预览自己算 cursorW/cursorH
+     * （{@code size/16} 与 {@code lineH*0.8}），**完全不看用户在「光标（尺寸）」
+     * 组设的值** —— 拖宽度滑块预览毫无反应，那就不叫预览。
+     *
+     * <p>这里把 pending 里的两个值推给预览；预览内部再按行高比例换算
+     * （见 {@code AnimationPreview#applyCursorSize}），避免直接搬物理像素
+     * 导致大字号下细得看不见。
+     */
     private void refreshPreviews() {
         if (previewConfig == null) {
             return;
         }
         syncPreviewAnimation();
+        syncPreviewCursorSize();
         previewConfig.tailColor = pending.tailColor;
         previewConfig.tailOpacity = pending.tailOpacity;
         previewConfig.useShadow = pending.useShadow;
