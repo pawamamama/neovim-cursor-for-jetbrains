@@ -91,10 +91,13 @@ public final class VPreviewRealtime {
                 Math.abs(conf.pendingForProbe().tailOpacity - 0.4f) > 1e-4f,
                 "现在是 " + conf.pendingForProbe().tailOpacity);
 
+        // 【0.9.73：平滑不参与预设】原断言是「切纯平滑输入后 smooth > 0」，
+        // 那是 0.9.67 误解期的判据。现在应断言【不变】。
+        conf.pendingForProbe().typingSmoothness = 0.42f;
         applyPreset(conf, 2);            // 纯平滑输入
         float smoothAfter = conf.pendingForProbe().typingSmoothness;
-        check("R-8 切「纯平滑输入」后 typingSmoothness 跟随预设",
-                smoothAfter > 0f, "smooth=" + smoothAfter);
+        check("R-8 切「纯平滑输入」后 typingSmoothness 保持不变（平滑不参与预设）",
+                Math.abs(smoothAfter - 0.42f) < 1e-4f, "smooth=" + smoothAfter);
 
         // ---- 恢复默认值必须完整 ----
         // 先弄脏多个字段，再点「恢复为默认值」，全部应回到预设值
@@ -104,11 +107,12 @@ public final class VPreviewRealtime {
         conf.pendingForProbe().cursorFadeOutDuration = 0.9f;
         conf.pendingForProbe().typingSmoothness = 0.95f;
         restore(conf);
+        // 【0.9.73：平滑不在预设域，恢复默认值不该动它】
+        // 现在只断言 3 个真正在预设域的新字段。
         boolean allBack = Math.abs(conf.pendingForProbe().tailOpacity - 1.0f) < 1e-3f
                 && conf.pendingForProbe().cursorDisappearDelay == 50
-                && Math.abs(conf.pendingForProbe().cursorFadeOutDuration - 0.075f) < 1e-3f
-                && conf.pendingForProbe().typingSmoothness == 0f;
-        check("R-9 「恢复为默认值」拉回全部 4 个新入预设字段（副本失效的根因）",
+                && Math.abs(conf.pendingForProbe().cursorFadeOutDuration - 0.075f) < 1e-3f;
+        check("R-9 「恢复为默认值」拉回预设域内的 3 个新字段（tailOpacity/两个淡出）",
                 allBack,
                 "alpha=" + conf.pendingForProbe().tailOpacity
                         + " delay=" + conf.pendingForProbe().cursorDisappearDelay

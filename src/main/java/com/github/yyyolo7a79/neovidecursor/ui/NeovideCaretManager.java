@@ -212,12 +212,44 @@ public class NeovideCaretManager implements EditorFactoryListener {
         }
     }
 
-    /** 运行期 → 持久化：把 {@link #CONFIG} 里能持久化的 15 项回写进 State 并落盘。 */
+    /**
+     * 运行期 → 持久化：把 {@link #CONFIG} 里能持久化的 15 项回写进 State 并落盘。
+     *
+     * <p><b>0.9.73 加初始化守卫（原本是数据丢失 bug）</b>
+     *
+     * <p>{@link #CONFIG} 是运行期快照，它的值<b>必须</b>先由
+     * {@link #syncStateToConfig()} 从持久化 State 灌满，否则里面全是
+     * {@code NeovideConfig} 的<b>编译期默认值</b>。
+     *
+     * <p>而「灌满」这件事原来只由 {@code editorCreated} 里的
+     * {@code initialScanDone} 分支保证 —— 换句话说：
+     * <b>只有先创建过编辑器，CONFIG 才是可信的</b>。
+     *
+     * <p>失败场景（审查实测确认）：
+     * <ol>
+     *   <li>用户打开工程但<b>不打开任何文件</b>（停在欢迎页 / 只开着 Maven 面板）</li>
+     *   <li>此时点 Tools 菜单里的任一开关（如「常驻刷新」）</li>
+     *   <li>该 setter 调本方法 → 用 CONFIG 的默认值覆盖用户持久化的
+     *       {@code tailColor} / 辉光参数 / 动画时长 → <b>立刻落盘</b></li>
+     *   <li>用户的自定义颜色与手感全部丢失，且没有任何提示</li>
+     * </ol>
+     *
+     * <p>守卫逻辑：若尚未做过 持久化 → 运行期 的同步，<b>拒绝回写</b>，
+     * 改为先拉一次再写。这样 CONFIG 一定先被 State 灌满，回写才有意义。
+     */
     private static void syncConfigToStateAndPersist() {
         try {
             NeovideCursorSettings svc = NeovideCursorSettings.getInstance();
             if (svc == null) {
                 return;
+            }
+            // 【守卫】CONFIG 若还没被 State 灌满，先拉一次 ——
+            // 否则下面的回写会拿编译期默认值覆盖用户设置。
+            if (!settingsSynced) {
+                LOG.info("neovide-cursor: CONFIG 尚未从 State 同步，"
+                        + "先拉取再回写（避免用默认值覆盖用户设置）");
+                svc.syncStateToConfig();
+                settingsSynced = true;
             }
             svc.syncConfigToState();
             svc.persistQuietly();

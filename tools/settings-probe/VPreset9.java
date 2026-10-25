@@ -94,10 +94,14 @@ public final class VPreset9 {
         s.stretchRatioK = 8.0f;
         s.typingSmoothness = 1.0f;
         CursorPresetApplier.applyAnimPreset(CursorPresets.ANIM_PRESETS[0]);
-        check("P-1c 应用内置预设【不改】stretchRatioK（k 不在预设域，属既定设计）",
-                Math.abs(s.stretchRatioK - 8.0f) < 1e-6f, "k=" + s.stretchRatioK);
-        check("P-1d 应用内置预设【改】typingSmoothness 为预设值 0",
-                Math.abs(s.typingSmoothness - 0f) < 1e-6f, "smooth=" + s.typingSmoothness);
+        // 【0.9.73 决策修正】两条断言都按当前真实行为重写：
+        //   · stretchRatioK 在 0.9.46 起【已进预设域】（P-1c 原来断言"不改"是过时的）
+        //   · typingSmoothness 在 0.9.73 起【不在预设域】（P-1d 原来断言"改"是 0.9.67 的误解）
+        check("P-1c 应用内置预设【会改】stretchRatioK（0.9.46 起已进预设域）",
+                Math.abs(s.stretchRatioK - CursorPresets.ANIM_PRESETS[0].stretchRatioK()) < 1e-4f,
+                "k=" + s.stretchRatioK + " 预设值=" + CursorPresets.ANIM_PRESETS[0].stretchRatioK());
+        check("P-1d 应用内置预设【不改】typingSmoothness（平滑不参与预设）",
+                Math.abs(s.typingSmoothness - 1.0f) < 1e-6f, "smooth=" + s.typingSmoothness);
 
         // 【口径修正】横向梯度必须用 f0/f2（rank 恒为 {0,2}）。
         // 预设只固定 smooth=0；k 不在预设域，由用户控制 —— 这是有意的：
@@ -655,9 +659,10 @@ public final class VPreset9 {
                     .parse(conf.pendingForProbe().customAnimPresets).size();
             System.out.println("  改 smooth=0.5 后：animCustomName=[" + afterSmooth
                     + "] 自定义预设数=" + derivedCount);
-            check("P-12c [finding] 改 typingSmoothness 必须和改其它 8 个字段一样派生出落脚点"
-                            + "（否则这次改动无处可存，切走预设就再也回不来）",
-                    !afterSmooth.isEmpty() && derivedCount == 1,
+            // 【0.9.73 决策修正】平滑不参与预设，所以改它**不该**派生副本 ——
+            // 它本身就是持久设置，不属于任何预设，切走再切回也不会丢。
+            check("P-12c 改 typingSmoothness【不】派生副本（平滑是持久设置，不属于预设）",
+                    afterSmooth.isEmpty() && derivedCount == 0,
                     "name=[" + afterSmooth + "] 自定义数=" + derivedCount);
 
             // ③ 后果放大：因为没派生，matchAnimPreset 也认不出它了 → 下拉掉到「自定义」

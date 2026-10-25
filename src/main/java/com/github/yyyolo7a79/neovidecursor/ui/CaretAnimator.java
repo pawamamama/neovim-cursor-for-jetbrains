@@ -1641,13 +1641,45 @@ public class CaretAnimator implements Disposable, CaretListener {
             glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
 
             logSlowRefresh(startedNanos, changed);
+            // 成功一次就把「连续失败」打平 —— 计数反映的是当前是否还坏着，
+            // 而不是历史累计（否则一次偶发异常之后日志会一直限流）。
+            refreshFailureCount = 0;
+            refreshFrameGap = 0;
             return changed;
 
         } catch (Throwable t) {
-            // 编辑器正在销毁或重绘中：本次跳过，下一帧会自动重试
+            // 【0.9.73：不能静默吞掉 —— 否则拖尾永久冻结且零线索】
+            //
+            // 原实现只有一行注释「编辑器正在销毁或重绘中：本次跳过，下一帧会自动重试」。
+            // 问题在于它假设异常是**暂时性**的。但这段包住了整个 500 行方法体，
+            // 含 carets.get(i) / activeTrails.get(i) 这类索引访问 ——
+            // 一旦出现**确定性**异常（例如某个 Caret 被回收后仍在列表里），
+            // 每一帧都会在同一处炸，于是：
+            //   · 拖尾永久冻结在最后位置
+            //   · 日志里一个字都没有
+            //   · 用户报「光标不动了」，我无从下手
+            //
+            // 现在：首次异常打 warn，之后按 1000 帧限流打一次（避免刷爆日志）。
+            // 同时计数，供诊断日志与探针观察。
+            refreshFailureCount++;
+            if (refreshFailureCount == 1 || refreshFrameGap >= FAILURE_LOG_EVERY) {
+                refreshFrameGap = 0;
+                LOG.warn("neovide-cursor: refreshTarget 抛异常（累计 "
+                        + refreshFailureCount + " 次）；若是确定性异常拖尾会永久冻结",
+                        t);
+            }
             return false;
         }
     }
+
+    /** refreshTarget 连续失败次数（诊断用；任何一次成功都会归零） */
+    private long refreshFailureCount;
+
+    /** 距上次失败日志的帧数，用于限流 */
+    private int refreshFrameGap;
+
+    /** 失败日志限流间隔（帧） */
+    private static final int FAILURE_LOG_EVERY = 1000;
 
     /**
      * 找「像素距离最近、且已初始化」的拖尾，作为新光标的起飞源。

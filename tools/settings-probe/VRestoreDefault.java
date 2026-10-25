@@ -37,13 +37,16 @@ public final class VRestoreDefault {
         s.glowLayers = 3;
         s.typingSmoothness = 0.9f;
         restore(s, 1);
+        // 【0.9.73：平滑不在预设域，恢复默认值不动它】
         boolean back = Math.abs(s.animationLength - 0.28f) < 1e-3f
                 && Math.abs(s.tailOpacity - 1.0f) < 1e-3f
-                && s.glowLayers == 8
-                && Math.abs(s.typingSmoothness) < 1e-3f;
-        check("D-1 内置预设上恢复 = 回到该预设常量（4 个字段全回）", back,
+                && s.glowLayers == 8;
+        boolean smoothKept = Math.abs(s.typingSmoothness - 0.9f) < 1e-3f;
+        check("D-1 内置预设上恢复 = 回到该预设常量（3 个字段）+ 平滑保持不变",
+                back && smoothKept,
                 "anim=" + s.animationLength + " alpha=" + s.tailOpacity
-                        + " layers=" + s.glowLayers + " smooth=" + s.typingSmoothness);
+                        + " layers=" + s.glowLayers + " smooth=" + s.typingSmoothness
+                        + "（平滑期望保持 0.9）");
 
         // ---- D-2（核心）：自定义副本上，恢复 = 回到它派生自的内置预设 ----
         NeovideCursorSettings.State s2 = new NeovideCursorSettings.State();
@@ -58,15 +61,17 @@ public final class VRestoreDefault {
         s2.glowLayers = 2;
         s2.stretchRatioK = 1.5f;
         restore(s2, 0);
+        // 【0.9.73：平滑不随预设，恢复不该把它改回 0】
         boolean restored = Math.abs(s2.animationLength - 0.10f) < 1e-3f
                 && Math.abs(s2.tailOpacity - 1.0f) < 1e-3f
-                && Math.abs(s2.typingSmoothness) < 1e-3f
                 && s2.glowLayers == 8
                 && Math.abs(s2.stretchRatioK - 4.5f) < 1e-3f;
-        check("D-2 自定义副本上恢复 = 回到派生自的内置预设（不是拷自己）",
-                restored,
+        boolean smoothKept2 = Math.abs(s2.typingSmoothness - 0.77f) < 1e-3f;
+        check("D-2 自定义副本上恢复 = 回到派生自的内置预设（平滑保持用户值）",
+                restored && smoothKept2,
                 "anim=" + s2.animationLength + " alpha=" + s2.tailOpacity
-                        + " smooth=" + s2.typingSmoothness + " layers=" + s2.glowLayers);
+                        + " smooth=" + s2.typingSmoothness + "（期望 0.77）"
+                        + " layers=" + s2.glowLayers);
 
         // ---- D-3: 恢复后副本名必须清掉（否则下拉撒谎）----
         check("D-3 恢复后 animCustomName 被清空（下拉不能显示副本名而值是内置的）",

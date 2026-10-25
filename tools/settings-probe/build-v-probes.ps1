@@ -70,7 +70,11 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
-        'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState'
+        'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState',
+        'VReviewFixes'
+# VReviewFixes 锁代码审查抓到的 5 条：
+# S-1 平滑不参与预设 / R-1 thread volatile / R-2 loop 有 try-catch 且能自愈 /
+# A-1 refreshTarget 的 catch 有日志 / M-1 syncConfigToStateAndPersist 有初始化守卫。
 # VLoadState 守 State 的【第四处拷贝】：loadState。
 # 前三处（字段声明 / FIELDS / copyFrom）都有探针，第四处从来没被守过 ——
 # 结果 loadState 手写 23 条而 State 有 28 字段，漏的 5 个（含 rgbGradient /

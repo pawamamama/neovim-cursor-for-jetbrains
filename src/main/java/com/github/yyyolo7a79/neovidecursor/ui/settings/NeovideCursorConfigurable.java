@@ -2191,7 +2191,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         s.tailOpacity = p.tailOpacity();
         s.cursorDisappearDelay = p.cursorDisappearDelay();
         s.cursorFadeOutDuration = p.cursorFadeOutDuration();
-        s.typingSmoothness = p.typingSmoothness();
+        // 【0.9.73 修正：输入平滑不参与预设】
+        //
+        // 0.9.67 我误读了用户要求「其他持久化 比如平滑关闭」——
+        // 那句话的意思是「平滑是持久化项、默认关闭」，**不是「平滑进预设」**。
+        // 用户明确说过多次：「平滑一直不参与预设」。
+        //
+        // 现在恢复正确行为：本方法<b>不写</b> typingSmoothness。
+        // 它是设备/习惯级的持久设置，切任何预设都保持不变。
+        //
+        // 连带影响：AnimPreset 里的 smoothTicks 与 typingSmoothness() 访问器
+        // 保留但不使用（见 CursorPresets 里的说明），因为 VRegr2 / VPreset9
+        // 等探针在做「预设字段域」比对时会读它 —— 删掉要改一串探针。
+        // **它不再被任何生产代码读写**，这是明确记录的技术债。
         com.github.yyyolo7a79.neovidecursor.ui.CursorDiag.presetApplied(
                 p.name(), s.stretchRatioK, s.animationLength, s.shortAnimationLength);
     }

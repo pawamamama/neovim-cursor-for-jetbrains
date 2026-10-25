@@ -55,10 +55,28 @@ final class RenderScheduler {
     private static final long BUSY_RETRY_MS = 1;
 
     /** 已注册的 animator。迭代是弱一致的，足以支撑"重算最早到期时刻"这一用途 */
+    private static final com.intellij.openapi.diagnostic.Logger LOG =
+            com.intellij.openapi.diagnostic.Logger.getInstance(RenderScheduler.class);
+
     private static final Set<CaretAnimator> ANIMATORS = ConcurrentHashMap.newKeySet();
 
-    /** 共享调度线程；集合为空时退出并置回 null，下次 {@link #register} 时重建 */
-    private static Thread thread;
+    /**
+     * 共享调度线程；集合为空时退出并置回 null，下次 {@link #register} 时重建。
+     *
+     * <p><b>0.9.73 加 volatile</b>：{@link #unregister} / {@link #wakeUp} 在
+     * <b>无锁</b>状态下读它，而写只发生在 {@link #register} 与 {@link #loop}
+     * 的 synchronized 块里。没有 volatile 时，无锁读者可能读到陈旧值：
+     * <ul>
+     *   <li>{@code unregister} 读到旧引用 → 打断一个已经退出/替换的线程；</li>
+     *   <li>{@code wakeUp} 读到 null → <b>跳过 interrupt</b>，于是「停手后第一次操作」
+     *       要多等一个空闲周期（最长 600ms）才投递 —— 正是 T1-1 注释里要消除的那一拍。</li>
+     * </ul>
+     * 加 volatile 后写入立即对无锁读者可见，代价是每次读一次内存屏障（可忽略）。
+     *
+     * <p>注意：{@code CaretAnimator} 内部的 volatile 用法本来就是对的
+     * （{@code nextDueNanos} / {@code framePending}），问题只在这一个字段。
+     */
+    private static volatile Thread thread;
 
     private RenderScheduler() {
     }
@@ -117,37 +135,74 @@ final class RenderScheduler {
                 }
             }
 
-            long now = System.nanoTime();
-            long due = now + MAX_SLEEP_MS * 1_000_000L;
-            for (CaretAnimator a : ANIMATORS) {
-                long d = a.nextDueNanos;
-                if (d < due) {
-                    due = d;
+            // ==================== 0.9.73：整个循环体包 try/catch ====================
+            //
+            // 【为什么必须有】原来 loop() 没有任何异常保护。而循环里会调
+            // dispatchDue() → SwingUtilities.invokeLater()，后者在 EDT shutdown 期间
+            // 可能抛异常。一旦抛出：
+            //   · 线程死掉
+            //   · 但 thread 字段仍非 null（只有正常退出路径才置 null）
+            //   · 后续 register 全走 else 分支去 interrupt() 一个死线程
+            //   · 结果：**所有动画永久停摆，且没有任何信号**
+            //
+            // 现在捕获后继续下一轮。连续失败时打印并主动置 thread=null，
+            // 让下一次 register 重建线程（自愈）。
+            try {
+                long now = System.nanoTime();
+                long due = now + MAX_SLEEP_MS * 1_000_000L;
+                for (CaretAnimator a : ANIMATORS) {
+                    long d = a.nextDueNanos;
+                    if (d < due) {
+                        due = d;
+                    }
                 }
-            }
 
-            long sleepMs = (due - now) / 1_000_000L;
-            if (sleepMs >= 1) {
-                try {
-                    Thread.sleep(sleepMs);
-                } catch (InterruptedException e) {
-                    // 被 wakeUp() / register / unregister 打断：立刻重算最早到期时刻，
-                    // 不重新入睡 —— 与基线"interrupt 醒来后直接落到投递"的语义一致。
-                    continue;
+                long sleepMs = (due - now) / 1_000_000L;
+                if (sleepMs >= 1) {
+                    try {
+                        Thread.sleep(sleepMs);
+                    } catch (InterruptedException e) {
+                        // 被 wakeUp() / register / unregister 打断：立刻重算最早到期时刻，
+                        // 不重新入睡 —— 与基线「interrupt 醒来后直接落到投递」的语义一致。
+                        continue;
+                    }
                 }
-            }
 
-            // 睡醒（或本来就已到期）：投递本轮所有到期的 animator
-            if (!dispatchDue()) {
-                // 到期时刻已过，但那个 animator 的任务还在 EDT 队列里：退避后再看。
+                // 睡醒（或本来就已到期）：投递本轮所有到期的 animator
+                if (!dispatchDue()) {
+                    // 到期时刻已过，但那个 animator 的任务还在 EDT 队列里：退避后再看。
+                    try {
+                        Thread.sleep(BUSY_RETRY_MS);
+                    } catch (InterruptedException ignored) {
+                        // 忽略：下一轮重新计算
+                    }
+                }
+                consecutiveFailures = 0;
+            } catch (Throwable t) {
+                consecutiveFailures++;
+                LOG.warn("neovide-cursor: 调度线程本轮异常（连续 " + consecutiveFailures + " 次）", t);
+                if (consecutiveFailures >= 3) {
+                    // 连续失败说明这个线程状态已不可靠：置 null 让下次 register 重建。
+                    synchronized (RenderScheduler.class) {
+                        if (thread == Thread.currentThread()) {
+                            thread = null;
+                        }
+                    }
+                    LOG.warn("neovide-cursor: 调度线程连续失败 " + consecutiveFailures
+                            + " 次，已置空以便下次 register 重建");
+                    return;
+                }
+                // 短暂退避，避免异常时疯狂自旋占满 CPU。
                 try {
                     Thread.sleep(BUSY_RETRY_MS);
                 } catch (InterruptedException ignored) {
-                    // 忽略：下一轮重新计算
                 }
             }
         }
     }
+
+    /** 连续异常次数（成功一轮即归零）。连续 3 次视为线程不可靠，置空自愈。 */
+    private static int consecutiveFailures;
 
     /**
      * 对本轮所有已到期的 animator <b>逐个</b>投递 —— 每个 animator 一次 {@code invokeLater}。
