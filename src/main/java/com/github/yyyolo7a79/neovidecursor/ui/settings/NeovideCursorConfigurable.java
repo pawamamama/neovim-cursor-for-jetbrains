@@ -1812,9 +1812,24 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /**
      * 把<b>当前选中项</b>的值重新写进 pending。
      *
-     * <p>0.9.9 起语义变了：内置预设只读，所以这里不再是「清掉覆盖、回到默认值」，
-     * 而是「丢弃面板里尚未保存的拖动，回到当前预设的已保存值」——
-     * 对内置预设 = 回到那 6 个常量；对自定义预设 = 回到它存的快照。
+     * <p><b>0.9.68：语义按用户要求统一成「回到默认值」</b>。
+     *
+     * <p>用户原话：「恢复为默认值 没有这个逻辑这么难吗 —— 直接从哪个预设拷贝的覆盖一下呗」。
+     *
+     * <p>旧行为（0.9.9~0.9.67）在自定义副本上是错的：它 restore 副本<b>自己存的快照</b>，
+     * 而按钮文案写的是「恢复为「基础 副本」默认值」—— 用户以为会回到「基础」的默认，
+     * 实际拿到的是副本当前存的值。**用户改了副本想反悔，点这个按钮毫无作用**，
+     * 因为它只是把自己又拷了一遍。
+     *
+     * <p>新行为：
+     * <ul>
+     *   <li><b>内置预设</b> → 写该预设的常量（原行为，正确）</li>
+     *   <li><b>自定义副本</b> → 回到它<b>派生自的那个内置预设</b>
+     *       （{@code pending.animPresetBase} 记着），并清掉自定义名 ——
+     *       也就是「放弃这份副本的改动，回到你最初拷贝的那一版」</li>
+     * </ul>
+     *
+     * <p>这正是用户说的「直接从哪个预设拷贝的覆盖一下」。
      */
     private void restoreAnimPreset() {
         // 【必须在抑制档里做】syncAllControlsFromPending() 会走到
@@ -1823,23 +1838,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         boolean prev = suppressDerive;
         suppressDerive = true;
         try {
-            if (!pending.animCustomName.isEmpty()) {
-                String snap = CustomPresets
-                        .get(pending.customAnimPresets, pending.animCustomName);
-                if (snap != null) {
-                    SettingsField
-                            .restore(pending, snap);
-                    syncAllControlsFromPending();
-                    return;
-                }
-                pending.animCustomName = "";
-            }
-            if (animBaseIdx < 0 || animBaseIdx >= CursorPresets.ANIM_PRESETS.length) {
-                return;
-            }
-            // 写【全部】预设字段，不只是 6 个动画字段（F-07：这是「恢复预设没用」的根因）
-            applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[animBaseIdx]);
-            pending.animPresetBase = animBaseIdx;
+            // ==================== 0.9.68 核心修改 ====================
+            //
+            // 原来这里有一段「在自定义副本上就 restore 它自己的快照」的分支，
+            // 那是**空操作**（把自己拷给自己），用户点了看不出任何变化。
+            // 现在统一走下面的「回到 animPresetBase 指向的内置预设」：
+            //   · 内置预设上：animPresetBase == 当前选中项，行为与原来一致
+            //   · 自定义副本上：animPresetBase 是它派生自的那一版，正是用户要的
+            //
+            // 副本名字在这里一并清掉 —— 因为值已经回到内置预设了，
+            // 再挂着副本名会让下拉显示与实际值不符（显示层撒谎）。
+            // 【用 pending.animPresetBase 而不是 animBaseIdx】
+            //
+            // 两者在内置预设上是同一个值，但**数据来源不同**：
+            //   animBaseIdx      面板打开时从 State 读出的快照，之后只在
+            //                    「用户在内置预设下拉里选了一项」时被改写；
+            //   animPresetBase   持久化字段，派生自定义副本时会被写成
+            //                    「副本派生自哪个内置预设」（见 afterPendingEdited / 派生逻辑）。
+            // 所以在自定义副本上，animPresetBase 才是权威的「我拷贝自谁」。
+            int base = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+            // 写【全部】预设字段（含 0.9.67 补入的 tailOpacity / 淡出两项 / smooth）
+            applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[base]);
+            pending.animPresetBase = base;
+            animBaseIdx = base;
+            // 值已回到内置预设 —— 副本名必须清掉，否则下拉显示「基础 副本」
+            // 而实际值是「基础」的，显示层就撒谎了。
             pending.animCustomName = "";
             syncAllControlsFromPending();
         } finally {
