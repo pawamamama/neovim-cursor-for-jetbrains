@@ -70,7 +70,12 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
-        'VRestoreDefault'
+        'VRestoreDefault', 'VDefaultFreeze'
+# VDefaultFreeze 是发布安全的第二道防线：锁住 State 的 28 个默认值。
+# 风险背景：平台自 2026.x 起 Storage 注解已无 skipDefaults（会写全部字段），
+# 一旦改了某字段的默认值，老用户（XML 里没有该值）与新用户（拿到新默认）
+# 会看到不同观感 —— 这是最难排查的一类问题。
+# 流程见 docs/RELEASE-SAFETY.md。
 # VRestoreDefault 锁「恢复为默认值」：副本必须回到它派生自的内置预设，
 # 而不是 restore 自己的快照（那是空操作，用户点了看不出变化）。
 # VPreviewRealtime 是「实时预览必须真生效」的守门探针 —— 它验的是几何/像素，
