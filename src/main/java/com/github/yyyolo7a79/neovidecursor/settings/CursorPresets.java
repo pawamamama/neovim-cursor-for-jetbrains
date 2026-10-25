@@ -535,20 +535,42 @@ public final class CursorPresets {
     // ==================== 颜色预设 ====================
 
     /**
-     * 一个颜色预设：2 个 HEX（契约 §5.6）。
+     * 一个颜色预设。
      *
      * <p><b>HEX 必须大写</b>：{@code sanitizeColor} 会统一成大写，
      * 预设表若写小写会造成 {@code equalsIgnoreCase} 匹配但 {@code equals} 不匹配的双口径。
+     *
+     * <p><b>0.9.75 新增 rgbWash</b>：颜色预设不再只是「两个 HEX」，
+     * 它还能决定「用不用色相循环」。
+     *
+     * <p><b>为什么 RGB 归颜色预设而不是动画预设</b>（用户要求）：
+     * 它改变的是「颜色怎么呈现」，与动画时长/拉伸完全无关；
+     * 而且选中它时必须同时关掉混色 —— 这正是颜色预设的职责。
+     *
+     * <p><b>rgbWash = true 时</b>：
+     * <ul>
+     *   <li>{@code rgbGradient} 置 true（走色相循环绘制）</li>
+     *   <li>混色（tailColor 纯色填充）自动被覆盖 —— 由绘制层的 if/else 保证</li>
+     *   <li>两个 HEX 仍写进 State，作为「关掉 RGB 后回到的颜色」</li>
+     * </ul>
      */
     public static final class ColorPreset {
         private final String name;
         private final String tailColor;
         private final String shadowColor;
+        /** 是否启用色相循环（RGB 动态）。见类注释。 */
+        private final boolean rgbWash;
 
         private ColorPreset(String name, String tailColor, String shadowColor) {
+            this(name, tailColor, shadowColor, false);
+        }
+
+        private ColorPreset(String name, String tailColor, String shadowColor,
+                            boolean rgbWash) {
             this.name = name;
             this.tailColor = tailColor;
             this.shadowColor = shadowColor;
+            this.rgbWash = rgbWash;
         }
 
         public String name() {
@@ -563,19 +585,31 @@ public final class CursorPresets {
             return shadowColor;
         }
 
+        /** 是否启用色相循环（RGB 动态） */
+        public boolean rgbWash() {
+            return rgbWash;
+        }
+
         @Override
         public String toString() {
             return name;
         }
     }
 
-    /** 5 个颜色预设（契约 §5.6，逐值冻结）。与动画预设<b>完全正交</b>：只碰 2 个 HEX。 */
+    /**
+     * 颜色预设。与动画预设<b>完全正交</b>：不碰任何时长/拉伸字段。
+     *
+     * <p><b>「彩虹」是唯一的例外性质</b>：它会把 {@code rgbGradient} 置 true，
+     * 因为色相循环本身就是一种颜色方案。其余预设都会把它置 false
+     * （否则用户选「冰蓝」却看到彩虹，那是撒谎）。
+     */
     public static final ColorPreset[] COLOR_PRESETS = {
             new ColorPreset("原版粉色", "#FFC0CB", "#FFC0CB"),   // = NeovideConfig 默认值
             new ColorPreset("冰蓝",     "#7DD3FC", "#38BDF8"),
             new ColorPreset("薄荷",     "#6EE7B7", "#34D399"),
             new ColorPreset("藕荷",     "#C4B5FD", "#A78BFA"),
             new ColorPreset("暖沙",     "#FDE68A", "#FCD34D"),
+            new ColorPreset("彩虹（动态）", "#FFC0CB", "#FFC0CB", true),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */

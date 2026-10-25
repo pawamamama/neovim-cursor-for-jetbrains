@@ -115,6 +115,30 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     static final int ACTIVE_DELAY_MS = 8;
 
+    /**
+     * 高刷新率模式下的目标帧间隔（纳秒）。
+     *
+     * <p><b>为什么从「只能是整毫秒」改成纳秒</b>：
+     * 原来 {@link #ACTIVE_DELAY_MS} 是 int 毫秒，调度线程按
+     * {@code Thread.sleep(ms)} 睡 —— 这决定了**帧率上限被钉在整毫秒档位**：
+     * 8ms=125fps、6ms=166fps、5ms=200fps、4ms=250fps。
+     * 想在 165Hz 屏幕上跑满 6.06ms 是不可能的（只能取 6 或 5）。
+     *
+     * <p><b>实测数据</b>（tools/bench/BenchGranularity.java，本机 Windows）：
+     * <pre>
+     *   裸 sleep(4)      连续调用 221~223 fps   ← 说明 240fps 档位是可达的
+     *   sleep4+nanoTime  223 fps
+     *   deadline 循环     220 fps
+     *   sleep(4)+忙等1ms  180 fps               ← 忙等反而更差
+     * </pre>
+     * 所以不需要 timeBeginPeriod，也不需要忙等；只要把「整毫秒 sleep」
+     * 换成「睡到毫秒下界 + 剩余时间按 Δ 补齐」，就能突破整毫秒档位。
+     *
+     * <p><b>注意</b>：真正的上限仍受 EDT 与 AWT 合成链路约束 ——
+     * 本常量只表达「我们打算多久投递一次」，不保证屏幕真的按这个频率刷新。
+     */
+    static final long ACTIVE_DELAY_NS = ACTIVE_DELAY_MS * 1_000_000L;
+
     /** 静止时的轮询间隔（低频看门狗） */
     private static final int IDLE_DELAY_MS = 120;
 
@@ -381,6 +405,16 @@ public class CaretAnimator implements Disposable, CaretListener {
     final AtomicBoolean framePending = new AtomicBoolean(false);
 
     /** 当前调度间隔：EDT 侧更新，调度线程读取 */
+    /**
+     * 当前调度间隔（纳秒）。
+     *
+     * <p><b>0.9.76：从 int 毫秒改为 long 纳秒</b> —— 毫秒取值把帧率钉在整毫秒档位，
+     * 165Hz（6.06ms）/240Hz（4.17ms）都表达不出来。详见
+     * {@link #computeNextDelayNs(boolean)}。
+     */
+    private volatile long currentDelayNs = IDLE_DELAY_MS * 1_000_000L;
+
+    /** 供诊断日志读的毫秒近似值（由 currentDelayNs 换算，不参与调度） */
     private volatile int currentDelayMs = IDLE_DELAY_MS;
 
     /**
@@ -653,9 +687,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         if (dispatched == Long.MIN_VALUE) {
             // 从未被调度线程投递过（理论上 runTick 只由投递触发，这里仅防御）：
             // 不能拿 MIN_VALUE 去加，否则溢出成极大负数 → 立刻疯狂投递。
-            next = now + currentDelayMs * 1_000_000L;
+            next = now + currentDelayNs;
         } else {
-            next = dispatched + currentDelayMs * 1_000_000L;
+            next = dispatched + currentDelayNs;
         }
         // 单帧耗时已超过 delay：立即到期（追赶），不额外等一个 delay —— 对齐基线
         nextDueNanos = Math.max(next, now);
@@ -676,8 +710,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 必须在覆盖 currentDelayMs 之前取：它记录的是"刚才所处的档位"。
         //   true  → 刚才在空闲档（IDLE_DELAY_MS / IDLE_UNFOCUSED_DELAY_MS）
         //   false → 刚才已在活跃档，说明这是打字／移动光标过程中的普通唤醒
-        final boolean fromIdleTier = currentDelayMs > MAX_ADAPTIVE_DELAY_MS;
+        final boolean fromIdleTier = currentDelayNs > MAX_ADAPTIVE_DELAY_MS * 1_000_000L;
 
+        currentDelayNs = ACTIVE_DELAY_NS;
         currentDelayMs = ACTIVE_DELAY_MS;
 
         // 从空闲档唤醒时，{@link #smoothedIntervalMs} 已被空闲间隔喂大
@@ -899,7 +934,8 @@ public class CaretAnimator implements Disposable, CaretListener {
             anyAnimating = tickSpring(dt, now);
         }
 
-        currentDelayMs = computeNextDelay(moved || anyAnimating);
+        currentDelayNs = computeNextDelayNs(moved || anyAnimating);
+        currentDelayMs = (int) (currentDelayNs / 1_000_000L);
 
         recordFrameStats(now, moved || anyAnimating);
     }
@@ -917,19 +953,31 @@ public class CaretAnimator implements Disposable, CaretListener {
      *   <li><b>静止降频</b>：完全没有动画时只做低频看门狗轮询。</li>
      * </ol>
      */
-    private int computeNextDelay(boolean active) {
+    /**
+     * 计算下一次调度间隔（纳秒）。
+     *
+     * <p><b>0.9.76：返回类型从 int 毫秒改为 long 纳秒</b>。
+     * 原来帧率被钉在整毫秒档位（8ms=125 / 6ms=166 / 5ms=200 / 4ms=250），
+     * 165Hz 屏想要的 6.06ms 表达不出来。实测连续 sleep(4) 能到 221~223fps，
+     * 说明系统粒度足够 —— 限制来自我们自己用整毫秒取值。
+     */
+    private long computeNextDelayNs(boolean active) {
         // 常驻刷新：不区分有无动画，永远走活跃档。
         // 这样停手后第一次操作也不会"冷启动"—— 下一帧最多 8ms 就到。
         // 代价见 NeovideConfig#alwaysHighFps（会持续占用 EDT）。
         if (config.alwaysHighFps) {
-            return ACTIVE_DELAY_MS;
+            return ACTIVE_DELAY_NS;
         }
 
         if (active) {
-            int adaptive = (int) Math.round(smoothedIntervalMs * 0.85);
-            return Math.max(ACTIVE_DELAY_MS, Math.min(adaptive, MAX_ADAPTIVE_DELAY_MS));
+            // 自适应：跟随实测间隔的 85%。仍以毫秒为语义单位（smoothedIntervalMs
+            // 是实测均值），但换算成纳秒返回，避免二次取整。
+            long adaptiveMs = Math.round(smoothedIntervalMs * 0.85);
+            long clamped = Math.max(ACTIVE_DELAY_MS,
+                    Math.min(adaptiveMs, MAX_ADAPTIVE_DELAY_MS));
+            return clamped * 1_000_000L;
         }
-        return isEditorFocused() ? IDLE_DELAY_MS : IDLE_UNFOCUSED_DELAY_MS;
+        return (isEditorFocused() ? IDLE_DELAY_MS : IDLE_UNFOCUSED_DELAY_MS) * 1_000_000L;
     }
 
     /** 编辑器当前是否持有键盘焦点 */

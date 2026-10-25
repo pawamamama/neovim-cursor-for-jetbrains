@@ -151,6 +151,9 @@ public final class VLoadState {
         s.shortAnimationLength = 0.15f;   // [0.02, 0.25]
         s.shadowBlurFactor = 0.4f;        // [0.05, 0.60]
         s.glowLayers = 6;                 // [1, 12]
+        // targetFps 只接受 125/144（白名单），用 144 才不会触发回落。
+        // 第一版用了 setAllDistinct 塞的 9 → 被回落到 125 → 误报"丢失"。
+        s.targetFps = 144;
     }
 
     private static String str(Object o, String name) throws Exception {

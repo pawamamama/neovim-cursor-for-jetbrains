@@ -157,14 +157,31 @@ final class RenderScheduler {
                     }
                 }
 
-                long sleepMs = (due - now) / 1_000_000L;
-                if (sleepMs >= 1) {
+                // 【0.9.76 亚毫秒调度】
+                //
+                // 原来只有 `Thread.sleep(sleepMs)`，其中 sleepMs 是整毫秒 ——
+                // 于是帧率被钉死在整毫秒档位（8ms=125 / 6ms=166 / 5ms=200 / 4ms=250），
+                // 165Hz 屏想要的 6.06ms 根本表达不出来。
+                //
+                // 现在：睡到「毫秒下界」，剩下的不足 1ms 部分用 nanoTime 忙等补齐。
+                // 实测（BenchGranularity）：连续 sleep(4) 能到 221~223fps，
+                // 说明系统粒度足够；忙等反而更差（180fps，因为占用调度时间片）。
+                // 所以不足 1ms 时用 onSpinWait 短暂让出，而不是死循环空转。
+                long remainNs = due - System.nanoTime();
+                if (remainNs >= 1_000_000L) {
                     try {
-                        Thread.sleep(sleepMs);
+                        Thread.sleep(remainNs / 1_000_000L);
                     } catch (InterruptedException e) {
                         // 被 wakeUp() / register / unregister 打断：立刻重算最早到期时刻，
                         // 不重新入睡 —— 与基线「interrupt 醒来后直接落到投递」的语义一致。
                         continue;
+                    }
+                } else if (remainNs > 0L) {
+                    // 不足 1ms：不再「直接跳过睡眠立刻派发」（那会让帧率变成
+                    // EDT 往返速度，反而抖），而是等到真正到期。
+                    // 用 onSpinWait 而不是空转 —— 它会提示 CPU 进入低功耗等待状态。
+                    while (System.nanoTime() < due) {
+                        Thread.onSpinWait();
                     }
                 }
 

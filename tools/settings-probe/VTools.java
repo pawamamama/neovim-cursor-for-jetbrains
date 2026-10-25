@@ -53,12 +53,15 @@ public final class VTools {
 
         ColorPresetGroup colorGroup = new ColorPresetGroup();
         AnAction[] colorItems = colorGroup.getChildActionsOrStubs();
-        check("M-5 颜色组有 5 个子项", colorItems.length == 5, "n=" + colorItems.length);
+        // 【0.9.75】不再硬写 5 —— 从预设表取，避免「加一个预设就红」
+        check("M-5 颜色组子项数 == 颜色预设表长度",
+                colorItems.length == CursorPresets.COLOR_PRESETS.length,
+                "n=" + colorItems.length + " 表=" + CursorPresets.COLOR_PRESETS.length);
         boolean allToggle2 = true;
         for (AnAction a : colorItems) {
             allToggle2 &= a instanceof ToggleAction;
         }
-        check("M-6 颜色组 5 个子项全是 ToggleAction", allToggle2, "");
+        check("M-6 颜色组全部子项是 ToggleAction", allToggle2, "");
 
         // ---- 菜单文案与预设表一致（两处不一致 = 双口径）----
         boolean namesMatch = true;

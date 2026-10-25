@@ -372,6 +372,11 @@ public final class SettingsField {
                 c -> c.hideNativeCaret, (c, v) -> c.hideNativeCaret = v));
         out.add(bools("alwaysHighFps", s -> s.alwaysHighFps, (s, v) -> s.alwaysHighFps = v,
                 c -> c.alwaysHighFps, (c, v) -> c.alwaysHighFps = v));
+        // 【0.9.76 新增 targetFps】只允许 125 / 144 两个值。
+        // 写入时做白名单校验，避免手改 XML 塞进 240（那个档位实测达不到）。
+        out.add(ints("targetFps", s -> s.targetFps,
+                (s, v) -> s.targetFps = (v == 144) ? 144 : 125,
+                null, null));
         out.add(bools("overlayFadeOut", s -> s.overlayFadeOut, (s, v) -> s.overlayFadeOut = v,
                 c -> c.overlayFadeOut, (c, v) -> c.overlayFadeOut = v));
 

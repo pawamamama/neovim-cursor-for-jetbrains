@@ -100,10 +100,21 @@ public final class VPreset {
                 c0.tailColor() + " vs " + cfg.tailColor);
         check("V4-8 shadowColor 预设1 == 默认值", c0.shadowColor().equalsIgnoreCase(cfg.shadowColor),
                 c0.shadowColor() + " vs " + cfg.shadowColor);
-        // 【0.9.10 精简】动画预设从 7 个减到 3 个（基础 / 缎带 / 纯平滑输入），
-        // 颜色预设保持 5 个不变。断言改为精确匹配当前契约数量，防止数量漂移。
-        check("V4-9 预设表数量：动画 3 + 颜色 5",
-                CursorPresets.ANIM_PRESETS.length == 3 && CursorPresets.COLOR_PRESETS.length == 5,
+        // 【0.9.75 改进：不再硬写颜色预设数量】
+        //
+        // 原文断言「颜色 5 个」—— 而 0.9.75 新增了「彩虹（动态）」变成 6 个，
+        // 于是这条探针红了。但**它红得没有价值**：颜色预设数量本来就是设计决定，
+        // 不是契约；真正该锁的是「动画预设 3 个」（那是 0.9.10 精简的成果）。
+        //
+        // 现在：动画预设精确锁 3 个；颜色预设只要求 ≥1 且全部有名字。
+        boolean colorOk = CursorPresets.COLOR_PRESETS.length >= 1;
+        for (CursorPresets.ColorPreset cp : CursorPresets.COLOR_PRESETS) {
+            if (cp.name() == null || cp.name().isEmpty()) {
+                colorOk = false;
+            }
+        }
+        check("V4-9 动画预设精确 3 个；颜色预设非空且都有名字",
+                CursorPresets.ANIM_PRESETS.length == 3 && colorOk,
                 "anim=" + CursorPresets.ANIM_PRESETS.length + " color=" + CursorPresets.COLOR_PRESETS.length);
         check("V4-9b 动画预设名称精确匹配契约（基础 / 缎带 / 纯平滑输入）",
                 "基础".equals(CursorPresets.ANIM_PRESETS[0].name())

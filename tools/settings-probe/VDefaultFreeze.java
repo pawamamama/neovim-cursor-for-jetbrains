@@ -50,6 +50,9 @@ public final class VDefaultFreeze {
         GOLDEN.put("trailMode", "SPRING");
         GOLDEN.put("hideNativeCaret", "true");
         GOLDEN.put("alwaysHighFps", "true");
+        // 目标帧率（0.9.76 新增）。只允许 125/144 —— 实测 165/240 达不到，
+        // 给做不到的数字让用户选是骗人（见 docs/PERFORMANCE-FPS.md）。
+        GOLDEN.put("targetFps", "125");
         GOLDEN.put("overlayFadeOut", "true");
         GOLDEN.put("cursorDisappearDelay", "50");
         GOLDEN.put("cursorFadeOutDuration", "0.075");

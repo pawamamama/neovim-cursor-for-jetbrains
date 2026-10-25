@@ -154,8 +154,99 @@ public class CaretTrailPanel extends JComponent {
         return rgbEnabled;
     }
 
-    /** RGB 渐变的终止色（硬编码，可调版明天做） */
+    /** RGB 渐变的终止色（保留兼容；新版按色相循环生成，不再使用单色终点） */
     private static final java.awt.Color RGB_END_COLOR = new java.awt.Color(0x7B68EE);
+
+    // ==================== RGB 色相循环（0.9.75）====================
+    //
+    // 【设计取舍：为什么不照抄 dsh-claude-style】
+    //
+    // 上游（Nwflower/dsh-claude-style）的 wash 是「七层径向渐变 + 整圈 hue-rotate」，
+    // 效果是多个色团在字形内漂移。但我们的目标是一个 2x40 像素的细长矩形：
+    //   - 七层色团在 2px 宽度上根本铺不开，会退化成一条混浊的色带；
+    //   - 它的漂移是二维的（x + y），而光标本质是一维的（沿长度方向）。
+    //
+    // 所以本实现改成「沿拖尾长度方向做色相循环」：
+    //   - 长度方向 = 光标的时间轴，从尾到头颜色连续变化 -> 一眼看出方向与速度
+    //   - 横向不渐变（2px 也看不出来，白费成本）
+    //   - 整条色相随时间整体前移 -> 静止时也能看出「在流动」
+    //
+    // 与上游共享同一个核心机制（色相旋转），但维度降了一级。
+    //
+    // 【性能实测】tools/bench/BenchRgbWash.java（2500 帧均值）：
+    //   1 光标 1 层纵向 -> 7 层径向：13us -> 120us（预算 1.5%）
+    //   8 光标 1 层纵向 -> 7 层径向：92us -> 904us（预算 11.3%）
+    // 说明上游方案在性能上其实可行，换维度是为了视觉效果，不是为了省性能。
+
+    /**
+     * 色相循环的周期（毫秒）—— 整条色相带前移一圈的时间。
+     *
+     * <p>取 3000ms：上游 wash 的 hue 周期是 4000ms，但那是作用在整块文字上的
+     * 氛围变化；光标是高频关注的细条，4 秒一圈会显得几乎没动。
+     */
+    private static final long RGB_HUE_PERIOD_MS = 3000L;
+
+    /**
+     * 沿长度方向铺几个完整色相圈。
+     *
+     * <p>2.0 = 从上到下跨越两个色相圈。取 2 而非 1：一圈会让整条只有一种主色；
+     * 三圈以上在 40px 内会糊成彩色噪点。
+     */
+    private static final float RGB_HUE_SPAN = 2.0f;
+
+    /** 饱和度 / 亮度：不用默认 1.0（深色主题上刺眼），0.75/0.95 鲜亮不刺目 */
+    private static final float RGB_HUE_SATURATION = 0.75f;
+    private static final float RGB_HUE_BRIGHTNESS = 0.95f;
+
+    /** 色相循环起始时刻（纳秒）；-1 = 尚未初始化 */
+    private long rgbPhaseStartNanos = -1L;
+
+    /**
+     * 生成沿长度方向的色相循环渐变。
+     *
+     * <p><b>为什么用 LinearGradientPaint 的多色标</b>：它接受任意数量
+     * (fraction, color)，一次填充完成整条渐变 —— 比叠 N 层单色便宜，
+     * 也比上游的 N 层径向少一个数量级。
+     *
+     * <p>色相走 HSB 而非 RGB 插值：RGB 线性插值经过灰色地带
+     * （红到绿会先变黄再变暗），HSB 走色相环才是真正的彩虹。
+     *
+     * @param top    四边形上边界（像素）
+     * @param bottom 四边形下边界（像素）
+     * @return 渐变画笔；边界退化时返回 null（调用方回退纯色）
+     */
+    private java.awt.Paint buildRgbWashPaint(float top, float bottom) {
+        float len = bottom - top;
+        if (len <= 1.0f) {
+            return null;
+        }
+        long now = System.nanoTime();
+        if (rgbPhaseStartNanos < 0L) {
+            rgbPhaseStartNanos = now;
+        }
+        double phase = ((now - rgbPhaseStartNanos) / 1_000_000.0) / RGB_HUE_PERIOD_MS;
+        phase -= Math.floor(phase);
+
+        // 色标：沿长度每 1/8 圈一个点，跨度 2 圈 -> 16 段 + 首尾。
+        // 少于 8 段时色带有明显分段（肉眼看得出格子）。
+        final int steps = 16;
+        float[] fractions = new float[steps + 1];
+        java.awt.Color[] colors = new java.awt.Color[steps + 1];
+        int userAlpha = fillColor == null ? 255 : fillColor.getAlpha();
+        for (int i = 0; i <= steps; i++) {
+            float t = i / (float) steps;
+            fractions[i] = t;
+            double hue = (phase + t * RGB_HUE_SPAN) % 1.0;
+            if (hue < 0) {
+                hue += 1.0;
+            }
+            java.awt.Color c = java.awt.Color.getHSBColor(
+                    (float) hue, RGB_HUE_SATURATION, RGB_HUE_BRIGHTNESS);
+            colors[i] = new java.awt.Color(c.getRed(), c.getGreen(), c.getBlue(), userAlpha);
+        }
+        return new java.awt.LinearGradientPaint(
+                0f, top, 0f, bottom, fractions, colors);
+    }
 
     private float glowWidth = 12f;
 
@@ -554,21 +645,23 @@ public class CaretTrailPanel extends JComponent {
         // RGB 关 → setColor(fillColor)，即原来的纯色路径。
         // 两条路径不会同时生效，切回来立刻恢复。
         if (rgbEnabled) {
-            // 【T3 RGB 最小可运行案例 —— 实验性，默认关】
+            // 【0.9.75：从「两色纵向渐变」升级为「色相循环」】
             //
-            // 用户要求：「先做简单运行案例我明天带你做可调版本」。
+            // 旧实现是「拖尾色 -> 蓝紫」的单段渐变，只有两个色标。
+            // 问题：沿长度方向只有一次颜色变化，看起来就是一条渐变的粉条，
+            // 没有「流动」感，也无法从颜色读出拖尾的方向与速度。
             //
-            // 纵向渐变：拖尾上端 → 下端。只在有宽度时看得出
-            // （2px 宽看不出横向渐变，这也是为什么先做宽度）。
+            // 新实现沿长度方向铺 RGB_HUE_SPAN 个完整色相圈（详见 buildRgbWashPaint），
+            // 整条色相还随时间前移 —— 静止时也能看出在流动。
             //
-            // 开启方式：-Dneovide.cursor.rgb=true
-            // 关闭时走原来的 setColor，行为与之前完全一致（parity 不受影响）。
+            // 【不混色】这是用户明确要求。实现上靠**单一 LinearGradientPaint 多色标**：
+            // 色标之间是线性插值（相邻色相间隔 1/8 圈，视觉上连续），
+            // 但**不叠加任何半透明层** —— 所以不会像上游那样多层混成浊色。
             float top = (float) Math.min(Math.min(quadY[0], quadY[1]), Math.min(quadY[2], quadY[3]));
             float bottom = (float) Math.max(Math.max(quadY[0], quadY[1]), Math.max(quadY[2], quadY[3]));
-            if (bottom - top > 0.5f) {
-                g2.setPaint(new java.awt.GradientPaint(
-                        0, top, fillColor,
-                        0, bottom, RGB_END_COLOR));
+            java.awt.Paint wash = buildRgbWashPaint(top, bottom);
+            if (wash != null) {
+                g2.setPaint(wash);
             } else {
                 g2.setColor(fillColor);
             }

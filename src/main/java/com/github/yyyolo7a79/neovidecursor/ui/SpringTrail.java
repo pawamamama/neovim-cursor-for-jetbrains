@@ -236,16 +236,63 @@ final class SpringTrail {
         for (int i = 0; i < corners.length; i++) {
             alignment[i] = corners[i].calculateDirectionAlignment(width, height, centerX, centerY);
         }
-        for (int i = 0; i < corners.length; i++) {
-            int rank = 0;
-            for (int j = 0; j < corners.length; j++) {
-                if (alignment[j] < alignment[i]) {
-                    rank++;
-                }
+
+        // ==================== 0.9.77 修复：rank 塌缩 ====================
+        //
+        // 【原实现的致命缺陷】
+        // 原来是「比自己小的有几个」计数：
+        //     for (j) if (alignment[j] < alignment[i]) rank++;
+        // 值【相等】时谁也不小于谁，于是双方拿到同一个 rank。
+        //
+        // 实测（V-RankCollapse，2x32 光标）：
+        //   打字 →（同行）  align -0.71/0.71/0.71/-0.71  ->  rank 0 2 2 0   只有 2 档
+        //   删除 ←（同行）  align  0.71/-0.71/-0.71/0.71 ->  rank 2 0 0 2   只有 2 档
+        //   下一行同列      align -0.71/-0.71/0.71/0.71  ->  rank 0 0 2 2   只有 2 档
+        //   上一行同列      align  0.71/0.71/-0.71/-0.71 ->  rank 2 2 0 0   只有 2 档
+        //   斜跳 ↘         align -0.91/-0.41/0.91/0.41  ->  rank 0 1 3 2   4 档 OK
+        //
+        // 【后果】纯水平 / 纯垂直移动时，同一侧上下两角拿相同 rank →
+        // 拿相同时长 → 四边形永远是【等腰梯形或矩形】，斜度恒为 0，
+        // 也就是「单行打字看不到斜缎带」。
+        // 斜跳因为四个对齐度天然互异，反而正常 —— 与用户观察完全吻合：
+        // 「特定情况下是缎带拉伸效果但更像斜缎带」= 只在斜跳/跨行时出现。
+        //
+        // 【修法：排序 + 索引 tiebreak】（上游四家 JS 一致做法）
+        //   .sort((a, b) => a.value === b.value ? a.index - b.index : a.value - b.value)
+        // 用稳定排序给出 0/1/2/3 四个【互不相同】的 rank，
+        // 并列时按角点固定顺序（TL/TR/BR/BL）拆开 —— 于是同侧上下角必然差一档，
+        // 四边形出现平行四边形效果，斜缎带出来了。
+        //
+        // 【为什么 tiebreak 用索引而不是别的】四家上游都用索引，
+        // 它保证「同样的输入永远得到同样的 rank」（确定性），
+        // 且 tiebreak 方向恒定 → 斜度方向稳定（不会这帧往左斜下帧往右斜）。
+        final int n = corners.length;
+        Integer[] order = idxScratch;
+        if (order == null || order.length != n) {
+            order = new Integer[n];
+            for (int i = 0; i < n; i++) {
+                order[i] = i;
             }
-            corners[i].jump(width, height, centerX, centerY, rank);
+            idxScratch = order;
+        }
+        // 三路手写稳定排序（n=4，避免 Arrays.sort 的装箱 Comparator 开销）
+        for (int i = 1; i < n; i++) {
+            int key = order[i];
+            int j = i - 1;
+            while (j >= 0 && alignment[order[j]] > alignment[key]) {
+                order[j + 1] = order[j];
+                j--;
+            }
+            order[j + 1] = key;
+        }
+        // 排序后 order[k] = 「第 k 靠后」的角点下标；k 就是它的 rank
+        for (int k = 0; k < n; k++) {
+            corners[order[k]].jump(width, height, centerX, centerY, k);
         }
     }
+
+    /** assignRanks 的下标暂存数组（复用，避免每帧分配） */
+    private Integer[] idxScratch;
 
     /**
      * 探针：当前中心点与四角是否自洽（用于断言「起飞后形状与源一致」）。

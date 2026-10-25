@@ -1641,7 +1641,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         syncAllControlsFromPending();
     }
 
-    /** 颜色预设被选中。只写 2 个 HEX，不碰任何动画字段（正交性硬判据）。 */
+    /**
+     * 颜色预设被选中。
+     *
+     * <p><b>与动画预设正交</b>：不碰任何时长 / 拉伸 / 辉光字段（硬判据）。
+     *
+     * <p><b>0.9.75 新增 rgbGradient</b>：颜色预设现在还能表达「用不用色相循环」。
+     * 选「彩虹（动态）」→ {@code rgbGradient = true}（走色相循环，纯色填充被覆盖）；
+     * 选其余任何一项 → {@code rgbGradient = false}（回到纯色）。
+     *
+     * <p><b>为什么必须双向写、不能只在彩虹时置 true</b>：
+     * 用户从「彩虹」切回「冰蓝」时，如果只写两个 HEX 而不关 rgbGradient，
+     * 绘制层仍走色相循环 —— 下拉显示「冰蓝」但光标是彩虹，**显示层撒谎**。
+     */
     private void onColorPresetPicked() {
         if (syncingControls || colorPresetCombo == null) {
             return;
@@ -1654,6 +1666,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[idx];
         pending.tailColor = p.tailColor();
         pending.shadowColor = p.shadowColor();
+        // 色相循环开关随预设双向同步（见方法注释）
+        pending.rgbGradient = p.rgbWash();
         syncAllControlsFromPending();
     }
 
@@ -1979,6 +1993,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[colorBaseIdx];
         pending.tailColor = p.tailColor();
         pending.shadowColor = p.shadowColor();
+        // 【0.9.75】与 onColorPresetPicked 一致：色相循环开关随预设双向同步，
+        // 否则从「彩虹」点恢复回「冰蓝」时光标仍是彩虹。
+        pending.rgbGradient = p.rgbWash();
         syncAllControlsFromPending();
     }
 

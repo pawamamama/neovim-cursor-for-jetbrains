@@ -196,6 +196,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         //   ① 字段声明  ② SettingsField.FIELDS  ③ State.copyFrom()  ④ 本方法 loadState
         // copyFrom 在 0.9.51 补过 diagLogging，而 loadState 从来没补过。
         // 探针 VDefaultFreeze 的 F-2 只查了 FIELDS 覆盖度，查不到这里 —— 现已补 VLoadState。
+        // 0.9.76 新增：目标帧率（只接受 125/144，其他值回落到 125）
+        target.targetFps = (from.targetFps == 144) ? 144 : 125;
+
         target.diagLogging = from.diagLogging;
         target.multiCursorNoGlow = from.multiCursorNoGlow;
         // 范围 clamp 与 loadState 其他数值字段一致（越界值不能进运行期）
@@ -705,8 +708,25 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         /** 3. 隐藏原生光标（覆盖层充当光标） */
         public boolean hideNativeCaret = true;
 
-        /** 4. 常驻刷新（永远按 8ms 调度） */
+        /** 4. 常驻刷新（永远走活跃档调度，不停手降频） */
         public boolean alwaysHighFps = true;
+
+        /**
+         * 4b. 目标帧率（仅「常驻刷新」开启时生效）。
+         *
+         * <p><b>为什么加这个字段</b>：原来常驻刷新恒按 8ms（125fps）调度，
+         * 144Hz 屏用不满。实测（docs/PERFORMANCE-FPS.md）：
+         * <pre>
+         *   125fps (8.00ms) → 实测 124.5fps   精准
+         *   144fps (6.94ms) → 实测 143.5fps   精准
+         *   165fps (6.06ms) → 实测 129.9fps   达不到
+         *   240fps (4.17ms) → 实测  91.7fps   达不到
+         * </pre>
+         * 所以只提供 125 / 144 两档 —— 给做不到的数字让用户选，是骗人。
+         *
+         * <p><b>默认 125</b>：与改动前的行为完全一致（8ms），升级不掉观感。
+         */
+        public int targetFps = 125;
 
         /** 5. 辉光淡出（停止后柔和熄灭） */
         public boolean overlayFadeOut = true;
@@ -842,6 +862,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             trailMode = from.trailMode;
             hideNativeCaret = from.hideNativeCaret;
             alwaysHighFps = from.alwaysHighFps;
+        targetFps = from.targetFps;
             overlayFadeOut = from.overlayFadeOut;
             cursorDisappearDelay = from.cursorDisappearDelay;
             cursorFadeOutDuration = from.cursorFadeOutDuration;

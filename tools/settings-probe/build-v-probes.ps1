@@ -71,7 +71,14 @@ if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 # ---------- 3. 跑探针 ----------
 $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch', 'VPreviewSizeLive', 'VPreviewRealtime',
         'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState',
-        'VReviewFixes', 'VQuadProbeTruth'
+        'VReviewFixes', 'VQuadProbeTruth', 'VRgbWash', 'VRankCollapse'
+# VRankCollapse 锁「rank 必须是 4 个互不相同的值」：
+# 原实现用「比它小的有几个」计数，并列时不计数 -> 纯轴向移动塌成 2 档 ->
+# 同侧上下角同速 -> 四边形永远矩形，斜缎带出不来。
+# 这是子代理查上游后定位的手感差异根因（上游四家 JS 都用排序+索引 tiebreak）。
+# VRgbWash 锁「RGB 色相循环 + 彩虹颜色预设」：
+# W-3 选彩虹开 RGB / 选冰蓝关 RGB（双向，否则显示层撒谎）/
+# W-4 RGB 开时颜色随位置变化 / W-5 RGB 关时颜色恒定 / W-6 颜色随时间前移。
 # VQuadProbeTruth 锁 P4 三处 medium：
 # M-1 HEX 颜色必须校验（否则坏颜色流进绘制层变黑且 decode 返回 true）/
 # M-2 探针不能读恒为 0 的 polyX/polyY（假的安全感）/
