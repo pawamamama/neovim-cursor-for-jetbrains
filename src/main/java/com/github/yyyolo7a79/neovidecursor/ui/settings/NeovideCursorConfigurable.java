@@ -136,10 +136,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * </pre>
      */
     private static final String W_SLOPE =
-            "单行打字时四边形<b>倾斜多少</b>。0% 是四角等速（纯矩形），越大越斜。"
-            + "<br/><b>82% 是上游原版的值</b>（四角系数 1.00/0.72/0.42/0.22），三个内置预设都用它。"
-            + "<br/><b>本项随预设变化</b>：改了它会自动生成副本，切预设会回到该预设的值。"
-            + "<br/>注意「输入平滑」会把这个倾斜压平：平滑开大时把斜度也调高，净效果可能不明显。";
+            "单行打字时四边形的<b>倾斜程度</b>。"
+            + "<br/><b>0% = 纯矩形</b>：只上下伸缩、左右边缘垂直，完全没有倾斜"
+            + "（<b>拉伸仍然存在</b>，不是取消形变）。"
+            + "<br/><b>100% = 完全斜</b>：等于「拉伸强度」推导出的原值，也就是上游原版效果。"
+            + "<br/><b>本项随预设变化</b>：改了它会自动生成副本，切预设回到该预设的值。"
+            + "<br/>注意「输入平滑」会把倾斜压平：平滑开大时斜度也会显得更小。";
 
     /** 目标帧率下拉项（List 而不是数组 —— row.comboBox 要求 Collection） */
     private static final java.util.List<String> FPS_ITEMS =

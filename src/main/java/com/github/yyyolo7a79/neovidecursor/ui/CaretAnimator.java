@@ -2056,7 +2056,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             double spread = (diagTotal > 1 && diagMaxX > diagMinX)
                     ? (diagMaxX - diagMinX) : -1;
             // 块选区时中心 x 应当一致（同一列），spread 接近 0
-            CursorDiag.frameSummary(frameSeq,
+            CursorDiag.frameSummary(System.identityHashCode(this), frameSeq,
                     editor.getCaretModel().getAllCarets().size(), diagTotal,
                     false, anyAnimating, spread, measuredFps);
         }

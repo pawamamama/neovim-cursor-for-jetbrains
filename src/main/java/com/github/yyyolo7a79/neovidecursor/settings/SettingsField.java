@@ -377,9 +377,9 @@ public final class SettingsField {
         out.add(ints("targetFps", s -> s.targetFps,
                 (s, v) -> s.targetFps = (v == 144) ? 144 : 125,
                 null, null));
-        // 斜度：0..100，越界回落 82（= 对齐上游，与 State 默认值一致）
+        // 斜度：0..100，越界回落 100（= 完全斜 = 对齐上游，与 State 默认值一致）
         out.add(ints("slopeTicks", s -> s.slopeTicks,
-                (s, v) -> s.slopeTicks = (v >= 0 && v <= 100) ? v : 82,
+                (s, v) -> s.slopeTicks = (v >= 0 && v <= 100) ? v : 100,
                 null, null));
         out.add(bools("overlayFadeOut", s -> s.overlayFadeOut, (s, v) -> s.overlayFadeOut = v,
                 c -> c.overlayFadeOut, (c, v) -> c.overlayFadeOut = v));

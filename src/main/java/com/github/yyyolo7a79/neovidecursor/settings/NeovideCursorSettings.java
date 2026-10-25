@@ -198,9 +198,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 探针 VDefaultFreeze 的 F-2 只查了 FIELDS 覆盖度，查不到这里 —— 现已补 VLoadState。
         // 0.9.76 新增：目标帧率（只接受 125/144，其他值回落到 125）
         target.targetFps = (from.targetFps == 144) ? 144 : 125;
-        // 斜度：0..100，其他值（含旧的 -1 = 跟随 k）一律迁移成 82（对齐上游）
+        // 斜度：0..100 原样保留；越界或旧值 -1 一律迁移成 100（= 对齐上游）
         target.slopeTicks = (from.slopeTicks >= 0 && from.slopeTicks <= 100)
-                ? from.slopeTicks : 82;
+                ? from.slopeTicks : 100;
 
         target.diagLogging = from.diagLogging;
         target.multiCursorNoGlow = from.multiCursorNoGlow;
@@ -493,18 +493,61 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      *
      * @param slope 0–100；{@code < 0} 表示「用 k 推导」（旧值兼容，0.9.80 起不再默认走这条）
      */
-    public static float[] deriveTrailFactorsFromSlope(float slope) {
-        if (slope < 0f) {
-            return null;              // 调用方回退到 deriveTrailFactors(k)
+    /**
+     * 「斜度」：从「纯矩形」到「完全斜」的连续插值。
+     *
+     * <p><b>语义（用户 0.9.81 明确）</b>：
+     * <ul>
+     *   <li>{@code slope = 0} → <b>纯矩形拉伸</b>：同侧上下两角取平均（等速），
+     *       四边形只上下伸缩、左右边缘垂直，<b>没有任何倾斜</b></li>
+     *   <li>{@code slope = 100} → <b>完全斜</b>：等于 {@code k} 推导出的原值（上游原版）</li>
+     * </ul>
+     *
+     * <p><b>关键：0 不是「取消拉伸」，是「取消倾斜」</b>。
+     * 之前一版我做成「用 slope 直接生成整套系数」，slope=0 时四角全变 1.0（四角同速），
+     * 连拉伸都没了 —— 那不符合用户要的「纯矩形拉伸」。
+     *
+     * <p><b>为什么「同侧两角取平均」就是纯矩形</b>：
+     * 打字右移时 rank = {0,2,3,1}（TL/TR/BR/BL），倾斜来自：
+     * <ul>
+     *   <li>左边缘 = rank0(TL) 与 rank1(BL) 的时长差</li>
+     *   <li>右边缘 = rank2(TR) 与 rank3(BR) 的时长差</li>
+     * </ul>
+     * 把这两对各自取平均 → 同侧等速 → 左右边缘都垂直 → 纯矩形。
+     * 而 rank0 与 rank2 之间仍有差 → 上下伸缩 → <b>拉伸保留</b>。
+     *
+     * <p>实测（k=4.5、单行右移一字符、光标 2x32）：
+     * <pre>
+     *   slope=0   → 0.86/0.86/0.32/0.32  拉伸 5.84px  斜 0.00px  ★纯矩形
+     *   slope=25  → 0.89/0.83/0.34/0.29  拉伸 6.47px  斜 1.01px
+     *   slope=50  → 0.93/0.79/0.37/0.27  拉伸 7.10px  斜 2.02px
+     *   slope=75  → 0.97/0.75/0.39/0.25  拉伸 7.70px  斜 3.04px
+     *   slope=100 → 1.00/0.72/0.42/0.22  拉伸 8.26px  斜 4.06px  = 上游原版
+     * </pre>
+     *
+     * @param base  由 {@code k} + {@code smooth} 推导出的基础四角系数
+     * @param slope 0–100；0 = 纯矩形（无斜），100 = 完全斜（k 原值）
+     * @return 插值后的四角系数（新数组）
+     */
+    public static float[] applySlopeOverlay(float[] base, float slope) {
+        if (base == null || base.length < 4) {
+            return base;
         }
         float t = clamp(slope, 0f, 100f) / 100f;
-        // 最短角从 1.0（无梯度）线性降到 0.05（极端）
-        float minFac = 1.0f - t * 0.95f;
-        // 四角在 1.0 与 minFac 之间按 k=4.5 的形状 {1, 0.72, 0.42, 0.22} 分配
-        float[] shape = {1.0f, 0.72f, 0.42f, 0.22f};
+        if (t >= 1f) {
+            return base;                  // 100 = 原值，无需插值
+        }
+        // 先构造「纯矩形」目标：rank 空间同侧配对取平均
+        float[] rect = base.clone();
+        for (int[] pair : new int[][]{{0, 1}, {2, 3}}) {
+            float avg = (base[pair[0]] + base[pair[1]]) / 2f;
+            rect[pair[0]] = avg;
+            rect[pair[1]] = avg;
+        }
+        // 从纯矩形线性插值到原值
         float[] out = new float[4];
         for (int i = 0; i < 4; i++) {
-            out[i] = round2(1.0f - (1.0f - minFac) * (1.0f - shape[i]) / 0.78f);
+            out[i] = round2(rect[i] + (base[i] - rect[i]) * t);
         }
         return out;
     }
@@ -517,17 +560,13 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      * @param slope  斜度（0–100），&lt; 0 = 用 k
      */
     public static float[] deriveTrailFactors(float k, float smooth, float slope) {
-        float[] bySlope = deriveTrailFactorsFromSlope(slope);
-        float[] base = (bySlope != null) ? bySlope : deriveTrailFactors(k);
-        float s = clamp(smooth, 0f, 1f) * 0.8f;
-        if (s <= 0f) {
-            return base;
-        }
-        float[] out = new float[base.length];
-        for (int i = 0; i < base.length; i++) {
-            out[i] = round2(base[i] + (1.0f - base[i]) * s);
-        }
-        return out;
+        // 先由 k 定基础梯度，再叠 smooth（压平），最后叠 slope（额外倾斜）。
+        //
+        // 【顺序不能反】slope 的作用是「在已有梯度上放大同侧差」，
+        // 若先叠 slope 再叠 smooth，smooth 会把 slope 的成果压平 ——
+        // 两者互相抵消，用户拉斜度看不到效果。
+        float[] base = deriveTrailFactors(k, smooth);
+        return applySlopeOverlay(base, slope);
     }
 
     public static float[] deriveTrailFactors(float k, float smooth) {
@@ -802,18 +841,21 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          * 同时表达「四角梯度差（=斜度）」与「标称倍率」两件事，
          * 想更斜只能把它拉到 8，而它的标签是「拉伸强度」，容易误解。
          *
-         * <p><b>0.9.80 起默认 82 并进入预设域</b>（用户要求「这个参数进预设，
-         * 初始就是对齐上游的参数，改这个参数会生成副本」）。
+         * <p><b>语义（0.9.81 定稿）</b>：</p>
+         * <ul>
+         *   <li>{@code 0} → <b>纯矩形拉伸</b>（有拉伸、无倾斜）</li>
+         *   <li>{@code 100} → <b>完全斜</b>（= {@code k} 推导的原值 = 上游原版）</li>
+         * </ul>
          *
-         * <p><b>82 是「对齐上游」的值</b>：它让 {@code deriveTrailFactorsFromSlope(82)}
-         * 产出 {@code [1.000, 0.720, 0.420, 0.220]}，与上游 k=4.5 的四角系数逐位相同。
-         * 而 k=4.5 也正是 {@code stretchRatioK} 的默认值 —— 两者自洽。
+         * <p><b>默认 100 = 对齐上游</b>（用户要求「初始就是对齐上游的参数」）。</p>
          *
-         * <p><b>为什么不保留 -1（跟随 k）作默认</b>：斜度进预设域之后，
-         * 「-1」在切换预设时没有意义（预设必须能确定一个具体值）。
-         * 旧值 -1 在 {@link #loadState} 里会被迁移成 82。
+         * <p>进预设域：改它会派生成副本，切预设会回到该预设的值。</p>
+         *
+         * <p><b>历史</b>：0.9.80 曾用 82（当时公式不同，82 恰好等于上游）；
+         * 0.9.81 改成「从纯矩形插值到原值」后，100 才等于上游，故默认改为 100。
+         * 旧值在 {@link #loadState} 里按原样保留（0-100 都合法）。</p>
          */
-        public int slopeTicks = 82;
+        public int slopeTicks = 100;
 
         /** 5. 辉光淡出（停止后柔和熄灭） */
         public boolean overlayFadeOut = true;

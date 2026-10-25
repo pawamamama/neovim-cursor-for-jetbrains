@@ -190,7 +190,7 @@ eovide-cursor-diag.log}
         }
     }
 
-    static void frameSummary(long frameSeq, int caretCount, int trailCount,
+    static void frameSummary(int animatorId, long frameSeq, int caretCount, int trailCount,
                              boolean targetMoved, boolean anyOffsetMoved,
                              double blockSpread, double fps) {
         if (!enabled()) {
@@ -210,15 +210,17 @@ eovide-cursor-diag.log}
         // 用户据此以为多光标掉到 58fps，而实测每帧 8.5ms（117fps）。
         double realFps = -1;
         long nowNs = System.nanoTime();
-        if (lastSampleSeq > 0 && frameSeq > lastSampleSeq) {
-            long dSeq = frameSeq - lastSampleSeq;
-            long dNs = nowNs - lastSampleNs;
+        // 按 animator 隔离（见 SAMPLE_STATE 的注释：static 版会让 85% 样本失效）
+        long[] st = sampleStateOf(animatorId);
+        if (st[0] > 0 && frameSeq > st[0]) {
+            long dSeq = frameSeq - st[0];
+            long dNs = nowNs - st[1];
             if (dNs > 0) {
                 realFps = dSeq * 1e9 / dNs;
             }
         }
-        lastSampleSeq = frameSeq;
-        lastSampleNs = nowNs;
+        st[0] = frameSeq;
+        st[1] = nowNs;
         boolean countOk = (caretCount == trailCount);
         // I1：目标动了但没有任何角点动 → 拖尾冻结
         boolean i1Ok = !(targetMoved && !anyOffsetMoved);
@@ -326,10 +328,28 @@ eovide-cursor-diag.log}
     /** 最近一帧的辉光层数（由绘制路径写入，供 frameSummary 打印） */
     static int glowLayersNow = 0;
 
-    // 【真实帧率采样状态】按 (序号差 ÷ 时间差) 算，口径见 frameSummary 的注释。
-    // 只被 EDT 上的 frameSummary 读写，单线程访问。
-    private static long lastSampleSeq = 0;
-    private static long lastSampleNs = 0;
+    // ==================== 真实帧率采样状态（0.9.81 修复）====================
+    //
+    // 【原实现的 bug】lastSampleSeq / lastSampleNs 是 **static** 字段。
+    // 实测日志：303 条 frame 行里 257 条打出 fps=?（84.8%），
+    // 相邻帧号差为 0 的占 30/39 —— 说明多个 CaretAnimator 实例在互相踩。
+    //
+    // 机制：编辑器 A 的 animator 采样到 #795 记下 (795, t1)；
+    //   编辑器 B 的 animator 也在 #795 采样，读到 lastSampleSeq=795，
+    //   dSeq = 795 - 795 = 0 → 不算 fps → 打 fps=?，并把 (795, t2) 覆盖回去。
+    //   于是只有「每批的第一个」能算出来，其余全是问号。
+    //
+    // 这与注释里警告过的「static 计数器被多编辑器共用导致表观翻倍」是同一类错误 ——
+    // 上次是翻倍，这次是让 85% 的样本失效。
+    //
+    // 修法：按 animator 身份隔离。用身份哈希做 key，避免残留（弱引用清不掉）。
+    private static final java.util.Map<Integer, long[]> SAMPLE_STATE =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** 取该 animator 的采样状态 [lastSeq, lastNs]；首次调用时初始化为「无历史」 */
+    private static long[] sampleStateOf(int animatorId) {
+        return SAMPLE_STATE.computeIfAbsent(animatorId, k -> new long[]{0L, 0L});
+    }
 
     // ==================== 覆盖性补充 ====================
 
