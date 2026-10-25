@@ -69,7 +69,10 @@ Step "javac V 探针（$($vprobes.Count) 个）"
 if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
-$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize'
+$mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHints', 'VMixed', 'VCustom', 'VFacadeEquiv', 'VSubpixel', 'VSeEdge', 'VRecurse', 'VSep', 'VPreset9', 'VVerify', 'VFrameRate', 'VSmooth', 'VOrder', 'VOrtho', 'VPerf', 'VPerf2', 'VRank', 'VLabel', 'VGrad', 'VRegr2', 'VFreeze', 'VWidth', 'VQuad', 'VMulti', 'VBlock', 'VCaret', 'VAddSetting', 'VCursorSize', 'VPreviewBranch'
+# VPreviewBranch 锁「预览窗必须显式设 charsMoved，不依赖像素判据」。
+# 它同时记录了为什么：兜底像素判据 (|jumpX| <= 8) 在预览的 width=1.8px 下
+# 会让结果随字号漂移 —— 实测 charW=8 判短跳(16帧)、charW=17 判跨行(48帧)。
 # VAddSetting 是「设置页加新参数的稳健性」守门探针：State 字段 vs FIELDS 表、
 # copyFrom 覆盖度、面板可建成、reset/apply 无残留脏状态。
 # 已用 4 个变异证明它抓得住漏改（M1 删 FIELDS 项 / M2 漏 copyFrom /

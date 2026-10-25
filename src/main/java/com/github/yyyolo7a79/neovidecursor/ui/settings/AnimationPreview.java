@@ -160,6 +160,8 @@ public final class AnimationPreview extends JComponent {
         }
         setOpaque(true);
         actionInterval = (mode == Mode.INLINE) ? TYPE_MS : CROSS_MS;
+        // 初值：单行模式按 1（短跳），跨行模式按跨行值 —— 与各自的第一帧一致。
+        pendingCharsMoved = (mode == Mode.INLINE) ? 1 : CROSS_CHARS_MOVED;
     }
 
     public static AnimationPreview inline(NeovideConfig c) { return new AnimationPreview(c, Mode.INLINE); }
@@ -383,6 +385,10 @@ public final class AnimationPreview extends JComponent {
         int advanceW = metrics.stringWidth(shown);
         centerX = TEXT_X + advanceW + cursorW / 2;
         centerY = contentTop() + lineH / 2;
+        // 单行打字/退格：每次只挪一个字符 → 短跳分支 → 用 trailFactors 梯度。
+        // 这就是真实编辑器里的观感（拖尾只比原版长一点），也是用户说
+        // 「预览拉得很诡异」时对比的那一侧。
+        pendingCharsMoved = 1;
         pushTarget();
     }
 
@@ -422,15 +428,66 @@ public final class AnimationPreview extends JComponent {
             centerX = TEXT_X + metrics.stringWidth(CROSS_LINE0) + cursorW / 2;
             centerY = contentTop() + lineH * 0.5;
         }
+        // 跨行/换行：字符数必然超过 typingMaxChars → 走跨行三档
+        // （前缘 = animationLength×(1-trailSize)，trailSize=1 时为 0 = 瞬时吸附）
+        pendingCharsMoved = CROSS_CHARS_MOVED;
         pushTarget();
     }
 
     private void pushTarget() {
+        // 【0.9.65 修复：预览必须告诉 TrailCorner「这次挪了几个字符」】
+        //
+        // 用户报：「动画的单行删除预览窗口是拉长的很诡异」，而实际编辑器里
+        // 单行只是比原版长一点，跨行才明显。查证结论：**预览画的是跨行分支**。
+        //
+        // ============ 根因 ============
+        //
+        // TrailCorner.jump() 用 charsMoved 判定走哪条分支（:199）：
+        //
+        //   if (charsMoved >= 0)  isShortJump = sameLine && charsMoved <= typingMaxChars(3);
+        //   else                  isShortJump = |jumpX| <= shortMoveThreshold && |jumpY| <= 0.001;
+        //
+        // charsMoved 默认 -1，而本类从不调 setCharsMoved() ——
+        // 于是每一帧都走**兜底分支**，而兜底用「像素归一化」判，预览里
+        // 一个字符宽 ≈ cursorW，jumpX 恒大于阈值 → **isShortJump 永远 false**
+        // → 全部走跨行三档。
+        //
+        // 两条分支的实际后果（用户参数 k=8 / smooth=0.2 / trailSize=1.0）：
+        //   单行短跳 → 四角 [110, 81, 50, 29] ms   梯度 3.85×，拖尾只比原版长一点
+        //   跨行三档 → 四角 [280, 140, 0, 0] ms    前缘瞬时吸附、后缘拖满 → 拉得很夸张
+        //
+        // 所以预览一直把「跨行」的形状套在「单行」的标题下。
+        //
+        // ============ 修法 ============
+        //
+        // 由调用方明确告知本次移动的字符数：
+        //   单行打字/退格 → 1（短跳，走 trailFactors 梯度）
+        //   跨行/换行     → 给一个必然超过 typingMaxChars 的值（走跨行三档）
+        //
+        // 这与 CaretAnimator 的做法完全一致（那边用 |offset 差| 得出真实字符数），
+        // 只是预览没有真实编辑器，只能按演示意图直接给值。
+        for (int i = 0; i < 4; i++) {
+            corners[i].setCharsMoved(pendingCharsMoved);
+        }
         int[] ranks = assignRanks(centerX, centerY);
         for (int i = 0; i < 4; i++) {
             corners[i].jump(cursorW, cursorH, centerX, centerY, ranks[i]);
         }
     }
+
+    /**
+     * 本帧移动了几个字符 —— 决定 {@code TrailCorner.jump} 走哪条分支。
+     *
+     * <p>见 {@link #pushTarget()} 的注释：这个值缺失时预览会全程走跨行分支。
+     *
+     * <p><b>为什么是字段而不是 pushTarget 的参数</b>：{@code pushTarget()} 由
+     * 4 处调用（单行打字/退格、跨行两步），每处都要传同一个值；用字段可以
+     * 在每个 advance* 里只设一次，避免某个调用点漏传 —— 这正是本 bug 的成因。
+     */
+    private int pendingCharsMoved = 1;
+
+    /** 跨行判定必然越过的字符数（> typingMaxChars=3 即可，取 99 表明"这是换行"） */
+    private static final int CROSS_CHARS_MOVED = 99;
 
     private void setInterval(int ms) {
         if (ms == actionInterval || actionTimer == null) return;
