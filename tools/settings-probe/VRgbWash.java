@@ -27,24 +27,31 @@ public final class VRgbWash {
         System.out.println("=== V-RGB-WASH：色相循环 + 彩虹预设 ===");
         V0Env.install();
 
-        // ---------- W-1：彩虹预设存在且标了 rgbWash ----------
+        // ---------- W-1：彩虹预设存在且风格为 RAINBOW ----------
+        //
+        // 【0.9.84 更新】原来只判 rgbWash=true，但马卡龙也是动态的，
+        // 「最后一个 rgbWash=true」变成了马卡龙。现在按【风格】精确定位。
         CursorPresets.ColorPreset rainbow = null;
         for (CursorPresets.ColorPreset p : CursorPresets.COLOR_PRESETS) {
-            if (p.rgbWash()) {
+            if (p.washStyle() == CursorPresets.WashStyle.RAINBOW) {
                 rainbow = p;
             }
         }
-        check("W-1 存在一个标记 rgbWash 的颜色预设", rainbow != null,
+        check("W-1 存在风格为 RAINBOW 的颜色预设", rainbow != null,
                 rainbow == null ? "没有" : rainbow.name());
 
-        // ---------- W-2：其余预设都不带 rgbWash ----------
-        int plain = 0;
+        // ---------- W-2：动态与纯色各占一部分 ----------
+        //
+        // 【0.9.84 更新】动态预设从 1 个（彩虹）变成 2 个（彩虹 + 马卡龙），
+        // 所以「其余全是纯色」这条不再成立。改为精确校验：
+        //   纯色数 + 动态数 = 总数，且动态数 == 2
+        int plain = 0, dyn = 0;
         for (CursorPresets.ColorPreset p : CursorPresets.COLOR_PRESETS) {
-            if (!p.rgbWash()) plain++;
+            if (p.rgbWash()) dyn++; else plain++;
         }
-        check("W-2 其余颜色预设都是纯色（rgbWash=false）",
-                plain == CursorPresets.COLOR_PRESETS.length - 1,
-                "纯色 " + plain + " 个 / 共 " + CursorPresets.COLOR_PRESETS.length);
+        check("W-2 动态预设 2 个（彩虹 + 马卡龙），其余为纯色",
+                dyn == 2 && plain + dyn == CursorPresets.COLOR_PRESETS.length,
+                "动态 " + dyn + " / 纯色 " + plain + " / 共 " + CursorPresets.COLOR_PRESETS.length);
 
         // ---------- W-3：选彩虹 → rgbGradient=true；选冰蓝 → false ----------
         if (rainbow != null) {
@@ -68,10 +75,28 @@ public final class VRgbWash {
         check("W-4 RGB 开启时同一四边形颜色随位置变化（色相循环生效）",
                 spreadOn > 30, "颜色跨度=" + spreadOn);
 
-        // ---------- W-5：RGB 关闭时颜色恒定 ----------
+        // ---------- W-5：RGB 关闭时走双拼渐变 ----------
+        //
+        // 【0.9.84 行为变更】原来 RGB 关闭 = 纯色填充（颜色跨度 0）。
+        // 现在加了双拼渐变（用户要求「混色是主色系自带的双拼渐变」），
+        // 所以 RGB 关闭时**沿长度方向有渐变**，但**不随时间流动**。
+        //
+        // 判据拆成两条：
+        //   W-5a  关闭时同一条内颜色有变化（双拼生效）
+        //   W-5b  关闭时颜色不随时间变（静态，与动态互斥）
         int spreadOff = colorSpread(false);
-        check("W-5 RGB 关闭时颜色恒定（纯色路径未受影响）",
-                spreadOff <= 2, "颜色跨度=" + spreadOff + "（应接近 0）");
+        check("W-5a 关闭动态时同一条内颜色有渐变（双拼生效）",
+                spreadOff > 5, "颜色跨度=" + spreadOff + "（应 > 5，但不该像动态那么大）");
+
+        NeovideConfig cfgStatic = new NeovideConfig();
+        cfgStatic.useShadow = false;
+        CaretTrailPanel pStatic = new CaretTrailPanel(cfgStatic);
+        pStatic.setRgbEnabled(false);
+        int s1 = sampleTopColor(pStatic);
+        Thread.sleep(700);
+        int s2 = sampleTopColor(pStatic);
+        check("W-5b 关闭动态时颜色不随时间变（静态双拼，与动态互斥）",
+                s1 == s2, String.format("%06X -> %06X", s1, s2));
 
         // ---------- W-6：颜色随时间变化 ----------
         NeovideConfig cfg = new NeovideConfig();

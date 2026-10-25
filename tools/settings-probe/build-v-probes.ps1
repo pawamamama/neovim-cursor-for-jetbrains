@@ -85,7 +85,8 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         'VerifyApplyConfig', 'VerifyPanel', 'VerifyPersistence', 'VSmoothGlobal',
         'VPreviewSize',
         # 已知有失败但覆盖有效功能，保留运行以便跟踪：
-        'VReset2', 'VSepBound', 'VSleep'
+        'VReset2', 'VSepBound', 'VSleep',
+        'VMacaron'
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：
 # 82（旧出厂默认）→ 100（消除「凭空多出副本」），用户真实值原样保留。
 # VSlopePreset 锁「斜度进预设域」：
