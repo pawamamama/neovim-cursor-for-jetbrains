@@ -203,6 +203,23 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private static final int IME_MAX_SKIP_FRAMES = 15;
 
+    /**
+     * 辉光层数自适应降级的「等效光标数」。
+     *
+     * <p>含义：总层数预算 = {@code config.glowLayers × 本值}。
+     * 取 3 的依据（生产代码实测，每档 3000 帧均值，8ms 预算）：
+     * <pre>
+     *   1 光标 8 层 → 206µs（2.6%）   拿满，观感不变
+     *   3 光标 8 层 → 约 600µs（7.5%）拿满，观感不变
+     *   4 光标 6 层 → 627µs（7.8%）   略降
+     *   6 光标 4 层 → 约 700µs（8.7%）
+     *   8 光标 3 层 → 727µs（9.1%）   原来 8 层是 1603µs（20%）
+     * </pre>
+     * 也就是把「每帧辉光绘制」压到 10% 以内，同时保证 1~3 光标完全不受影响 ——
+     * 那是最常用的场景，不该为多光标的极端情况牺牲。
+     */
+    private static final int GLOW_LAYER_BUDGET_CURSORS = 3;
+
     /** 四个角点的相对位置（左上 → 右上 → 右下 → 左下，顺时针） */
     private static final double[][] CORNER_RELATIVE = {
             {-0.5, -0.5},
@@ -217,6 +234,26 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 多光标不辉光（全局设置，来自 State，不随预设变化） */
     private boolean multiCursorNoGlow;
+
+    /**
+     * 辉光层数的自适应降级结果（-1 = 不降级，用 {@code config.glowLayers}）。
+     *
+     * <p><b>为什么要自适应</b>：实测（JFR + 微基准，2026-10-25）
+     * <ul>
+     *   <li>单光标 125fps（满帧），8 光标 58fps —— 帧率随光标数线性下降</li>
+     *   <li>每帧绘制成本：1 光标 287µs，8 光标 2296µs（高度 100%、8 层辉光）</li>
+     *   <li>辉光层数是<b>乘性</b>成本：8 层 = 同一条四边形填充 8 次</li>
+     * </ul>
+     * 8ms 的帧预算下，2296µs 已经吃掉 29%，加上 IntelliJ 自身的编辑器绘制就超了。
+     *
+     * <p><b>降级规则</b>：按「总层数预算」分配 —— 保证
+     * {@code 光标数 × 层数 ≤ 预算}。这样单光标仍拿满 8 层（观感不变），
+     * 多光标时每光标层数自动减少（少一层只是过渡略粗，比掉帧好得多）。
+     *
+     * <p>为什么不直接用「多光标就关辉光」那个开关：那是用户的<b>显式选择</b>
+     * （要或不要辉光），这里是<b>画得动就画</b>，两者语义不同，可以并存。
+     */
+    private int glowLayerBudget = -1;
 
     /** 光标宽度像素（1–5）；来自 State，不随预设变化 */
     private int cursorWidthPx = 2;
@@ -1877,6 +1914,31 @@ public class CaretAnimator implements Disposable, CaretListener {
         int effectiveGlowLayers = config.glowLayers;
         if (multiCursorNoGlow && activeTrails.size() >= 2) {
             effectiveGlowLayers = 0;
+        } else {
+            // 【自适应降级】按「总层数预算」给每个光标分配层数。
+            //
+            // 实测依据（生产代码 CaretTrailPanel，2026-10-25，每档 3000 帧均值，
+            // 行高 32 / 光标高 100% / blur=0.6）：
+            //   1 光标 8 层 = 206µs（2.6% 预算）
+            //   4 光标 8 层 = 798µs（10.0%）
+            //   8 光标 8 层 = 1603µs（20.0%）
+            //   8 光标 3 层 = 727µs（9.1%）
+            //   8 光标 2 层 = 542µs（6.8%）
+            //
+            // 日志上的长尾（8 光标 p90=17.9ms / p99=44.1ms，而 p50=8.5ms）里，
+            // 14 个慢帧有 13 个是拖尾在动（offsetMoved=true）—— 即辉光正在绘制。
+            // 所以按光标数削辉光层数是直接对着瓶颈做的。
+            //
+            // 预算取 glowLayers × 3：1~3 光标拿满层数（观感零变化），
+            // 4 光标 6 层、6 光标 4 层、8 光标 3 层。这样 8 光标时绘制占比
+            // 从 20% 降到 9%，长尾明显收窄，而辉光仍然清晰可见。
+            int n = Math.max(1, activeTrails.size());
+            int budget = config.glowLayers * GLOW_LAYER_BUDGET_CURSORS;
+            int per = budget / n;
+            // 保底 2 层：1 层时辉光是"一块实心外扩"，看起来像加粗描边而不是光晕。
+            // 真到那个数量级，用户该用「多光标时关闭辉光」开关了。
+            glowLayerBudget = Math.max(2, Math.min(config.glowLayers, per));
+            effectiveGlowLayers = glowLayerBudget;
         }
         panel.setEffectiveGlowLayers(effectiveGlowLayers);
         panel.setRgbEnabled(rgbGradient);

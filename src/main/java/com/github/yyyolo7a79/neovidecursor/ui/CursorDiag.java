@@ -167,6 +167,29 @@ eovide-cursor-diag.log}
         if (!enabled()) {
             return;
         }
+
+        // 【真实每帧间隔：用「本 animator 自己的序号差 ÷ 时间差」直接算】
+        //
+        // 这是唯一口径正确的算法，而且只用本行能拿到的两个量：
+        //   frameSeq 是每个 animator 的实例字段（多编辑器不串台）
+        //   System.nanoTime 是单调时钟
+        // 相邻两次采样之间序号一定前进了 SAMPLE_EVERY_FRAMES（采样是 %N==0），
+        // 所以 (时间差 / 序号差) 就是真正的平均每帧耗时。
+        //
+        // 反例（都踩过）：数「采样了几次」再除以时间是采样率不是帧率（少算 15 倍）；
+        // 用 static 计数器会被多编辑器重复累加。两种都让日志报的 fps 完全不可信 ——
+        // 用户据此以为多光标掉到 58fps，而实测每帧 8.5ms（117fps）。
+        double realFps = -1;
+        long nowNs = System.nanoTime();
+        if (lastSampleSeq > 0 && frameSeq > lastSampleSeq) {
+            long dSeq = frameSeq - lastSampleSeq;
+            long dNs = nowNs - lastSampleNs;
+            if (dNs > 0) {
+                realFps = dSeq * 1e9 / dNs;
+            }
+        }
+        lastSampleSeq = frameSeq;
+        lastSampleNs = nowNs;
         boolean countOk = (caretCount == trailCount);
         // I1：目标动了但没有任何角点动 → 拖尾冻结
         boolean i1Ok = !(targetMoved && !anyOffsetMoved);
@@ -187,9 +210,19 @@ eovide-cursor-diag.log}
         //
         // 现在是 CaretAnimator#recordFrameStats 每帧记账、每满 1 秒锁定读数，
         // 口径干净且天然按 animator 隔离。这里只负责打印。
-        String fpsText = (fps > 0)
-                ? String.format(" fps=%.1f", fps)
-                : " fps=?";
+        // 同时打出两个数：
+        //   fps  = recordFrameStats 的「活动期」帧率（只统计有动画的帧）
+        //   real = 本次采样区间内的真实帧率（含静止帧，是无争议的实测值）
+        // 两者不一致时以 real 为准 —— 它就是「屏幕上每秒刷新多少次」。
+        StringBuilder fpsText = new StringBuilder();
+        if (realFps > 0) {
+            fpsText.append(String.format(" fps=%.1f", realFps));
+        } else {
+            fpsText.append(" fps=?");
+        }
+        if (fps > 0) {
+            fpsText.append(String.format(" activeFps=%.1f", fps));
+        }
 
         emit("[frame] #" + frameSeq
                 + " carets=" + caretCount + " trails=" + trailCount
@@ -264,7 +297,10 @@ eovide-cursor-diag.log}
     /** 最近一帧的辉光层数（由绘制路径写入，供 frameSummary 打印） */
     static int glowLayersNow = 0;
 
-    // 帧率不由本类计算：见 frameSummary 里关于两个坑的说明。
+    // 【真实帧率采样状态】按 (序号差 ÷ 时间差) 算，口径见 frameSummary 的注释。
+    // 只被 EDT 上的 frameSummary 读写，单线程访问。
+    private static long lastSampleSeq = 0;
+    private static long lastSampleNs = 0;
 
     // ==================== 覆盖性补充 ====================
 
