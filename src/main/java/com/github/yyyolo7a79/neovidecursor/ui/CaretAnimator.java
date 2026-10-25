@@ -252,15 +252,6 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** RGB 渐变开关（来自 State） */
     private boolean rgbGradient;
-
-    /**
-     * 动态渐变风格（0.9.84）。由 {@link #syncGlobalSettings()} 从 State 读取。
-     *
-     * <p>为什么不放进 State 之外的地方：颜色预设选中时会把风格写进 State 的一个
-     * 派生字段（见 {@code CursorPresetApplier}），与 {@code rgbGradient} 一起流转。
-     */
-    private com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle
-            rgbStyle = com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle.RAINBOW;
     private final NeovideConfig config;
     /**
      * 每个 {@code Caret} 一份拖尾状态（多光标）。
@@ -1876,7 +1867,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 多光标：每个光标都要补画（原生光标被全局隐藏，不补画就彻底不可见）
         // RGB 开关与弹簧路径保持同一语义：控制台光标也是我们画的，配色要一致
         panel.setRgbEnabled(rgbGradient);
-                panel.setRgbStyle(rgbStyle);
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
             trail.snapToTarget();
@@ -2013,7 +2003,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
         panel.setEffectiveGlowLayers(effectiveGlowLayers);
         panel.setRgbEnabled(rgbGradient);
-                panel.setRgbStyle(rgbStyle);
         // 【诊断必须报告本帧真正生效的层数】
         //
         // 这个字段原来只在 tickStaticCaret 里被赋值，弹簧路径从不写 ——
@@ -2261,47 +2250,13 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorHeightRatio = s.cursorHeightRatio;
             rgbGradient = s.rgbGradient;
             targetFps = s.targetFps;
-            // 【0.9.84】动态风格从「当前颜色匹配哪个预设」反推。
-            //
-            // 为什么不加 State 字段：rgbGradient 已有 40 处引用，
-            // 再并存一个 washStyle 字段就要同步 5 处拷贝（纪律四-B 的坑）。
-            // 而风格本来就是「颜色预设」的属性 —— 用现有 matchColorPreset 反推，
-            // 零新增状态、零新增拷贝点。
-            //
-            // 代价：如果用户手动改 HEX 导致匹配不上任何预设，风格回落到 RAINBOW
-            // （= 0.9.75 的原有行为），不会出意外。
-            rgbStyle = resolveWashStyle(s);
         } catch (Throwable ignored) {
             multiCursorNoGlow = false;
             cursorWidthPx = 2;
             cursorHeightRatio = 1.0f;
             rgbGradient = false;
             targetFps = 125;
-            rgbStyle = com.github.yyyolo7a79.neovidecursor.settings
-                    .CursorPresets.WashStyle.RAINBOW;
         }
-    }
-
-    /**
-     * 从当前 State 的颜色值反推「属于哪个颜色预设」，取其动态风格。
-     *
-     * <p>匹配不上任何预设时回落 {@code RAINBOW}（0.9.75 的原有行为）。
-     */
-    private static com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle
-            resolveWashStyle(com.github.yyyolo7a79.neovidecursor.settings
-                    .NeovideCursorSettings.State s) {
-        try {
-            com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.ColorPreset p =
-                    com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier
-                            .matchColorPreset(s);
-            if (p != null) {
-                return p.washStyle();
-            }
-        } catch (Throwable ignored) {
-            // 反推失败：走默认
-        }
-        return com.github.yyyolo7a79.neovidecursor.settings
-                .CursorPresets.WashStyle.RAINBOW;
     }
 
     /** 渲染模式切换后调用：清空两种模型的内部状态，避免残留 */

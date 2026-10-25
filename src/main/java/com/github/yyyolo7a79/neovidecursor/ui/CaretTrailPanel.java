@@ -154,30 +154,6 @@ public class CaretTrailPanel extends JComponent {
         return rgbEnabled;
     }
 
-    /**
-     * 动态渐变的风格（0.9.84）。
-     *
-     * <p><b>为什么不把 {@code setRgbEnabled} 改成 enum 参数</b>：那个方法有 4 处调用
-     * （两个绘制路径 + 预览 + 探针），改签名会牵动一片。
-     * 保持 boolean 语义（开/关动态），风格用这个平行的 setter 单独设 ——
-     * 默认 {@code RAINBOW}，与 0.9.75 的行为完全一致。
-     */
-    private com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle
-            rgbStyle = com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle.RAINBOW;
-
-    /** 设置动态渐变风格（配合 {@link #setRgbEnabled(boolean)} 使用）。 */
-    public void setRgbStyle(
-            com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle style) {
-        this.rgbStyle = (style == null)
-                ? com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle.RAINBOW
-                : style;
-    }
-
-    /** 当前动态渐变风格（探针用） */
-    public com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle rgbStyle() {
-        return rgbStyle;
-    }
-
     /** RGB 渐变的终止色（保留兼容；新版按色相循环生成，不再使用单色终点） */
     private static final java.awt.Color RGB_END_COLOR = new java.awt.Color(0x7B68EE);
 
@@ -340,105 +316,6 @@ public class CaretTrailPanel extends JComponent {
         }
         return new java.awt.LinearGradientPaint(
                 0f, top, 0f, bottom, rgbFractions, rgbColors);
-    }
-
-    // ==================== 马卡龙双色过渡（0.9.84）====================
-    //
-    // 【用户要求】「加一个马卡龙色系动态渐变」「b（双色缓慢过渡而不是全色板循环）」
-    //
-    // 【设计】两个马卡龙色交替：当前色 → 下一色，用 smoothstep 缓动连续插值。
-    //   · 不使用色相环（马卡龙色相跨度大，环状循环会花）
-    //   · 两色之间的 ΔE 实测 14~31（柔和过渡，见 CursorPresets.MACARON_COLORS）
-    //   · 沿着长度方向做渐变，整条颜色随时间缓慢推移
-    //
-    // 【为什么周期比彩虹长】马卡龙的本质是「柔和」。彩虹 4000ms 一圈是刻意的活跃感；
-    // 马卡龙用 8000ms，让颜色变化慢到「注意不到在变，但一眼看不是静止」。
-    // 这是主观判断，如果用户觉得太慢/太快，改这一个常量即可。
-
-    /**
-     * 马卡龙两色过渡的周期（毫秒）—— 从一色过渡到下一色。
-     *
-     * <p><b>3000ms</b>（0.9.84）：最初用 8000ms，理由是「马卡龙要柔和」。
-     * 实测渲染 8 帧（间隔 1 秒）后发现**前 8 秒根本没离开同一个过渡区**，
-     * 看起来就是静态的一根粉棒 —— 用户会以为没生效。
-     *
-     * <p>3000ms × 6 色 = 18 秒走完整个色板，单次过渡 3 秒 ——
-     * 既看得出变化，又不至于像彩虹那样抢注意力。
-     */
-    private static final long MACARON_PERIOD_MS = 3000L;
-
-    /** 马卡龙渐变的色标段数（比彩虹少：两色过渡不需要 17 段） */
-    private static final int MACARON_STEPS = 8;
-
-    /** 马卡龙色标数组（复用） */
-    private final float[] macaronFractions = new float[MACARON_STEPS + 1];
-    private final java.awt.Color[] macaronColors = new java.awt.Color[MACARON_STEPS + 1];
-
-    /** 马卡龙渐变起始时刻（纳秒） */
-    private long macaronStartNanos = -1L;
-
-    /**
-     * 生成马卡龙双色渐变。
-     *
-     * <p>当前色与下一色按相位插值（smoothstep 缓动，避免线性插值的"匀速感"），
-     * 再沿长度方向从「插值色」渐变到「明显更浅的版本」——
-     * 这样即使两色相位相近，纵向也始终有可见的深浅过渡。
-     *
-     * @param top    四边形上边界
-     * @param bottom 四边形下边界
-     * @return 渐变画笔；边界退化时返回 null
-     */
-    private java.awt.Paint buildMacaronPaint(float top, float bottom) {
-        if (!Float.isFinite(top) || !Float.isFinite(bottom) || bottom - top <= 1.0f) {
-            return null;
-        }
-        String[] palette = com.github.yyyolo7a79.neovidecursor.settings
-                .CursorPresets.MACARON_COLORS;
-        if (palette == null || palette.length < 2) {
-            return null;
-        }
-        long now = System.nanoTime();
-        if (macaronStartNanos < 0L) {
-            macaronStartNanos = now;
-        }
-        double elapsedMs = (now - macaronStartNanos) / 1_000_000.0;
-
-        // 相位 [0, palette.length)：整数部分是「当前色」索引，小数部分是过渡进度
-        double phase = (elapsedMs / MACARON_PERIOD_MS) % palette.length;
-        if (phase < 0) {
-            phase += palette.length;
-        }
-        int i0 = (int) phase;
-        int i1 = (i0 + 1) % palette.length;
-        float t = (float) (phase - i0);
-        // smoothstep：3t² - 2t³，比线性更有"呼吸感"
-        float eased = t * t * (3f - 2f * t);
-
-        java.awt.Color c0 = NeovideColors.parse(palette[i0], 1.0f);
-        java.awt.Color c1 = NeovideColors.parse(palette[i1], 1.0f);
-        int alpha = (fillColor == null) ? 255 : fillColor.getAlpha();
-
-        // 主色 = 两色按 eased 插值
-        int mr = Math.round(c0.getRed() + (c1.getRed() - c0.getRed()) * eased);
-        int mg = Math.round(c0.getGreen() + (c1.getGreen() - c0.getGreen()) * eased);
-        int mb = Math.round(c0.getBlue() + (c1.getBlue() - c0.getBlue()) * eased);
-
-        // 末端 = 主色降亮度 30%，制造纵向深浅层次
-        float[] hsb = java.awt.Color.RGBtoHSB(mr, mg, mb, null);
-        int endRgb = java.awt.Color.HSBtoRGB(hsb[0], hsb[1], hsb[2] * 0.70f);
-        int er = (endRgb >> 16) & 0xFF, eg = (endRgb >> 8) & 0xFF, eb = endRgb & 0xFF;
-
-        for (int i = 0; i <= MACARON_STEPS; i++) {
-            float f = i / (float) MACARON_STEPS;
-            macaronFractions[i] = f;
-            macaronColors[i] = new java.awt.Color(
-                    Math.round(mr + (er - mr) * f),
-                    Math.round(mg + (eg - mg) * f),
-                    Math.round(mb + (eb - mb) * f),
-                    alpha);
-        }
-        return new java.awt.LinearGradientPaint(
-                0f, top, 0f, bottom, macaronFractions, macaronColors);
     }
 
     private float glowWidth = 12f;
@@ -852,103 +729,16 @@ public class CaretTrailPanel extends JComponent {
             // 但**不叠加任何半透明层** —— 所以不会像上游那样多层混成浊色。
             float top = (float) Math.min(Math.min(quadY[0], quadY[1]), Math.min(quadY[2], quadY[3]));
             float bottom = (float) Math.max(Math.max(quadY[0], quadY[1]), Math.max(quadY[2], quadY[3]));
-            // 【0.9.84】按风格分派：RAINBOW = 全色相循环，MACARON = 马卡龙双色过渡
-            java.awt.Paint wash = (rgbStyle
-                    == com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.WashStyle.MACARON)
-                    ? buildMacaronPaint(top, bottom)
-                    : buildRgbWashPaint(top, bottom);
+            java.awt.Paint wash = buildRgbWashPaint(top, bottom);
             if (wash != null) {
                 g2.setPaint(wash);
             } else {
                 g2.setColor(fillColor);
             }
         } else {
-            // ==================== 0.9.84：双拼渐变 ====================
-            //
-            // 【用户定义的语义】
-            //   · 「混色」= 主色系自带的**静态双拼渐变**，末端色由算法自动算
-            //   · 「RGB 动态」= 色相循环，**与双拼互斥**（走上面那个 if 分支）
-            //
-            // 用户原话：「混色是主色系比如粉色->渐变到计算过的颜色，
-            //            要求计算渐变算法天然适配光标色和辉光色保证能有最舒服的双拼」
-            //
-            // 【算法：辉光色 × 0.72 亮度】
-            //
-            //   末端色 = HSL(辉光色.色相, 辉光色.饱和度 × 1.05, 辉光色.亮度 × 0.72)
-            //
-            // 为什么用辉光色而不是自己造一个颜色：用户要求「天然适配光标色和辉光色」。
-            // 辉光色本来就是用户选的、与主色协调的第二个颜色，直接拿它降亮度：
-            //   · 色相自动协调（不需要色相环计算）
-            //   · 5 个预设全部落在可接受对比度内（实测见下）
-            //
-            // 【为什么 0.72】实测扫描（tools/bench/ZzDualToneScan，WCAG 相对亮度公式）：
-            //   系数   粉色    冰蓝    薄荷    藕荷    暖沙
-            //   0.85  1.42   1.82   1.76   2.11   1.64   ← 粉色太弱，看不出渐变
-            //   0.72  1.96   2.46   2.39   2.78   2.29   ← 全部落在 1.96~2.78
-            //   0.65  2.36   2.93   2.87   3.25   2.75   ← 偏强
-            // 0.72 让最弱的粉色也有 1.96（肉眼可辨），最强的藕荷 2.78 仍在
-            // 「同一色系的深浅」范围内，不会像两种颜色拼的。
-            //
-            // 【性能】GradientPaint 是 Java2D 内置的 2 色标线性渐变，
-            // 比色相循环的 17 色标便宜一个数量级（实测见 BenchRgbWash）。
-            float top = (float) Math.min(Math.min(quadY[0], quadY[1]), Math.min(quadY[2], quadY[3]));
-            float bottom = (float) Math.max(Math.max(quadY[0], quadY[1]), Math.max(quadY[2], quadY[3]));
-            if (bottom - top > 1.0f && glowColor != null) {
-                java.awt.Color end = deriveDualToneEnd(glowColor);
-                g2.setPaint(new java.awt.GradientPaint(
-                        0f, top, fillColor,
-                        0f, bottom, end));
-            } else {
-                g2.setColor(fillColor);
-            }
+            g2.setColor(fillColor);
         }
         g2.fill(path);
-    }
-
-    /**
-     * 双拼渐变的亮度系数 —— 末端色 = 辉光色 × 本系数。
-     *
-     * <p><b>0.58</b>（0.9.84 定）：用户实测 0.72「说实话不明显」。
-     *
-     * <p>实测数据（tools/bench/ZzDualToneScan + ZzDualTonePerceptual）：
-     * <pre>
-     *   系数   WCAG对比度   感知色差 ΔE     判读
-     *   0.72   1.96~2.78   22.6~33.0     已属「明显不同色」
-     *   0.58   2.88~3.86   34.2~40.0     更强
-     *   0.50   3.69~4.65   41.1~47.2     接近「两种颜色」
-     * </pre>
-     *
-     * <p><b>注意</b>：0.72 的 ΔE 已经超过「明显」阈值（>15），
-     * 所以「不明显」不完全是色差问题 —— 2px 宽的细条上，
-     * 渐变本身的可视面积就很有限。0.58 是在不变成「两色拼接」前提下的强化档。
-     *
-     * <p><b>待实现</b>：做成面板参数条（用户要求，见 docs/NEXT-STEPS.md）。
-     * 当前是常量，改值需重新编译安装。
-     */
-    private static final float DUAL_TONE_LUMA_FACTOR = 0.58f;
-
-    /**
-     * 从辉光色推导双拼渐变的末端色。
-     *
-     * <p>算法：保持色相不变，饱和度 ×1.05（略微补偿降亮度带来的发灰），亮度 ×0.72。
-     *
-     * <p><b>为什么保持色相</b>：色相一变就不叫「双拼」而是「两种颜色」了。
-     * 用户要的是同色系的深浅过渡。
-     *
-     * @param glow 辉光色（用户选的，与主色天然协调）
-     * @return 末端色；glow 为 null 时返回主色的降亮度版本
-     */
-    private java.awt.Color deriveDualToneEnd(java.awt.Color glow) {
-        float[] hsb = java.awt.Color.RGBtoHSB(
-                glow.getRed(), glow.getGreen(), glow.getBlue(), null);
-        int rgb = java.awt.Color.HSBtoRGB(
-                hsb[0],
-                Math.min(1f, hsb[1] * 1.05f),
-                hsb[2] * DUAL_TONE_LUMA_FACTOR);
-        // 保留主色的不透明度（tailOpacity），而不是辉光的不透明度
-        int alpha = (fillColor == null) ? 255 : fillColor.getAlpha();
-        return new java.awt.Color(
-                (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, alpha);
     }
 
     /**

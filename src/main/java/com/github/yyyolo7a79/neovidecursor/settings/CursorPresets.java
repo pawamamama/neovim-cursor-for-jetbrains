@@ -574,34 +574,12 @@ public final class CursorPresets {
      *   <li>两个 HEX 仍写进 State，作为「关掉 RGB 后回到的颜色」</li>
      * </ul>
      */
-    /**
-     * 动态渐变的风格。
-     *
-     * <p><b>0.9.84 新增</b>：原来只有一个 {@code rgbWash} 布尔（开 = 彩虹，关 = 纯色）。
-     * 现在需要第三种状态「马卡龙动态」，所以抽出风格枚举。
-     *
-     * <p><b>为什么不把 {@code State.rgbGradient} 也改成枚举</b>：
-     * 它有 40 处引用、11 个探针依赖，改它等于大手术。
-     * 风格只属于「颜色预设」这一层 —— 绘制层只需要知道「要不要动态、用哪个色板」，
-     * 那由 {@link CaretTrailPanel#setRgbStyle} 传下去，State 那边仍是布尔。
-     */
-    public enum WashStyle {
-        /** 纯色（双拼渐变或单一颜色） */
-        NONE,
-        /** 全色相循环（0.9.75 的「彩虹」） */
-        RAINBOW,
-        /** 马卡龙双色缓慢过渡（0.9.84 新增） */
-        MACARON
-    }
-
     public static final class ColorPreset {
         private final String name;
         private final String tailColor;
         private final String shadowColor;
         /** 是否启用色相循环（RGB 动态）。见类注释。 */
         private final boolean rgbWash;
-        /** 动态渐变的风格（0.9.84）。{@code rgbWash=false} 时恒为 NONE。 */
-        private final WashStyle washStyle;
 
         private ColorPreset(String name, String tailColor, String shadowColor) {
             this(name, tailColor, shadowColor, false);
@@ -613,16 +591,6 @@ public final class CursorPresets {
             this.tailColor = tailColor;
             this.shadowColor = shadowColor;
             this.rgbWash = rgbWash;
-            this.washStyle = rgbWash ? WashStyle.RAINBOW : WashStyle.NONE;
-        }
-
-        private ColorPreset(String name, String tailColor, String shadowColor,
-                            WashStyle style) {
-            this.name = name;
-            this.tailColor = tailColor;
-            this.shadowColor = shadowColor;
-            this.rgbWash = (style != WashStyle.NONE);
-            this.washStyle = style;
         }
 
         public String name() {
@@ -637,14 +605,9 @@ public final class CursorPresets {
             return shadowColor;
         }
 
-        /** 是否启用动态渐变（任一风格） */
+        /** 是否启用色相循环（RGB 动态） */
         public boolean rgbWash() {
             return rgbWash;
-        }
-
-        /** 动态渐变风格（{@link WashStyle}）。纯色预设返回 {@code NONE}。 */
-        public WashStyle washStyle() {
-            return washStyle;
         }
 
         @Override
@@ -667,36 +630,6 @@ public final class CursorPresets {
             new ColorPreset("藕荷",     "#C4B5FD", "#A78BFA"),
             new ColorPreset("暖沙",     "#FDE68A", "#FCD34D"),
             new ColorPreset("彩虹（动态）", "#FFC0CB", "#FFC0CB", true),
-            // 【0.9.84】马卡龙动态。两个 HEX 是「关掉动态后回到的颜色」，
-            // 取马卡龙色板的第 0 色（樱花粉）与它的辉光配对。
-            new ColorPreset("马卡龙（动态）", "#FFD1DC", "#E1BEE7", WashStyle.MACARON),
-    };
-
-    /**
-     * 马卡龙动态渐变的色板（0.9.84）。
-     *
-     * <p>按<b>色相环顺序</b>排列，相邻两色交替过渡 —— 这样从最后一个回到第一个
-     * 也是连续的（色相环闭合），不会出现突兀的跳变。
-     *
-     * <p>配色来自马卡龙色系：低饱和（S ≈ 0.13~0.29）+ 高明度（B ≈ 0.90~1.00）。
-     *
-     * <p><b>实测过渡质量</b>（tools/bench/ZzMacaronDual，CIE76 ΔE）：
-     * <pre>
-     *   樱花粉→蜜桃橘  14.4    蜜桃橘→奶油黄  19.5
-     *   奶油黄→抹茶绿  23.9    抹茶绿→婴儿蓝  27.6
-     *   婴儿蓝→薰衣草  31.2    薰衣草→樱花粉  17.9（闭合处）
-     * </pre>
-     * 全部落在 14~31 的「柔和过渡」区间（< 8 太接近，> 35 跳变明显）。
-     *
-     * <p>与深色主题（0x2B2D30）的对比度 8.36~11.26 —— 醒目但不刺眼。
-     */
-    public static final String[] MACARON_COLORS = {
-            "#FFD1DC", // 0 樱花粉   H=346  S=0.18  B=1.00
-            "#FFCCBC", // 1 蜜桃橘   H=14   S=0.26  B=1.00
-            "#FFE5B4", // 2 奶油黄   H=39   S=0.29  B=1.00
-            "#C8E6C9", // 3 抹茶绿   H=122  S=0.13  B=0.90
-            "#B3E5FC", // 4 婴儿蓝   H=199  S=0.29  B=0.99
-            "#E1BEE7", // 5 薰衣草   H=291  S=0.18  B=0.91
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */
