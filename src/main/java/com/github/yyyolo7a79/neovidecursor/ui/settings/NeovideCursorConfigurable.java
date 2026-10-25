@@ -274,7 +274,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private static final int SHORT_MAX = 25;
     private static final int SHORT_STEP = 1;
 
-    /** 10 个滑块的规格表。<b>顺序 = 面板从上到下的顺序</b>（探针按此下标取滑块）。 */
+    /**
+     * 刻度表。<b>数组顺序不再承担任何契约</b> —— 取值一律走 {@link #specOf(String)}，
+     * 按 key 查。往中间插入新项不会影响任何已有调用点。
+     *
+     * <p><b>历史</b>：原来注释写着「顺序 = 面板从上到下的顺序（探针按此下标取滑块）」，
+     * 而生产代码用 {@code SPECS[11]} 这种硬编码下标取值。两者叠加的结果是：
+     * 插入一项 → 后面全部偏移 → 编译期无提示 → 症状是「拖 A 滑块 B 参数变了」。
+     * 0.9.65 改成按 key 查。
+     *
+     * <p><b>面板视觉顺序</b>由 {@code build*Group} 里各 {@code addSlider(...)} 的
+     * 调用顺序决定，与本数组顺序无关。
+     */
     private static final SliderSpec[] SPECS = {
             // 1. 淡出前保持时长：刻度 = 毫秒
             new SliderSpec("cursorDisappearDelay", DELAY_MIN, DELAY_MAX, DELAY_STEP, " ms",
@@ -841,12 +852,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
             g.row("短动画时长（打字/退格）", row -> {
-                addSlider(row, SPECS[9], null);
+                addSlider(row, specOf("shortAnimationLength"), null);
                 row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
             g.row("输入平滑（拖尾形状 · 全局）", row -> {
-                addSlider(row, SPECS[10], null);
+                addSlider(row, specOf("typingSmoothness"), null);
                 row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
@@ -857,7 +868,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // trailSize + animationLength。
             // 放在「多行缎带」下会让用户以为它管跨行 —— 调了没反应。
             g.row("拉伸强度（行内后缘）", row -> {
-                addSlider(row, SPECS[7], springMode);
+                addSlider(row, specOf("stretchRatioK"), springMode);
                 row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });
@@ -882,12 +893,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
             g.row("拖尾密度（整体）", row -> {
-                addSlider(row, SPECS[6], springMode);
+                addSlider(row, specOf("trailSize"), springMode);
                 row.rowComment("<b>控制跨行缎带拉多长</b>（越大越长）。也影响行内，但行内主要由「缎带拉伸强度」决定。", COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
             g.row("跨行动画时长", row -> {
-                addSlider(row, SPECS[8], null);
+                addSlider(row, specOf("animationLength"), null);
                 row.rowComment(W_ANIM_LEN, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
@@ -925,7 +936,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             });
 
             g.row("拖尾不透明度", row -> {
-                addSlider(row, SPECS[2], null);
+                addSlider(row, specOf("tailOpacity"), null);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -954,18 +965,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             });
 
             g.row("辉光峰值不透明度", row -> {
-                addSlider(row, SPECS[3], shadowOn);
+                addSlider(row, specOf("glowOpacity"), shadowOn);
                 return kotlin.Unit.INSTANCE;
             });
 
             g.row("辉光层数", row -> {
-                addSlider(row, SPECS[4], shadowOn);
+                addSlider(row, specOf("glowLayers"), shadowOn);
                 row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
                 return kotlin.Unit.INSTANCE;
             });
 
             g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
-                addSlider(row, SPECS[5], shadowOn);
+                addSlider(row, specOf("shadowBlurFactor"), shadowOn);
                 row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
                 return kotlin.Unit.INSTANCE;
             });
@@ -987,7 +998,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             cur.row("光标宽度", row -> {
                 // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
                 // 那个档位看不出区别。改成纯 1-5px。
-                addSlider(row, SPECS[11], null);
+                addSlider(row, specOf("cursorWidthPx"), null);
                 row.rowComment("<b>持久配置，全局生效</b>。1~5 像素；"
                         + "5 = IDEA 粗光标宽度（上限）。"
                         + "<b>静止时也保持这个宽度。</b>", COMMENT, NO_LINK);
@@ -1007,7 +1018,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             });
 
             cur.row("光标高度（% 行高）", row -> {
-                addSlider(row, SPECS[12], null);
+                addSlider(row, specOf("cursorHeightRatio"), null);
                 row.rowComment("<b>持久配置，全局生效</b>。"
                         + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
                         + "<b>上限就是顶格，不能超过。</b>", COMMENT, NO_LINK);
@@ -1030,13 +1041,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             });
 
             g.row("淡出前保持时长", row -> {
-                addSlider(row, SPECS[0], fadeOn);
+                addSlider(row, specOf("cursorDisappearDelay"), fadeOn);
                 row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
                 return kotlin.Unit.INSTANCE;
             });
 
             g.row("淡出时长", row -> {
-                addSlider(row, SPECS[1], fadeOn);
+                addSlider(row, specOf("cursorFadeOutDuration"), fadeOn);
                 return kotlin.Unit.INSTANCE;
             });
             return kotlin.Unit.INSTANCE;
@@ -1237,6 +1248,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         bindings.add(insertAt, b);
         return cell;
+    }
+
+    /**
+     * 按 <b>key</b> 取刻度表里的一项 —— 取代 `SPECS[数字]` 这种硬编码下标。
+     *
+     * <p><b>为什么必须去掉数字下标</b>：原来写的是 {@code SPECS[11]} / {@code SPECS[12]}
+     * 这类硬编码下标，一旦有人在数组中间插入一项，它后面所有下标全部偏移，
+     * 而<b>编译期毫无提示</b>。
+     * 症状会是「拖 A 滑块，B 参数变了」这种极难定位的错。
+     *
+     * <p><b>为什么用 key 而不是常量（如 SPEC_CURSOR_WIDTH = 11）</b>：
+     * 常量仍然要人工数下标，插项时照样得改；key 是字符串，与数组位置完全解耦。
+     *
+     * <p><b>写错 key 会怎样</b>：这里直接抛 {@link IllegalStateException}，
+     * 面板构建时立刻炸 —— 而不是静默返回一个错误刻度。<b>宁可启动失败，也不要静默错位。</b>
+     * 另外 {@code VAddSetting} 的 A-1/A-2 会在门禁里先抓到这类拼写问题。
+     */
+    private static SliderSpec specOf(String key) {
+        for (SliderSpec s : SPECS) {
+            if (s.key.equals(key)) {
+                return s;
+            }
+        }
+        throw new IllegalStateException(
+                "SPECS 里没有 key=\"" + key + "\" 的刻度项 —— 检查拼写，或确认它已加入 SPECS 数组");
     }
 
     /** SPECS 数组里某 spec 的下标；找不到返回 Integer.MAX_VALUE（排最后） */
