@@ -265,21 +265,32 @@ public final class VReset {
         return -1;
     }
 
-    /** 「性能诊断」= 点它之后 apply，pending 任何字段都不变的那个。 */
+    /**
+     * 定位「性能诊断」复选框。
+     *
+     * <p><b>0.9.88 改法</b>：原来靠「点它后 apply，pending 任何字段都不变的那个」
+     * 来暴力识别 —— 那是因为它当年用的是 {@code bindCheck}，会写进 pending。
+     *
+     * <p>0.9.88 把它改成**非绑定复选框**（这正是 R-16 要的行为：不参与 isModified、
+     * 不创建副本），于是它不再写 pending，暴力识别就找不到它了。
+     *
+     * <p>现在直接按**组件身份**定位：从 configurable 的 {@code paintDiagCheck}
+     * 私有字段取出那个 JCheckBox，再在列表里找同一个实例。
+     * 这比启发式更可靠 —— 它测的就是「面板上那个真实的性能诊断开关」。
+     */
     private static int findPaintDiagCheckbox(NeovideCursorConfigurable conf, List<JCheckBox> boxes) {
-        for (int i = 0; i < boxes.size(); i++) {
-            conf.reset();
-            String before = digest(conf);
-            boxes.get(i).doClick();
-            conf.apply();
-            String after = digest(conf);
-            boxes.get(i).doClick();
-            conf.apply();
-            if (before.equals(after)) {
-                return i;
+        try {
+            java.lang.reflect.Field f =
+                    NeovideCursorConfigurable.class.getDeclaredField("paintDiagCheck");
+            f.setAccessible(true);
+            Object target = f.get(conf);
+            if (target instanceof JCheckBox) {
+                return boxes.indexOf(target);
             }
+            return -1;
+        } catch (ReflectiveOperationException e) {
+            return -1;
         }
-        return -1;
     }
 
     private static String digest(NeovideCursorConfigurable conf) {

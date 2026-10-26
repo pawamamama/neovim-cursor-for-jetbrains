@@ -149,17 +149,18 @@ public final class CursorPresetApplier {
         NeovideCursorSettings.State s = svc.getState();
         s.tailColor = p.tailColor();
         s.shadowColor = p.shadowColor();
-        // 【0.9.79 修复：Tools 切颜色时没同步 rgbGradient】
+        // 【0.9.88 删除：不再写 rgbGradient】
         //
-        // 0.9.75 给颜色预设加了 rgbWash 标记（「彩虹（动态）」= true，其余 false），
-        // 设置面板的 onColorPresetPicked / restoreColorPreset 都同步写了；
-        // **但 Tools 菜单这条路径忘了写** —— 于是：
-        //   · 从「彩虹」在 Tools 里切到「冰蓝」→ 两个 HEX 变了，
-        //     但 rgbGradient 仍是 true → 绘制层继续走色相循环 → 光标还是彩虹
-        //   · 用户看到「切了颜色没变化，只有从设置面板切才管用」
+        // 这里原来有一行 `s.rgbGradient = p.rgbWash();`（0.9.79 加的）。
+        // 当时 rgbGradient 表示「走不走色相循环」，所以选颜色预设时同步它是对的。
         //
-        // 这与「两条路径语义必须一致」是同一类问题（restoreSkipping 那次也是）。
-        s.rgbGradient = p.rgbWash();
+        // 但 0.9.85 起 rgbGradient 改成「用户的光标渐变开关」，语义变了：
+        //   用户手动开渐变 → 点「冰蓝」→ 这行把 rgbGradient 改成 false
+        //   → **双拼被静默关掉**。用户视角是「明明开了渐变，点个颜色就没了」。
+        //
+        // 现在彩虹的判定完全靠**读路径反推**：
+        //   CaretAnimator.resolveRgbWash() → matchColorPreset(s) → p.rgbWash()
+        // 彩虹有独有 HEX（#4FC3F7 / #B388FF），能唯一匹配，不需要写 rgbGradient。
         svc.persistQuietly();
         NeovideCaretManager.applyConfig();
         LOG.info("neovide-cursor: 已应用颜色预设 " + p.name()

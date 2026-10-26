@@ -1330,19 +1330,26 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         panel.collapsibleGroup("高级（诊断）", false, g -> {
             g.row("性能诊断（跳过重绘，只跑计算）", row -> {
                 row.topGap(TopGap.MEDIUM);
-                // 【T3-2：本轮新引入的回归，medium】
-                // 原来 getter 读字段 paintDiag，而该字段只在 apply() 里由
-                // super.apply() 更新。本轮给 syncAllControlsFromPending() 补了
-                // super.reset() → 它用【陈旧的字段值】覆盖控件，于是
-                // 「勾选性能诊断 → 换预设」会静默把勾选取消（父提交 c03ea7f^ 不会）。
+                // 【0.9.88 修复：不能用 bindCheck】
                 //
-                // 修法：让控件自己成为真相 —— getter 之后直接读组件状态，
-                // 字段只在 apply() 那一瞬同步给 NeovideCaretManager。
-                Cell<JBCheckBox> diagCell = bindCheck(row, () -> paintDiag, v -> paintDiag = v);
-                paintDiagCheck = diagCell.getComponent();
-                paintDiagCheck.addItemListener(e ->
-                        paintDiag = paintDiagCheck.isSelected());
-                diagCell.comment(W_PAINT_DIAG, COMMENT, NO_LINK);
+                // 原来这里是 `bindCheck(row, () -> paintDiag, v -> paintDiag = v)`。
+                // `bindSelected` 会让控件成为 JBPanel 的**绑定控件**，于是它参与
+                // `isModified()` —— 点一下「性能诊断」，设置面板就显示「有未保存改动」，
+                // 进而触发自动派生「XX 副本」。
+                //
+                // 但 paintDiag **不是 State 字段**（不持久化，只活在面板里），
+                // 它本该是「调试开关」而不是「配置项」。本方法开头的 javadoc
+                // （1326 行）早就写着「不参与 isModified()」—— 代码与注释矛盾了。
+                //
+                // 修法：用**原生复选框**（row.checkBox 直接拿组件，不调 bindSelected），
+                // 自己监听状态变化。这样它不在绑定控件表里，isModified() 看不到它。
+                //
+                // 为什么仍然保留 paintDiagCheck 字段：换了预设后要能把勾选状态复原，
+                // 否则「停止重绘」会在用户不知情时被重置（那是 T3-2 修过的回归）。
+                paintDiagCheck = row.checkBox("").getComponent();
+                paintDiagCheck.setSelected(paintDiag);
+                paintDiagCheck.addItemListener(e -> paintDiag = paintDiagCheck.isSelected());
+                row.rowComment(W_PAINT_DIAG, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1769,8 +1776,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[idx];
         pending.tailColor = p.tailColor();
         pending.shadowColor = p.shadowColor();
-        // 色相循环开关随预设双向同步（见方法注释）
-        pending.rgbGradient = p.rgbWash();
+        // 【0.9.88 删除：不再写 rgbGradient】
+        // 用户的光标渐变开关不该被颜色预设改写（详见 CursorPresetApplier 同一处说明）。
+        // 彩虹靠 resolveRgbWash() 从预设反推，不需要这个字段参与。
         syncAllControlsFromPending();
     }
 
@@ -2096,9 +2104,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[colorBaseIdx];
         pending.tailColor = p.tailColor();
         pending.shadowColor = p.shadowColor();
-        // 【0.9.75】与 onColorPresetPicked 一致：色相循环开关随预设双向同步，
-        // 否则从「彩虹」点恢复回「冰蓝」时光标仍是彩虹。
-        pending.rgbGradient = p.rgbWash();
+        // 【0.9.88 删除：不再写 rgbGradient】与 onColorPresetPicked 一致，
+        // 彩虹靠 resolveRgbWash() 反推，不占用用户的光标渐变开关。
         syncAllControlsFromPending();
     }
 
