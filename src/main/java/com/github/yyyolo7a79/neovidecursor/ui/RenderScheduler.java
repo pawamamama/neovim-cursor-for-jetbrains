@@ -180,6 +180,20 @@ final class RenderScheduler {
                     // 不足 1ms：不再「直接跳过睡眠立刻派发」（那会让帧率变成
                     // EDT 往返速度，反而抖），而是等到真正到期。
                     // 用 onSpinWait 而不是空转 —— 它会提示 CPU 进入低功耗等待状态。
+                    //
+                    // 【0.9.88 实测说明：本分支在 Windows 上极少命中】
+                    //
+                    // 800 帧采样（tools/bench 的调度探针）：sleep 命中 799 次、
+                    // 本分支命中 **0 次**。原因是 Thread.sleep(N ms) 实际会睡
+                    // N+1 个时钟粒度，醒来时通常已跨过 due，remainNs <= 0。
+                    //
+                    // 那为什么保留：① 它是正确性兜底 —— 时钟源抖动时仍需等到
+                    // 真正到期，不能提前派发；② 在其他平台（时钟粒度更细）
+                    // 会正常生效。
+                    //
+                    // 【重要】NEXT-STEPS 里「忙等 180fps 更差」那条实测，
+                    // 测的是**独立的忙等循环**，不是这段代码 —— 本分支从未在生产中
+                    // 执行过，所以那条数据与本分支无关。已在文档中更正。
                     while (System.nanoTime() < due) {
                         Thread.onSpinWait();
                     }
@@ -251,7 +265,30 @@ final class RenderScheduler {
             posted = true;
             // 【EDT 任务粒度红线】这个 Runnable 体内只服务这一个 animator：
             // 不含 for / forEach，也不会去 tick 第二个 animator。
-            SwingUtilities.invokeLater(animator::runTick);
+            //
+            // ============ 0.9.88 修复：invokeLater 抛出会导致永久活锁 ============
+            //
+            // 【死态】上面两行已经把 framePending=true 和 lastDispatchedDueNanos=due
+            // 落地了。如果 invokeLater 抛异常（EDT 已关闭、内存不足、EDT 队列拒绝…），
+            // 那个 Runnable 永远不会执行 → runTick 里的复位代码也永远不会跑。
+            //
+            // 于是这个 animator 同时满足两个「跳过」条件：
+            //   :243  lastDispatchedDueNanos == due      -> 跳过
+            //   :247  framePending 已经是 true           -> 跳过
+            // **该光标彻底不动，而且没有任何日志** —— 循环级 catch(Throwable)
+            // 也盖不住，因为循环本身没抛。
+            //
+            // 【修法】失败时把两个标志回滚到「未投递」状态，并记一行 warn。
+            // 只在异常路径生效，正常路径零变化。
+            try {
+                SwingUtilities.invokeLater(animator::runTick);
+            } catch (Throwable t) {
+                animator.framePending.set(false);
+                animator.lastDispatchedDueNanos = Long.MIN_VALUE;
+                posted = false;
+                LOG.warn("neovide-cursor: invokeLater failed, rolled back dispatch flags "
+                        + "(animator=" + System.identityHashCode(animator) + ")", t);
+            }
         }
         return posted;
     }

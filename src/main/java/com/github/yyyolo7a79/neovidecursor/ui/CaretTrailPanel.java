@@ -67,7 +67,6 @@ public class CaretTrailPanel extends JComponent {
     private final Path2D.Double quadPath = new Path2D.Double();
 
     /** 是否已有可绘制的四边形 */
-    private boolean hasQuad = false;
 
     // ===== 多光标：N 个四边形（扁平数组 + 步长，零分配）=====
 
@@ -512,7 +511,6 @@ public class CaretTrailPanel extends JComponent {
      */
     public void beginQuads() {
         quadCount = 0;
-        hasQuad = false;
         hasGhosts = false;
     }
 
@@ -540,7 +538,6 @@ public class CaretTrailPanel extends JComponent {
         }
         quads[base + 8] = glow < 0f ? 0f : Math.min(glow, 1f);
         quadCount++;
-        hasQuad = true;
         hasGhosts = false;
     }
 
@@ -568,7 +565,6 @@ public class CaretTrailPanel extends JComponent {
         ghosts.clear();
         ghosts.addAll(shapes);
         hasGhosts = true;
-        hasQuad = false;
     }
 
     /**
@@ -704,10 +700,9 @@ public class CaretTrailPanel extends JComponent {
 
     /** 清除全部绘制数据（光标不可见 / 模式切换时调用） */
     public void clearCorners() {
-        hasQuad = false;
         hasGhosts = false;
         // 【审查修正】必须一并清 quadCount —— 绘制循环看的是 quadCount，
-        // 只清 hasQuad 的话下一帧仍会把旧四边形画出来（清不干净）。
+        // 只清 quadCount 的话下一帧仍会把旧四边形画出来（清不干净）。
         quadCount = 0;
         ghosts.clear();
     }
@@ -725,7 +720,7 @@ public class CaretTrailPanel extends JComponent {
 
     @Override
     protected void paintComponent(Graphics g) {
-        if (!hasQuad && !hasGhosts) {
+        if (quadCount <= 0 && !hasGhosts) {
             return;
         }
 
@@ -773,7 +768,7 @@ public class CaretTrailPanel extends JComponent {
         // 细长四边形（2×32）的 stroke 几何构造尤其不划算。
         //
         // 结论：这条路走不通，老老实实保留逐层 fill。
-        drawQuadGlow(g2, path, glow);
+        drawQuadGlow(g2, glow);
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
         //
@@ -868,7 +863,7 @@ public class CaretTrailPanel extends JComponent {
      * IntelliJ 光标极窄（2×32），于是最亮的那层只向外扩不到 1px 且随即被
      * 不透明主体盖住；而真正扩得够远的层，alpha 已衰减到 2% 以下。
      */
-    private void drawQuadGlow(Graphics2D g2, Path2D.Double ignoredPath, float quadGlow) {
+    private void drawQuadGlow(Graphics2D g2, float quadGlow) {
         if (!config.useShadow || currentGlowLayers() <= 0 || glowWidth <= 0.5f) {
             return;
         }
@@ -1096,7 +1091,7 @@ public class CaretTrailPanel extends JComponent {
      * @param h  可用高度
      */
     public void paintForPreview(Graphics2D g2, int w, int h) {
-        if (!hasQuad && !hasGhosts) {
+        if (quadCount <= 0 && !hasGhosts) {
             return;
         }
         if (hasGhosts) {

@@ -559,14 +559,19 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private boolean skipNextIntervalMeasurement = false;
 
-    /**
-     * 上次记录的视觉位置，用于低成本地判断光标是否移动。
-     * {@code getVisualPosition()} 远比 {@code visualPositionToXY()} 便宜 ——
-     * 后者要换算折叠、制表符宽度等，是高帧率下的主要开销来源。
-     */
-    // lastVisualLine/Column 已下沉到 SpringTrail（见 isAt / markAt）
-    private int __unusedLastVisualLine = Integer.MIN_VALUE;
-    private int lastVisualColumn = Integer.MIN_VALUE;
+    // 【0.9.88 删除两个遗留字段】
+    //
+    // 原本这里有：
+    //     private int __unusedLastVisualLine = Integer.MIN_VALUE;
+    //     private int lastVisualColumn = Integer.MIN_VALUE;
+    //
+    // 它们记录的「上次视觉位置」早已下沉到 SpringTrail（见 isAt / markAt），
+    // 生产代码零读写 —— 字段名前面的 __unused 就是当时留下的标记，
+    // 但一直没删。留着会让读代码的人以为「这里还有一套位置缓存」。
+    //
+    // 删除前的核实：全仓 src 只有这两行声明，无任何读写；
+    // 唯一的外部引用在 tools/ImeGeomCriterionTest.java，那是已废弃的旧测试，
+    // 不在构建与探针门禁范围内。
 
     /**
      * 上一帧的光标字符偏移（{@link com.intellij.openapi.editor.CaretModel#getOffset()}）。

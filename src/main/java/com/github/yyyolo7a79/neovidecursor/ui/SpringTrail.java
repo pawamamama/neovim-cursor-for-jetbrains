@@ -303,7 +303,17 @@ final class SpringTrail {
         }
     }
 
-    /** assignRanks 的下标暂存数组（复用，避免每帧分配） */
+    /**
+     * assignRanks 的下标暂存数组（复用，避免每次调用分配数组）。
+     *
+     * <p><b>为什么是 {@code Integer[]} 而不是 {@code int[]}</b>：排序时要用
+     * {@link java.util.Arrays#sort(Object[], java.util.Comparator)} 或自定义
+     * 比较器，它只接受对象数组。用 {@code int[]} 就得手写一套排序。
+     *
+     * <p>注意：这里**确实会有装箱**（{-128..127} 之外每次装箱成新对象）。
+     * 但 rank 恒为 0..3，全部命中 {@code Integer} 缓存，实际零分配。
+     * 所以「避免装箱」的说法不准确 —— 准确说法是「避免数组分配 + 命中装箱缓存」。
+     */
     private Integer[] idxScratch;
 
     /**
