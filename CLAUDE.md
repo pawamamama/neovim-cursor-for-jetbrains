@@ -1,0 +1,470 @@
+# CLAUDE.md —— 接手这份工作前先读
+
+> 写给一个**全新会话的 Claude**：读完这一份就能直接干活，不需要再问任何人。
+> 生成时间：2026-10-25 深夜 · 对应提交 `6895655`
+
+---
+
+# 一、这是什么项目
+
+**JetBrains IDE 插件的光标拖尾动画**（Neovide 风格）。
+
+光标移动时不是简单平移，而是四个角各自挂一个阻尼弹簧，按「运动方向与角点的夹角」
+分配不同的动画时长，把规整矩形拉成平行四边形 —— 视觉上就是「拖尾」，
+不是叠加残影。
+
+```
+项目根目录   D:\deepseekwork\neovim-cursor-pr
+语言         Java 21
+构建         **无 Gradle** —— javac 直接编译 + 手写 plugin.xml
+仓库         https://github.com/pawamamama/neovim-cursor-for-jetbrains
+分支         fix/f7-override-read（一直在这个分支，没有 main）
+```
+
+## 规模（实测）
+
+```
+生产代码   src/main/java/.../neovidecursor/    34 文件 / 15,053 行
+探针       tools/settings-probe/V*.java        90 文件 / 18,044 行
+基准       tools/bench/*.java                 16 文件
+```
+
+**探针比生产代码还多。** 这个项目的核心工作方式是「改任何行为都要有守门探针」。
+
+## 包结构
+
+```
+core/        5 文件  物理引擎 —— DampedSpring / TrailCorner / NeovideConfig / AfterimageTrail / NeovideColors
+settings/    4 文件  State / 预设 / 字段表
+ui/         25 文件  绘制 + 帧调度 + Tools 菜单
+  ui/settings/       设置面板（NeovideCursorConfigurable 3110 行，全项目最大）
+```
+
+---
+
+# 二、当前状态（用这组数字判断一切）
+
+```
+版本         v0.9.89（本地已装）
+HEAD         6895655
+远程         fork/main = 6895655（同步）
+工作区       干净
+D0 门禁      PASS（core/NeovideConfig.java 零 diff）
+探针         87 个运行 / 8 个失败 / 79 个通过（那 8 个都是过期断言，不是功能故障）
+```
+
+## 那 8 个失败的探针（**不要试图让它们变绿**）
+
+```
+VDefects(6)  VSnap(10)  VTools(1)  VHints(1)
+VCustom(1)   VReset2(2) VSepBound(7)  VSleep(1)
+```
+
+它们断言的是 0.9.7x 时代的行为，后来功能改了但断言没跟上。
+**修它们要做的是「改断言方向 + 写清为什么」，不是改代码迁就断言，更不是删断言。**
+
+这是纪律二.6：**改方向不删断言。**
+
+---
+
+# 三、三十秒上手
+
+## 编译
+
+```powershell
+Set-Location D:\deepseekwork\neovim-cursor-pr
+$libs='D:\deepseekwork\_idea-anim\idea-libs'
+$cp=(Get-ChildItem -LiteralPath $libs -Filter '*.jar' | ForEach-Object { $_.FullName }) -join ';'
+Get-ChildItem -Recurse -File -Filter *.java 'src\main\java' | ForEach-Object { $_.FullName } | Set-Content build\v2-probe\srcs.txt
+javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\classes "@build\v2-probe\srcs.txt"
+```
+
+## 三道门禁（改完必跑）
+
+```powershell
+# ① D0：core/NeovideConfig.java 必须零 diff
+git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java
+
+# ② 全量探针（唯一权威入口）
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probes.ps1
+```
+
+**⚠️ 不要并发跑两次门禁。** 两份门禁共用 `build\v2-probe\classes`，
+编译那步会先删除目录 —— 另一份正在加载探针主类时会 ClassNotFoundException，
+失败数从 8 暴涨到 18/19，看起来像你引入了巨大回归。**这是假象**（见纪律四-G-2）。
+
+## 打包安装
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.90 -NoStart
+```
+
+**⚠️ 这个脚本每次都会清空用户配置**（用户 0.9.70 明确要求的行为）。
+所以「改了设置重启就没了」不是 bug，是安装脚本清空。
+
+---
+
+# 四、核心机制（改代码前必须懂）
+
+## 4.1 拖尾是怎么产生的
+
+```
+四个角 = 四个独立的 X/Y 阻尼弹簧（DampedSpring）
+每次光标跳动，按对齐度给四角排名 rank 0..3
+rank 映射到 trailFactors[4] 里的一个系数
+时长 = shortAnimationLength × factor
+factor 越小 → 时长越短 → 越快到位
+```
+
+`deriveTrailFactors(k, smooth, slope)` 是唯一派生入口：
+
+```
+k=4.5, smooth=0, slope=100  ->  [1.00, 0.72, 0.42, 0.22]   完全斜（对齐上游）
+k=4.5, smooth=0, slope=0    ->  [0.86, 0.86, 0.32, 0.32]   纯矩形（只拉伸不倾斜）
+```
+
+**slope 的语义**：0 = 同侧两角系数相等（左右边缘垂直）→ 规整矩形；
+100 = 完全对齐上游的四档梯度 → 平行四边形。
+
+## 4.2 三条互斥的填充路径（颜色）
+
+```
+cursorRgbWash = true          -> 彩虹：色相循环（buildRgbWashPaint）
+cursorRgbWash = false
+  + rgbEnabled = true         -> 双拼：上端拖尾色 / 下端从辉光色算出（buildDualTonePaint）
+两者都 false                  -> 纯色
+```
+
+**彩虹判定不在 State 里**，而是由 `CaretAnimator.resolveRgbWash()` 从
+「当前颜色匹配哪个预设」反推。原因见纪律四-D。
+
+## 4.3 辉光的真相
+
+```java
+glowColor = NeovideColors.parse(config.shadowColor, 1.0f);   // 第 385 行
+```
+
+**辉光始终用 `shadowColor`，从引入到现在从未跟随过光标本体色。**
+查过全部 git 历史确认。紧贴光标的那圈辉光被本体盖住，外圈是稀薄的 shadowColor ——
+这个层次是对的，不要"优化"它。
+
+---
+
+# 五、十四类陷阱（每一条都是真踩过的）
+
+## 陷阱 1：一个字段承担两个职责（纪律四-D）
+
+`rgbGradient` 曾经同时表示「用户要不要渐变」和「这个预设是不是彩虹」。
+0.9.85 改语义后三处写入仍按旧语义赋 `p.rgbWash()`，导致：
+
+```
+用户开了渐变 → 点「冰蓝」→ rgbGradient 被静默改成 false → 双拼消失
+```
+
+**规则**：字段名必须能一句话说清它表示什么。表示两个东西就拆两个字段。
+
+## 陷阱 2：字段接通了 ≠ 字段生效了（纪律四-E，最严重的一次）
+
+`targetFps` 曾经：声明有、`loadState` 有、`copyFrom` 有、`FIELDS` 白名单有，
+但 `computeNextDelayNs` 读的仍是常量 —— **用户选 144 完全没效果**。
+
+**State 字段有六层，漏一层就是「重启即失效」：**
+```
+① 字段声明           ② SettingsField.FIELDS 注册
+③ State.copyFrom()   ④ NeovideCursorSettings.loadState()
+⑤ 消费者（真正读它的代码）   ⑥ UI 控件
+```
+
+守门探针：`VDeadField`（检查字段是否被真正消费）、`VLoadState`（检查拷贝完整性）。
+
+## 陷阱 3：探针复刻逻辑而不是调用生产代码（纪律四-G）
+
+`AnimationPreview.assignRanks()` 曾有一份**独立的 rank 实现**，
+与生产 `SpringTrail.assignRanks()` 分家，导致「预览不变但实际变了」。
+
+**规则**：探针要么调用生产方法，要么断言生产行为，不许自己重写算法。
+
+## 陷阱 4：探针会骗你 —— 假通过 / 假失败 / 并发假红（纪律四-G / 四-G-2）
+
+```
+假通过①  探针测的是生产不用的并行实现（collectTrailTargets 就是这样）
+假通过②  断言太弱，改坏了也不红
+假失败   build 目录被并发清空 -> ClassNotFoundException -> 全红
+```
+
+**验真方法：变异测试。** 故意把生产代码改坏，探针必须变红。
+改完必须**删 classes 全量重编译**（增量编译会复用旧字节码）。
+
+## 陷阱 5：门禁脚本本身没被测
+
+**2026-10-25 的最大发现**：`build-v-probes.ps1` 的 `$mains = @(...)` 数组
+从 0.9.83 起缺右括号，**每一版都 ParseError，一个探针都没跑过**。
+之前所有「探针 X/Y 通过」的数字都是手写命令跑的，不可复现。
+
+补上括号后暴露第二个故障：87 个绝对路径超 Windows 32767 字符上限。
+改成 `@argfile` 才真正跑通。
+
+**规则**：门禁脚本改完，**先跑一次看它是否报错**，不要假设它在跑。
+
+## 陷阱 6：预览与生产必须同源
+
+`AnimationPreview` 曾经：
+- 用两参数版 `deriveTrailFactors(k, smooth)` —— **完全不看斜度**
+- 没有 `setCursorRgbWash` —— **彩虹根本推不到预览**
+
+**规则**：任何「预览 / 真机」双路径，参数必须走同一个函数、推同一组字段。
+守门探针：`VPreviewParity`。
+
+## 陷阱 7：参数有三套清单，别把差异当 bug
+
+```
+AnimPreset                    14 个观感参数（内置预设）
+SettingsField.PRESET_FIELDS   26 个（自定义预设快照）
+applyAnimPresetFields 实写    13 个（内置预设只写观感）
+```
+
+**26 ≠ 14 是两套机制，不是 bug。** 完整归属表见 `docs/PARAMETER-MAP.md`。
+
+## 陷阱 8：`RUNTIME_SWITCH_KEYS` 太短
+
+恢复自定义预设时要跳过「设备/环境开关」。原来只有 4 项，漏了 5 个：
+
+```
+targetFps  cursorWidthPx  cursorHeightRatio  diagLogging  multiCursorNoGlow
+```
+
+0.9.87 补到 9 项。判据：**这个字段改变的是「光标长什么样」，还是「插件怎么跑」？**
+
+## 陷阱 9：`invokeLater` 抛出 → 永久活锁
+
+`RenderScheduler.dispatchDue()` 先置 `framePending=true` 和 `lastDispatchedDueNanos=due`，
+再 `invokeLater`。后者抛出时两个标志已成死态 → **该光标彻底不动且无任何日志**。
+
+0.9.88 加了 try/catch 回滚 + warn。
+
+## 陷阱 10：并发改同一个仓库
+
+两个 agent 同时改同一个文件 → 提交会混在一起。
+**做法**：各自 stage 自己的文件，`git status --porcelain` 逐个确认。
+
+## 陷阱 11：`install.ps1` 会清空配置
+
+见「三、三十秒上手」。这不是 bug。
+
+## 陷阱 12：文档会撒谎
+
+`NEXT-STEPS.md` 里曾经写着「探针 72/82 通过」，那个数字来自一份**从未执行过**的脚本。
+
+**规则**：文档里的数字要能复现。写之前先跑一遍。
+
+## 陷阱 13：注意 build/ 目录的 150+ 个一次性脚本
+
+`build/*.ps1` 里有大量 `cb*.ps1` / `snap*.ps1` / `i5*.ps1` 之类的一次性排查脚本。
+**它们不是项目的一部分**，不要试图理解或维护。真正要用的只有：
+
+```
+build/install.ps1          打包 + 安装
+build/offline-build.ps1    只打包
+```
+
+## 陷阱 14：D0 门禁不能破
+
+`core/NeovideConfig.java` 必须零 diff。
+要加配置字段就加在 `State` 里，不要动 `NeovideConfig`。
+
+---
+
+# 六、已经验证过「做不到」的方向（**不要重试**）
+
+| 想法 | 结论 | 证据 |
+|---|---|---|
+| 前缘硬吸附产生「左半边」 | **锁两个角时斜度归零，锁单个前缘角才能出斜度** | `UPSTREAM-VSCODE-RESEARCH.md` §3.1 |
+| 辉光跟随光标色 | **从未存在过**，一直是独立 `shadowColor` | 全部 git 历史 |
+| 描边替代多层 fill 画辉光 | 实测 0.94x（更慢） | `PERFORMANCE-FPS.md` |
+| `timeBeginPeriod` 提帧率 | 无收益 | 同上 |
+| 忙等 / `parkNanos` | 更差（180 vs 221 fps / 8.65ms vs 4.09ms） | 同上 |
+| 自适应辉光降级 | 用户否决（与多光标开关语义重复） | `NEXT-STEPS.md` |
+
+**「左半边」的精确数据**（2×32 光标，单行右移一字符）：
+
+```
+锁住的角        左边缘斜  右边缘斜  拉伸px
+基线            2.11     4.06     8.26
+TR+BR（前缘）   2.11     0.00    11.58   <- 前缘完全直 + 后缘斜 = 左半边
+TL+BL（后缘）   0.00     4.06     6.16   <- 后缘直 + 前缘斜 = 右半边
+TR（前缘单角）   2.11     7.43    11.58
+```
+
+**结论**：锁「运动方向那一侧的两个角」能做出左半边（前缘斜度精确 0.00），
+而且**不需要新机制** —— `DampedSpring.setAnimationLength()` 是 public。
+缺的只是「锁哪两个角」的判断。**用户已决定做成开关、默认关，但先不做。**
+
+---
+
+# 七、待办（按优先级）
+
+## 7.1 用户已决定但未实现
+
+**半边拖尾开关**
+```
+形态：加复选框「前缘贴合（半边拖尾）」，默认关
+理由：它改变整体观感，做成可选最安全
+```
+
+实现要点（已验证可行）：
+1. `TrailCorner` 加 `setLeadingSnap()` → `springX/springY.setAnimationLength(0.0)`
+2. `SpringTrail.assignRanks()` 末尾按 `config.leadingSnap` 给 `order[2]/order[3]` 调它
+3. State 加字段 —— **注意六层拷贝**（见陷阱 2）
+4. 面板加复选框 —— **加 UI 控件前先问用户**
+5. 探针断言「开启时前缘斜度 == 0.00 且后缘 > 0」
+
+## 7.2 需要用户拍板
+
+| 项 | 说明 |
+|---|---|
+| `slope < 0` 语义 | 当前被 clamp 成 0（纯矩形），与 javadoc 说的「用 k 推导」相反 |
+| 双拼强度做成参数条 | 当前是常量 `DUAL_TONE_LUMA_FACTOR = 0.58f`，10 处改动 |
+
+## 7.3 可以做的清理
+
+| 项 | 说明 |
+|---|---|
+| 8 个过期断言 | 逐个查为什么红，改断言方向 |
+| `build/` 下 150+ 一次性脚本 | 可清理，但先列清单给用户确认 |
+
+---
+
+# 八、工作方式（用户明确要求，违反会被骂）
+
+## 8.1 语义不清晰先问，不许猜（纪律四-I）
+
+本项目在「RGB / 彩虹 / 双拼 / 辉光」上**连续猜错 6 次**，每次都做了实际改动，
+累计浪费数小时，用户情绪失控。
+
+必须问的情况：
+```
+· 用户用了模糊词：「改善」「好看点」「不对劲」「土」「怪」
+· 同一个词可能有两个意思（「混色」「动态」「渐变」都是）
+· 用户说「改回去」「恢复」—— 改回到哪个版本？
+· 我正要基于「大概这个意思」做超过 20 行的改动
+· 用户描述与我看到的代码不一致
+```
+
+**问的时候给选项，不给开放式问题：**
+```
+✓ 「光标设置里那个开关，开 = 彩虹 还是 双拼？」
+✗ 「你想要什么效果？」
+```
+
+## 8.2 看可维护性，不是最小改动（纪律四-J）
+
+两次「最小改动」的后果：
+```
+RGB 换成色相循环  -> 140 行死代码 + 功能与名字对不上
+双拼放错位置      -> 占了纯色路径，用户所有颜色都带渐变
+```
+
+以下情况不能只求最小改动：
+```
+① 一个字段承担两个职责   -> 拆字段
+② 同一语义存在于两处     -> 先统一再改
+③ 名字与行为不符         -> 改名，别只加注释
+④ 产生死代码             -> 要么接回去，要么删干净
+⑤ 同一个 bug 第二次出现  -> 前一次是补丁，重做
+```
+
+## 8.3 其他硬要求
+
+```
+· 加 UI 控件前先问用户
+· 删除 / 移动 / 批量重命名前先列清单确认
+· 文档写「为什么」，不只写「是什么」（用户是自学者）
+· 只用中文回答
+· 命令给可直接复制的纯文本块，用绝对路径
+```
+
+---
+
+# 九、文档地图
+
+## 必读（按顺序）
+
+| 文档 | 内容 | 行数 |
+|---|---|---|
+| **本文件** | 接手入口 | — |
+| `docs/WORK-DISCIPLINE.md` | **14 条纪律**，动手前必读 | 641 |
+| `docs/PARAMETER-MAP.md` | 每个参数是否跟随预设 | 165 |
+| `docs/NEXT-STEPS.md` | 待办与已放弃方向 | 164 |
+| `START-HERE.md` | 项目状态入口 | 212 |
+
+## 按任务查
+
+| 任务 | 文档 |
+|---|---|
+| 改物理 / rank / 斜度 | `docs/design/RANK-COLLAPSE-FIX.md` |
+| 对齐上游手感 | `docs/design/UPSTREAM-VSCODE-RESEARCH.md` |
+| 改颜色 / 渐变 / 彩虹 | `docs/COLOR-STATE-DECISIONS.md` |
+| 优化性能 | `docs/PERFORMANCE-FPS.md` |
+| 发版 | `docs/RELEASE-SAFETY.md` |
+| 代码审计记录 | `docs/CODE-AUDIT-0.9.87.md`（722 行） |
+| 全部文档索引 | `docs/INDEX.md` |
+
+## 历史留痕（**不要当现状**）
+
+```
+PROGRESS.md / VERSIONS.md / ROADMAP.md / LESSONS.md
+0.9.8-TASKS.md / AUTONOMOUS-TASKS.md / ASSERTIONS.md
+MANUAL-ACCEPTANCE-0.9.5.md / USER-FEEDBACK-0.9.5.md
+docs/archive/*  docs/TONIGHT-*.md
+```
+
+这些停在 0.9.5 ~ 0.9.33 期间。
+
+---
+
+# 十、关键代码位置速查
+
+| 想改什么 | 去哪个文件 | 关键方法/行 |
+|---|---|---|
+| 四角弹簧的积分 | `core/DampedSpring.java` | `update(dt)` —— 首句 `animationLength <= dt` 就归零 |
+| 单角时长分配 | `core/TrailCorner.java` | `jump(w, h, cx, cy, rank)` |
+| 四角排名 | `ui/SpringTrail.java` | `assignRanks()` —— 稳定排序 + 索引 tiebreak |
+| 系数派生 | `settings/NeovideCursorSettings.java` | `deriveTrailFactors(k, smooth, slope)` 第 605 行 |
+| 绘制（辉光+主体） | `ui/CaretTrailPanel.java` | `paintQuad` / `drawQuadGlow` / `buildRgbWashPaint` / `buildDualTonePaint` |
+| 帧调度 | `ui/RenderScheduler.java` | `loop()` / `dispatchDue()` |
+| 每帧驱动 | `ui/CaretAnimator.java` | `runTick()` / `syncGlobalSettings()` / `resolveRgbWash()` |
+| State 字段表 | `settings/SettingsField.java` | `FIELDS` / `PRESET_FIELDS` / `RUNTIME_SWITCH_KEYS` |
+| 预设表 | `settings/CursorPresets.java` | `ANIM_PRESETS` / `COLOR_PRESETS` |
+| 设置面板 | `ui/settings/NeovideCursorConfigurable.java` | `createPanel()` + 各 `build*Group()` |
+| 预览 | `ui/settings/AnimationPreview.java` | `assignRanks()` / `onConfigChanged()` |
+
+## 面板的组顺序（渲染顺序）
+
+```
+总开关 -> 单行输入输出 -> 多行缎带 -> 颜色 -> 光标 -> 辉光 -> 淡出 -> 实验性 -> 高级（诊断）
+```
+
+对应的构建方法：`buildMasterGroup` / `buildInlineGroup` / `buildCrossGroup` /
+`buildColorGroup` / `buildCursorGroup` / `buildGlowGroup` / `buildFadeGroup` /
+`buildExperimentalGroup` / `buildDiagGroup`
+
+---
+
+# 十一、一条给接手者的建议
+
+这个项目最大的风险不是代码复杂，而是**历史文档和实测数字大量失真**：
+
+```
+· NEXT-STEPS 说「探针 72/82 通过」—— 那份脚本从没跑过
+· UPSTREAM 报告说 useHardSnap「可做、风险可控」—— 实测做不到
+· 多处文档说「辉光跟随光标」—— 从未存在过
+```
+
+**所以：任何数字，自己跑一遍再信。任何结论，找到证据再改。**
+
+写完这份文档我核对时发现**自己写错两处**（探针通过数、两份文档行数），
+已修正。这不是谦虚 —— 是想说明这条规则的强度：
+**连一份刚刚写完、专门讲「不要信数字」的文档，自己都带着错数字。**
+
+项目里已经有一套很严的门禁和三万多行探针，那是你最可靠的盟友 ——
+前提是你确认它真的在跑。
