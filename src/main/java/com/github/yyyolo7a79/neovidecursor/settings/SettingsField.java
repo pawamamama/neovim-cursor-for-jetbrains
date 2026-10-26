@@ -586,9 +586,37 @@ public final class SettingsField {
      *   <li>{@code trailMode} / {@code alwaysHighFps} —— 性能策略，不是观感</li>
      * </ul>
      * 内置预设路径（{@code applyAnimPresetFields}）从不碰这几个，所以自定义路径也必须一致。
+     *
+     * <p><b>【0.9.87 补齐 5 项】</b>
+     *
+     * <p>上一版只有 4 项，是「从 CursorPresetApplier 的硬写清单提成常量」时原样搬过来的，
+     * 没有回头按同一标准重新审视。核实后发现另有 5 个字段同样属于「设备/环境级」：
+     * <ul>
+     *   <li>{@code targetFps} —— 跟屏幕刷新率绑定。而且它带白名单 setter
+     *       （只接受 125/144），恢复时会把历史值静默改成 125</li>
+     *   <li>{@code cursorWidthPx} —— State 注释明写「设备级设置，不进预设」</li>
+     *   <li>{@code cursorHeightRatio} —— 同上，与字形/字号相关</li>
+     *   <li>{@code diagLogging} —— 排查开关，长期开会撑大 idea.log，不是观感</li>
+     *   <li>{@code multiCursorNoGlow} —— State 注释明写「不随预设变化」</li>
+     * </ul>
+     *
+     * <p><b>判定标准</b>：这个字段改变的是「光标长什么样」，还是「插件怎么跑 / 在什么设备上跑」？
+     * 后者一律进本清单。按此标准，{@code cursorWidthPx} 与 {@code cursorHeightRatio}
+     * 虽然影响观感，但它们跟着**屏幕/字体**走而不是跟着**风格**走 —— 换机器该保持，
+     * 所以仍在清单内。
+     *
+     * <p><b>不在清单里的三个颜色字段</b>（{@code tailColor} / {@code shadowColor} /
+     * {@code rgbGradient}）是另一回事：它们属于**颜色预设**域，由颜色预设路径写。
+     * 目前它们同时在 {@code inPreset} 里，导致自定义**动画**预设也会写它们 ——
+     * 这是已知的机制重叠（见 docs/PARAMETER-MAP.md），暂不改，因为改了会破坏
+     * 「自定义预设恢复全部观感」的预期。
      */
     public static final String[] RUNTIME_SWITCH_KEYS = {
-            "enabled", "hideNativeCaret", "trailMode", "alwaysHighFps"
+            // 全局开关 / 环境
+            "enabled", "hideNativeCaret", "trailMode", "alwaysHighFps",
+            // 0.9.87 补齐：设备级
+            "targetFps", "cursorWidthPx", "cursorHeightRatio",
+            "diagLogging", "multiCursorNoGlow"
     };
 
     public static int restoreSkipping(NeovideCursorSettings.State s, String snapshot,

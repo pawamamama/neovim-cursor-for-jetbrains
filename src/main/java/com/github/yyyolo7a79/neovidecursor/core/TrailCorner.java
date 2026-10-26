@@ -4,11 +4,15 @@ package com.github.yyyolo7a79.neovidecursor.core;
  * 拖尾角点 —— 光标矩形的四个角之一，每个角独立挂一组 X/Y 阻尼弹簧。
  *
  * <p><b>这是「拖尾」效果的核心机制。</b>光标移动时，按「运动方向与角点方向的夹角」
- * 给四个角分配不同的滞后系数：位于运动前方的角快速跟上（甚至瞬间硬吸附），
- * 位于后方的角缓慢跟随。于是原本规整的矩形被"拉长"成不规则四边形，
+ * 给四个角分配不同的滞后系数：位于运动前方的角快速跟上，位于后方的角缓慢跟随。
+ * 于是原本规整的矩形被"拉长"成不规则四边形，
  * 视觉上就形成了拖尾 —— 不是叠加残影，而是光标自身被拉伸变形。
  *
- * <p>移植自 VS Code 版 {@code neovide-cursor.js} 的 {@code Corner} 类（第 103-208 行）。
+ * <p>移植自 VS Code 版 {@code neovide-cursor.js} 的 {@code Corner} 类。
+ *
+ * <p><b>与上游的已知差异</b>：上游有「前缘瞬间硬吸附」（{@code useHardSnap}），
+ * 本实现<b>没有</b>。原因见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1
+ * （上游 2 个角点、我们 4 个，几何上做不出来）。
  */
 public class TrailCorner {
 
@@ -106,26 +110,22 @@ public class TrailCorner {
         return (dx / len) * relativeNormX + (dy / len) * relativeNormY;
     }
 
-    /**
-     * 「硬吸附」的对齐度阈值：角点对齐度超过它就瞬移到位。
-     *
-     * <p>取 0.5 的依据见 {@link #jump} 里短跳分支的注释 ——
-     * 纯轴向移动恰好有同侧两角超 0.5（形成「半边」效果），
-     * 斜跳只有一角（与上游一致）。
-     */
-    private static final double HARD_SNAP_ALIGNMENT = 0.5;
-
     // ==================== 弹簧参数分配 ====================
 
     /**
      * 光标跳动时调用：根据位移大小与运动方向，为该角点选择合适的弹簧时长。
      *
-     * <p>分配规则（与原 JS 版一致）：
+     * <p>分配规则：
      * <ul>
      *   <li>位移小 → 用 shortAnimationLength，动作干脆</li>
-     *   <li>角点位于运动最前方 → 硬吸附，瞬间到位，避免前缘拖糊</li>
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
+     *
+     * <p><b>注意：本实现<b>没有</b>「前缘硬吸附」</b>（上游的 {@code useHardSnap}）。
+     * 0.9.83 尝试过并放弃 —— 不是实现难度问题，是几何上不成立：
+     * 上游 2 个角点，我们 4 个，纯轴向移动时同侧两角的对齐度完全相等，
+     * 吸附会同时命中两个角、把时长差抹平，反而让斜度变小。
+     * 完整数据见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1。
      *
      * <p><b>【忠实还原原版】</b>本方法的时长分配已按 VS Code 原版
      * {@code neovide-cursor.js} 的 {@code Corner.jump()}（第 149-173 行）对齐：

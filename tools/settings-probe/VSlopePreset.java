@@ -46,21 +46,42 @@ public final class VSlopePreset {
         }
         check("斜度 0→100 时间侧差单调增大", mono, "末端差=" + prevDiff);
 
-        // 5) 三个预设都是 100
-        boolean all100 = true;
+        // 5) 只有「纯平滑输入」有斜度，其余两个为 0（纯拉伸）
+        //
+        // 【0.9.87 语义变更】原断言「三个预设斜度都是 100」。
+        // 用户 2026-10-25 明确要求：「只有纯平滑输入会单行倾斜，其他两个都是零只拉伸」。
+        // 所以断言方向反转：不是全 100，而是只有一个非 0。
         StringBuilder t = new StringBuilder();
+        int slanted = 0;
+        String slantedName = "";
         for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
-            t.append(p.name()).append("=").append(p.slopeTicksValue()).append(" ");
-            if (p.slopeTicksValue() != 100) all100 = false;
+            int v = p.slopeTicksValue();
+            t.append(p.name()).append("=").append(v).append(" ");
+            if (v != 0) {
+                slanted++;
+                slantedName = p.name();
+            }
         }
-        check("三个内置预设斜度都是 100", all100, t.toString().trim());
+        check("只有一个内置预设带斜度（纯平滑输入）",
+                slanted == 1 && "纯平滑输入".equals(slantedName),
+                t.toString().trim() + " | 带斜度的=" + slantedName);
 
-        // 6) 切预设会写 slopeTicks
+        check("「基础」与「缎带」斜度为 0（纯拉伸、无倾斜）",
+                CursorPresets.ANIM_PRESETS[0].slopeTicksValue() == 0
+                        && CursorPresets.ANIM_PRESETS[1].slopeTicksValue() == 0,
+                "基础=" + CursorPresets.ANIM_PRESETS[0].slopeTicksValue()
+                        + " 缎带=" + CursorPresets.ANIM_PRESETS[1].slopeTicksValue());
+
+        // 6) 切预设会写 slopeTicks（切到基础 -> 0，切到纯平滑输入 -> 100）
         NeovideCursorSettings.State s = new NeovideCursorSettings.State();
         s.slopeTicks = 30;
         NeovideCursorConfigurable.applyAnimPresetFields(s, CursorPresets.ANIM_PRESETS[0]);
-        check("切预设把斜度拉回 100（在预设域内）", s.slopeTicks == 100,
-                "切后 = " + s.slopeTicks);
+        int afterBase = s.slopeTicks;
+        NeovideCursorConfigurable.applyAnimPresetFields(s, CursorPresets.ANIM_PRESETS[2]);
+        int afterSmooth = s.slopeTicks;
+        check("切预设真的写 slopeTicks（基础->0、纯平滑->100）",
+                afterBase == 0 && afterSmooth == 100,
+                "基础后=" + afterBase + " 纯平滑后=" + afterSmooth);
 
         // 7) State 默认 100
         check("State 默认 slopeTicks = 100",
