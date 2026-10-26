@@ -154,6 +154,30 @@ public class CaretTrailPanel extends JComponent {
         return rgbEnabled;
     }
 
+    /**
+     * 当前是否走「彩虹（色相循环）」（0.9.86）。
+     *
+     * <p>与 {@link #rgbEnabled}（光标渐变/双拼）是**两条独立路径，互斥**：
+     * <pre>
+     *   cursorRgbWash = true          -> 彩虹（颜色预设「彩虹（动态）」）
+     *   cursorRgbWash = false + rgbEnabled=true  -> 双拼（光标渐变开关）
+     *   两者都 false                  -> 纯色
+     * </pre>
+     *
+     * <p>由 {@code CaretAnimator} 从「当前颜色匹配哪个预设」反推后设置。
+     */
+    private boolean cursorRgbWash;
+
+    /** 设置是否走彩虹 */
+    public void setCursorRgbWash(boolean on) {
+        this.cursorRgbWash = on;
+    }
+
+    /** 当前是否走彩虹（探针用） */
+    public boolean isCursorRgbWash() {
+        return cursorRgbWash;
+    }
+
     /** RGB 渐变的终止色（保留兼容；新版按色相循环生成，不再使用单色终点） */
     private static final java.awt.Color RGB_END_COLOR = new java.awt.Color(0x7B68EE);
 
@@ -756,22 +780,37 @@ public class CaretTrailPanel extends JComponent {
 
         // 主体实心填充（画在光晕之上，保证光标本身清晰锐利）
         //
-        // ==================== 0.9.83：光标渐变（双拼）====================
+        // ==================== 0.9.86：三条互斥的填充路径 ====================
         //
-        // 【控件语义】光标设置里的「光标渐变」复选框（字段仍是 rgbGradient）。
-        //   开 → 上端 = 拖尾颜色，下端 = 从辉光色算出的末端色（同一色系）
-        //   关 → 纯色填充
+        // 【用户明确的三条语义，逐字】
+        //   「不要光标颜色渐变开关 和 彩虹颜色预设分错了，这是不同的东西 要做互斥」
+        //   「光标颜色渐变开关只用于纯色渐变」
+        //   「辉光按之前调查的不要动不然更乱」
         //
-        // 【与历史的关系】
-        //   最早（0.9.29 引入 RGB 渐变）就是「拖尾色 → 蓝紫 #7B68EE」两色渐变。
-        //   0.9.75 我把它换成了色相循环（彩虹），那是理解错了 ——
-        //   用户要的一直是「光标自己从上到下有个同色系的深浅变化」。
-        //   现在把蓝紫换成「按辉光色算出来的末端色」，两端属于同一色系。
+        //   ① 彩虹（颜色预设「彩虹（动态）」）→ 色相循环，见 buildRgbWashPaint
+        //      实现完全按 docs/design/RGB-WASH-REFERENCE.md：
+        //        两个动画叠加（wash-hue 4000ms + wash-drift 5000ms）
+        //        沿长度铺 RGB_HUE_SPAN 圈 → 多个颜色同时可见
+        //   ② 光标渐变开关开 → 双拼（上端拖尾色 / 下端从辉光色算出的末端色）
+        //   ③ 都没有 → 纯色
         //
-        // 【辉光不动】辉光始终用 glowColor（= shadowColor），与本体无关。
-        //   查过全部 git 历史：从引入双拼到现在，辉光从未跟随过光标本体色。
-        //   紧贴光标的辉光层被本体盖住，外圈是稀薄的 shadowColor —— 这个层次是对的。
-        if (rgbEnabled) {
+        // 【互斥】彩虹优先。选了彩虹预设时，即使「光标渐变」开着也走彩虹 ——
+        //   否则用户选彩虹却看到双拼，功能对不上名字（0.9.85 就是这个问题）。
+        //
+        // 【辉光不动】始终用 glowColor（= shadowColor）。查过全部 git 历史：
+        //   从引入双拼到现在，辉光从未跟随过光标本体色。
+        if (cursorRgbWash) {
+            // ① 彩虹：按 MD 的两个动画实现
+            float top = (float) Math.min(Math.min(quadY[0], quadY[1]), Math.min(quadY[2], quadY[3]));
+            float bottom = (float) Math.max(Math.max(quadY[0], quadY[1]), Math.max(quadY[2], quadY[3]));
+            java.awt.Paint wash = buildRgbWashPaint(top, bottom);
+            if (wash != null) {
+                g2.setPaint(wash);
+            } else {
+                g2.setColor(fillColor);
+            }
+        } else if (rgbEnabled) {
+            // ② 光标渐变（双拼）
             float top = (float) Math.min(Math.min(quadY[0], quadY[1]), Math.min(quadY[2], quadY[3]));
             float bottom = (float) Math.max(Math.max(quadY[0], quadY[1]), Math.max(quadY[2], quadY[3]));
             java.awt.Paint dual = buildDualTonePaint(top, bottom);
@@ -781,6 +820,7 @@ public class CaretTrailPanel extends JComponent {
                 g2.setColor(fillColor);
             }
         } else {
+            // ③ 纯色
             g2.setColor(fillColor);
         }
         g2.fill(path);

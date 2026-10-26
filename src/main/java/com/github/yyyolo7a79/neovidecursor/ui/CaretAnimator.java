@@ -252,6 +252,9 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** RGB 渐变开关（来自 State） */
     private boolean rgbGradient;
+
+    /** 是否走彩虹色相循环（0.9.86）。与 {@link #rgbGradient}（双拼）互斥。 */
+    private boolean cursorRgbWash;
     private final NeovideConfig config;
     /**
      * 每个 {@code Caret} 一份拖尾状态（多光标）。
@@ -1867,6 +1870,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 多光标：每个光标都要补画（原生光标被全局隐藏，不补画就彻底不可见）
         // RGB 开关与弹簧路径保持同一语义：控制台光标也是我们画的，配色要一致
         panel.setRgbEnabled(rgbGradient);
+                panel.setCursorRgbWash(cursorRgbWash);
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
             trail.snapToTarget();
@@ -2003,6 +2007,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
         panel.setEffectiveGlowLayers(effectiveGlowLayers);
         panel.setRgbEnabled(rgbGradient);
+                panel.setCursorRgbWash(cursorRgbWash);
         // 【诊断必须报告本帧真正生效的层数】
         //
         // 这个字段原来只在 tickStaticCaret 里被赋值，弹簧路径从不写 ——
@@ -2250,12 +2255,34 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorHeightRatio = s.cursorHeightRatio;
             rgbGradient = s.rgbGradient;
             targetFps = s.targetFps;
+            // 【0.9.86】彩虹与双拼互斥：从「当前颜色匹配哪个预设」反推
+            cursorRgbWash = resolveRgbWash(s);
         } catch (Throwable ignored) {
             multiCursorNoGlow = false;
             cursorWidthPx = 2;
             cursorHeightRatio = 1.0f;
             rgbGradient = false;
             targetFps = 125;
+            cursorRgbWash = false;
+        }
+    }
+
+    /**
+     * 从当前 State 反推「是否走彩虹」。
+     *
+     * <p>判据：当前颜色匹配到的预设是否带 {@code rgbWash} 标记。
+     * 匹配不上任何预设时返回 {@code false}（走双拼/纯色，不会误触发彩虹）。
+     */
+    private static boolean resolveRgbWash(
+            com.github.yyyolo7a79.neovidecursor.settings
+                    .NeovideCursorSettings.State s) {
+        try {
+            com.github.yyyolo7a79.neovidecursor.settings.CursorPresets.ColorPreset p =
+                    com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier
+                            .matchColorPreset(s);
+            return p != null && p.rgbWash();
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
