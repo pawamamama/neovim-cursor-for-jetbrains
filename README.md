@@ -337,3 +337,9 @@ Per-layer alpha is solved from the layer count: `A = 1 - (1 - peak)^(1/N)`
 MIT, see [LICENSE](LICENSE).
 
 The algorithm derives from the VS Code `neovide-cursor` extension (MIT), see [NOTICE.md](NOTICE.md).
+
+---
+
+<sub>**For contributors**: see [START-HERE.md](START-HERE.md) (project state & gates)
+and [docs/INDEX.md](docs/INDEX.md) (documentation map).
+The core physics file `core/NeovideConfig.java` is locked — any diff there fails CI.</sub>

@@ -1,373 +1,205 @@
-# 新会话入口 —— 请先读这一页
+# 开发档案 —— 从这里开始
 
-> ⚠️ **【本文已过时，停在 2026-10-20 / v0.9.5】**
+> **版本：v0.9.87** · 最后更新：2026-10-25 深夜
 >
-> **当前状态看 [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md)** —— 那是唯一的现状来源。
-> **工作纪律看 [docs/WORK-DISCIPLINE.md](docs/WORK-DISCIPLINE.md)** —— 444 行，含 8 类踩坑。
->
-> 本文保留仅作历史留痕。里面写的「7 动画预设 / 5 颜色预设 / 10 个滑块」
-> 在 v0.9.83 已是「3 动画预设 / 6 颜色预设 / 14 滑块」。
-> **不要把这里的版本号和功能数量当现状。**
-
-> 给全新 AI 会话的交接。
-> 遇到具体问题：先查 [`LESSONS.md`](LESSONS.md)（踩坑与验证方法），
-> 再查对应批次的契约（`OPTIM-BATCH1.md` / `FIX-BATCH2.md` / `FIX-BATCH3.md`）。
+> 这是本项目唯一的状态入口。如果你是新会话，读完这一页就知道该干什么。
 
 ---
 
-## 0. 一句话现状（2026-10-20）
+## 0. 三十秒了解这个项目
 
-**插件能用，用户认可。五轮已交付：`0.9.5-settings-ui`（本轮，待安装）。**
-**上一版 `0.9.4-settings` 是第一个带设置界面的版本。**
+**是什么**：JetBrains IDE 插件的光标拖尾动画（Neovide 风格）。
+光标移动时不是简单平移，而是四角各自挂阻尼弹簧、按运动方向分配不同时长，
+把矩形拉成平行四边形 —— 视觉上就是「拖尾」，不是叠加残影。
 
-**0.9.5 交付了什么**（详见 `VERSIONS.md` 的 0.9.5 节）：
-- **修掉 §6.5 的 4 个已实测缺陷**（滑块跟手 / 刻度挤压 / Tools 覆盖 / 切主题复活）
-- **布局重排**：预设置顶 → 总开关 / 淡出 / 颜色与辉光 → ▾拖尾手感 / ▾动画时序（折叠）
-- **7 动画预设 × 5 颜色预设，完全正交**（换一个不动另一个）
-- **10 个滑块改吸附式**：滑块（吸附刻度）+ 输入框（任意值）+ 右侧数值实时跟随
-- **放开 `animationLength` / `shortAnimationLength`** 为可调（0.05–0.35 / 0.02–0.25）
-- **Tools 新增两个预设子菜单**
-- **参数默认值仍零改动**（`NeovideConfig.java` 零 diff、`core/` 零新增）
-- 产物：`dist\jetbrains-neovide-cursor-0.9.5-settings-ui.jar`，回退脚本 `build\rollback-0.9.5.ps1`
+**技术栈**：Java 21，**无 Gradle**，`javac` 直接编译 + 手写 `plugin.xml`。
 
-**0.9.4 交付了什么**（详见 `VERSIONS.md`）：
-- 新增 `Settings | Tools | Neovide Cursor` 设置页（16 项参数）
-- 新增 `NeovideCursorSettings`（`@State` + `PersistentStateComponent`），持久化到
-  `<config>/options/NeovideCursorSettings.xml`
-- 迁移并删除 `PropertiesComponent` 的两个旧键（消除三真相源）
-- 新增 `NeovideCaretManager.applyConfig()` 编排（S0–S8）
-- 修掉 `alwaysHighFps` 读不到时兜底 `false` 的 bug
-- **参数默认值零改动**（`NeovideConfig.java` 零 diff，三件套全过）
+**规模**：
+```
+生产代码   src/main/java/.../neovidecursor/   34 文件 / ~14k 行
+探针       tools/settings-probe/V*.java       83 个（74 通过）
+基准程序   tools/bench/Bench*.java            16 个
+```
 
-**§6.5 的 4 个已实测缺陷已在 0.9.5 全部修掉**（每条的修法与证据见 §6.5 顶部的「已修」标注）。
-
-**不要再做的三件事**（已验证走到尽头）：
-
-**不要再做的三件事**（已验证走到尽头）：
-
-1. 优化绘制 —— 12 层辉光只有 **0.05ms/帧**（8ms 预算的 0.6%）
-2. 减少重绘面积 —— **面积大 67 倍反而快 15 倍**
-3. 叠加层数调参 —— 降辉光层数实测**无 fps 收益**
-
-**真正的瓶颈是 EDT 抢占**：插件只占 EDT 的 10.7%，而 IDE 自身 `ScaledBlit.Scale` 占 12.6%。
+**探针比生产代码还多** —— 这个项目的惯例是「改任何行为都要有守门探针」。
 
 ---
 
-## 1. 项目是什么
+## 1. 三道门禁（改完必跑）
 
-**IntelliJ IDEA 插件**：`com.github.yyyolo7a79.neovidecursor`
-Neovide 风格的「拖尾光标」—— 光标移动时留下被拉伸的渐隐残影 + 辉光。
+```powershell
+# ① D0：core/NeovideConfig.java 必须零 diff
+git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java
 
-| 项 | 值 |
-|---|---|
-| 用户仓库 | `D:\deepseekwork\neovim-cursor-pr` |
-| 当前分支 | **`feat/settings-ui-ready`** |
-| 当前提交 | **`3c3944d`** |
-| 上游 | `yyyyolo7a79-sketch/neovim-cursor-for-jetbrains` @ `6bed09d`（v0.5.0） |
-| 用户 fork | `pawamamama/neovim-cursor-for-jetbrains` |
-| 上游作者状态 | 说要「用 Opus 5.5 重构」 |
+# ② 全量探针（从文件读清单，不要手写副本）
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools\\settings-probe\\build-v-probes.ps1
+```
+
+**当前基线**：探针 74/83。9 个失败都是过期断言（`VSnap` / `VDefects` / `VSepBound` 等），
+见 §6，不算新问题。
 
 ---
 
-## 2. 当前安装的版本（权威，已实测）
+## 2. 现在能做什么 / 什么不能做
 
-```
-v0.9.4-settings
-大小:   70,056 B
-SHA256: D30B23E2FF59C33051C67F1614B586A2CAD70B3266EF7515F83DB9E0DD527F4D
-内容指纹: META-INF/plugin.xml = 7D5CDEF493B4DFA6   ← 判断内容请用这个
-```
+### 已实现（不要重做）
 
-> ⚠️ **jar 的整体 SHA256 每次重建都会变**（zip 条目记录 .class 的 mtime，而 javac 每次重编
-> 都会刷新它）。所以整体哈希只能验「文件没被替换」，不能验「内容有没有变」。
-> 判断内容一致请看 `VERIFY-SETTINGS.md` §12.2 的 27 条稳定指纹表。
-
-**安装路径**（文件名仍是旧的 `0.5.0.jar`，安装脚本固定此名）：
-
-```
-C:\Users\wangw\AppData\Roaming\JetBrains\IntelliJIdea2026.1\plugins\jetbrains-neovide-cursor\lib\jetbrains-neovide-cursor-0.5.0.jar
-```
-
-### Tools 菜单（5 项，0.9.4 未改）
-
-```
-Neovide 拖尾光标（开关）
-Neovide 光标：性能诊断（禁用重绘）
-Neovide 光标：残影模式（低帧率更稳）
-Neovide 光标：隐藏原生光标（常驻绘制）      ← 默认已勾选
-Neovide 光标：辉光淡出（停止后柔和熄灭）    ← 默认已勾选
-```
-
-### 设置页（0.9.4 新增）
-
-`Settings | Tools | Neovide Cursor` —— 16 项参数，分 4 组：
-总开关 / 淡出 / 颜色与辉光 / 拖尾手感。
-
-> ⚠️ **Tools 菜单与设置页写同一份 state**，但**面板打开期间点 Tools 会丢失操作**
-> （面板的 `pending` 会覆盖回去）。见 §6.5 缺陷 3。
-
-### 关键配置（权威）
-
-| 参数 | 值 | 说明 |
+| 功能 | 版本 | 守门探针 |
 |---|---|---|
-| `alwaysHighFps` | **true** | 常驻刷新，恒 8ms（≈125fps）；**0.9.4 前读不到时兜底 false，已修** |
-| `hideNativeCaret` | **true** | **批次2 起默认勾选**（有意偏离上游踩坑 #19） |
-| `overlayFadeOut` | **true** | 辉光淡出开关（批次2 新增） |
-| `cursorDisappearDelay` | 50 | 淡出前保持毫秒数 |
-| `cursorFadeOutDuration` | 0.075f | 淡出秒数（75ms） |
-| `glowLayers` | 8 | |
-| `ACTIVE_DELAY_MS` | 8 | **不要改**（12 会"傻快"，用户实测） |
-| `shortAnimationLength` | 0.11 | 单行动画时长 |
-| `animationLength` | 0.10 | 跨行动画时长 |
-| `trailFactors` | {1.0, 0.72, 0.42, 0.22} | 四角梯度，4.5 倍 |
-| `maxTrailDistanceFactor` | 60 | 上游 README 说 4，代码是 60（见 issue #7） |
+| 四角弹簧拖尾 | 0.9.0 | `PhysicsParity` |
+| 设置面板（14 滑块 + 9 复选框 + 4 下拉） | 0.9.62 | 组件树比对 |
+| 3 动画预设 + 6 颜色预设 | 0.9.62 | `VPreset` |
+| 多光标 | 0.9.32 | `VMulti` |
+| rank 塌缩修复（单行斜缎带） | 0.9.77 | `VRankCollapse` |
+| 斜度参数（0=纯矩形 / 100=上游） | 0.9.81 | `VSlopePreset` |
+| 光标渐变（双拼） | 0.9.85 | `VRgbWash` |
+| 彩虹 / 双拼互斥 | 0.9.86 | `VRainbowSep` |
+| 设备级字段不跟自定义预设 | 0.9.87 | `VSwitchKeysGap` |
 
----
+### 已验证做不到（不要再试）
 
-## 3. 回退（随时可用，脚本已入库）
-
-```powershell
-# 回 0.9.2（注意：0.9.2 从未装过）
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\rollback-0.9.3.ps1"
-
-# 回 0.9.1 / 0.9.0 / 071 / 080 / uni（历史上用户认可的几个基线）
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\rollback-0.9.2.ps1"
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\rollback-0.9.1.ps1"
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\rollback-071.ps1"
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\rollback-080.ps1"
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\rollback-uni.ps1"
-```
-
-**安装/回退的铁律**：
-1. **完全退出 IDEA**（它内存映射锁住 jar）
-2. **先 `Move-Item` 旧 jar，再 `Copy-Item` 新 jar** —— 直接覆盖会报「用户映射区域」错误
-3. 重启 IDEA 生效
-
-`dist\` 里有全部历史 jar，**`VERSIONS.md` 是对照表**（唯一可信的版本记录）。
-
----
-
-## 4. 三轮已完成的工作
-
-| 批次 | 版本 | 内容 | 契约/报告 |
-|---|---|---|---|
-| **1** | `0.9.1-zeroopt` | 零观感优化：fps 日志门控、每帧分配复用、删空转链路、删 7 死字段、**N 条调度线程 → 1 条共享线程** | `OPTIM-BATCH1.md` / `VERIFY-BATCH1.md` / `REVIEW-BATCH1.md` |
-| **2** | `0.9.2-imetime-fade` | IME 判据第一版（**对水杉无效**）、**辉光淡出 + 开关**、`hideNativeCaret` 默认改勾选 | `FIX-BATCH2.md` / `VERIFY-BATCH2.md` |
-| **3** | `0.9.3-imegeom` | **IME 判据改几何比较** + virtual space 排除 | `FIX-BATCH3.md` / `NEXT-TASK-IME.md` |
-| **4** | `0.9.4-settings` | **设置界面 16 项** + `NeovideCursorSettings` 持久化 + 旧键迁移删除 + `applyConfig()` 编排 + `alwaysHighFps` 兜底 bug | `SETTINGS-CONTRACT.md` / `VERIFY-SETTINGS.md` / `REVIEW-SETTINGS.md` |
-
-### 几个值得记住的数字
-
-| 指标 | 值 |
-|---|---|
-| 空闲档帧率（实测） | **188 帧 / 1.5s ≈ 125fps**（触及 `ACTIVE_DELAY_MS=8` 理论上限） |
-| EDT 繁忙档（tick 25ms） | 57~60 帧（基线 58~59，噪声范围内） |
-| 线程数 | N 编辑器 → **1 条**（基线 N 条） |
-| parity | 三份 harness **逐字节一致** |
-
----
-
-## 5. 上游 issue / PR 清单
-
-| 编号 | 类型 | 内容 | 状态 |
-|---|---|---|---|
-| [PR #4](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/pull/4) | PR | `lastNanos` 一行修复 | open |
-| [#5](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/5) | issue | CJK 短跳判据（像素 → 字符偏移） | open |
-| [#6](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/6) | issue | IME 中间态（**含更正评论**：非通用 IME 问题） | open |
-| [#7](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/7) | issue | `maxTrailDistanceFactor` 与 README 矛盾 | open |
-| [#8](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/8) | issue | 1ms busy-retry 退避代价 ~3.4% | open |
-| [#9](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains/issues/9) | issue | virtual space 使两 API 合法分岔 | open |
-
----
-
-## 6. 未完成（按建议优先级）
-
-| 优先级 | 项 | 收益/说明 |
+| 想法 | 为什么不行 | 出处 |
 |---|---|---|
-| **P0** | **设置界面 4 个缺陷**（见 §6.5） | 用户已实测反馈，滑块不跟手 + 数字挤压 + Tools 覆盖 + 缺预设 |
-| **P1** | **设置界面重做**（`SETTINGS-UI-REDESIGN.md`） | 布局、预设、滑块吸附、`animationLength` 进可调 |
-| P2 | 空闲时不再往 EDT 交脏区 | 完全静止也每 8ms 交一次；8 编辑器 ≈ 1000 次/秒重画**已经正确**的画面 |
-| P3 | 隐藏标签页降频 | 现在 `isShowing()` 只是不画，调度仍 8ms、每帧照样调 `visualPositionToXY` |
-| P4 | 多光标（Alt 列选） | **已确认不支持**（`getCaretModel().getVisualPosition()` 只取主光标）；上游有 `SpringTrail` 可参考 |
-| P5 | 流光 RGB 特效 | 用户想要浅色系炫酷效果；需改绘制 + 实测 p95 帧间隔 |
-| P6 | 辉光双色渐变 | 用户想要"扩散也能两种颜色"；需改 `drawQuadGlow` |
-| P7 | `BUSY_RETRY_MS 1→0` | 追平 EDT 繁忙时 −3.4%；代价轻微空转（见 issue #8） |
+| 前缘硬吸附产生「左半边」 | **能做到，但和「锁两个角」是一回事**（见 §5） | `UPSTREAM-VSCODE-RESEARCH.md` §3.1 |
+| 描边替代多层 fill 画辉光 | 实测 0.94x（更慢） | `PERFORMANCE-FPS.md` |
+| `timeBeginPeriod` 提帧率 | 无收益 | 同上 |
+| 忙等 / `parkNanos` | 更差（180 vs 221 / 8.65ms vs 4.09ms） | 同上 |
+| 自适应辉光降级 | 用户否决（与多光标开关语义重复） | `NEXT-STEPS.md` |
 
 ---
 
-## 6.5 【已修·0.9.5】设置界面 4 个已实测缺陷
+## 3. 文档地图
 
-> ✅ **四条全部已在 `0.9.5-settings-ui` 修掉**（2026-10-20）。
-> 每条下面是当时的实测记录，保留作史料；**修法与可复跑证据**在
-> `SETTINGS-UI-CONTRACT.md` §1–§4、`VERIFY-SETTINGS-V2.md`、`REVIEW-SETTINGS-V2.md`。
->
-> 快速复验：`pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\run-t9-full.ps1`
-> → 应输出 `ALL T9 VERIFICATION PASSED`（11 段 exit 全 0）。
+### 必读（按顺序）
 
-| 缺陷 | 修法一句话 | 探针断言 | 变异 |
-|---|---|---|---|
-| **1** 滑块不跟手（0/10） | 显式 `addChangeListener` + 重写 `isModified()` + getter 返回 `snapToTick(pending)`（**三条缺一不可**，后两条是对向陷阱） | B1-1/B1-2/B1-3、D1-1/D1-2 | MUT-3 删 listener → 红 12 条 |
-| **2** 刻度挤压（51/101/201 条） | 自建 min/mid/max 三刻度 + **显式** `setPaintLabels(true)` + `setPaintTicks(false)` | B2-1..B2-4、D2-1 | MUT-B → 红 11 条 |
-| **3** Tools 覆盖面板 | `apply()` 逐字段脏标记 + baseline 快照（**不是** `if (dirtyAnyField) target = pending`） | B3-1..B3-5、D3-1..D3-4 | MUT-C → 红 3 条 |
-| **4** 切主题光标复活 | `applyNativeCaretHidden(boolean force)` + 新增 `CaretSchemeWatcher` 订阅 `EditorColorsManager.TOPIC` | S1..S5b、S-2..S-4d | MUT-D/MUT-4 → 红 4–5 条 |
-
-### 缺陷 1（高） ✅已修：8 个滑块的数值标签拖动时**一个都不更新**
-
-**现象**：拖滑块，右边 `50 ms` / `0.55` / `8 层` 这些数字不动。
-
-**根因**（实测）**：`SliderKt.bindValue(...)` 没有在 JSlider 上注册 `ChangeListener`。
-```
-滑块[0] 上的 ChangeListener 数量 = 0
-拖动前 pending.cursorDisappearDelay = 50
-拖动后 pending.cursorDisappearDelay = 50      ← pending 不跟随
-标签跟随变化的滑块数 = 0 / 8（不跟随 = 8）
-```
-→ 拖动只改了组件值，`pending` 不变，标签自然不刷新（要到 `apply()` 才取组件值）。
-
-**修法方向**：给每个 slider 显式 `addChangeListener`，或用 `Cell.onChanged`（注意它带
-`@ApiStatus.NonExtendable`，第一期契约刻意没用），或改用 `slider + intTextField` 双向绑定。
-
-### 缺陷 2（中） ✅已修：刻度数字**挤成一团**
-
-**现象**：滑块下方一串数字糊在一起（截图已确认）。
-
-**根因**（实测）：DSL `slider()` 默认 `paintLabels=true`，每个刻度都画标签。
-```
-滑块[0] range=0..500  step=10  paintLabels=true  labelTable条目=51   ← 51 个数字
-滑块[1] range=0..1000 step=5   paintLabels=true  labelTable条目=201  ← 201 个数字！
-滑块[3] range=0..100  step=1   paintLabels=true  labelTable条目=101
-```
-
-**修法方向**：`SliderKt.labelTable(cell, Map)` 只给关键刻度画标签，或 `setPaintLabels(false)`
-改用 `showValueHint()` + 右侧数值标签。
-
-### 缺陷 3（高） ✅已修：**面板打开期间点 Tools 菜单，操作会被覆盖**
-
-**现象**：面板开着 → 去点 Tools 菜单取消「辉光淡出」→ 回来点 OK → **取消被撤销了**。
-
-**复现结果**（实测）：
-```
-点 Tools 取消后： state.overlayFadeOut = false  /  pending.overlayFadeOut = true
-面板点 OK 后：   state.overlayFadeOut = true   ← Tools 的操作被覆盖回 true
-```
-
-**根因**：面板的 `pending` 是 `reset()` 时的快照，`apply()` 无条件用 `pending` 覆盖 state。
-期间任何外部改动（Tools 菜单）都会被冲掉。
-
-**修法方向**（三选一，待方案定）：
-- (a) Panel 打开时禁用 Tools 菜单项
-- (b) `apply()` 前重新读 state，只写用户真正改过的字段（脏字段跟踪）
-- (c) Tools 菜单改动时通知已打开的面板刷新 `pending`
-
-### 缺陷 4（中） ✅已修：切主题后原生光标**复活**，插件以为它还隐藏着
-
-**根因**（代码已确认）：全仓库搜 `EditorColorsListener` / `ColorsListener` / `schemeChanged`
-→ **零命中**。而 `applyNativeCaretHidden()` 有早退：
-
-```java
-// NeovideCaretManager:606
-if (savedCaretColor != null) {
-    return;   // ← 以为"已经隐藏过"
-}
-```
-
-**后果链**：插件隐藏原生光标 → 用户切主题（scheme 整个被换掉，透明色丢失）→
-原生光标重新可见 → 但 `savedCaretColor != null`，插件**不会重新隐藏** →
-**原生光标 + 覆盖层两套同时绘制**（用户感知：更卡、双光标）。
-
-**这解释了用户那句「原生光标已经废掉了」的困惑** —— 它没废，是切主题后复活了。
-
----
-
-## 7. 已知但**不影响使用**的问题
-
-| 项 | 影响 |
+| 文档 | 什么时候读 |
 |---|---|
-| 水杉输入法组合态 | **0.9.3 已修**（几何判据），但**缺一次真机日志确认**；探针在 `dist\neovide-ime-probe.zip` |
-| `BUSY_RETRY_MS=1` | EDT 繁忙时 −3.4%（系统性，但用户感知不到） |
-| 控制台光标 | 由 `tickStaticCaret` 补画（与上游"跳过 CONSOLE"不同） |
-| `isInVirtualSpace` 用字符数比视觉列 | 保守方向，只会漏拦不会误拦 |
+| **本页** | 任何时候，先读 |
+| [docs/WORK-DISCIPLINE.md](docs/WORK-DISCIPLINE.md) | **动手前必读**，570 行 / 12 条纪律 |
+| [docs/PARAMETER-MAP.md](docs/PARAMETER-MAP.md) | 改任何参数归属前 |
+| [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md) | 想知道下一步做什么 |
+
+### 按任务查
+
+| 任务 | 读这个 |
+|---|---|
+| 改物理 / rank / 斜度 | [docs/design/RANK-COLLAPSE-FIX.md](docs/design/RANK-COLLAPSE-FIX.md) |
+| 对齐上游手感 | [docs/design/UPSTREAM-VSCODE-RESEARCH.md](docs/design/UPSTREAM-VSCODE-RESEARCH.md) |
+| 改颜色 / 渐变 / 彩虹 | [docs/COLOR-STATE-DECISIONS.md](docs/COLOR-STATE-DECISIONS.md) |
+| 优化性能 | [docs/PERFORMANCE-FPS.md](docs/PERFORMANCE-FPS.md) |
+| 发版 | [docs/RELEASE-SAFETY.md](docs/RELEASE-SAFETY.md) |
+| 改设置面板 | [docs/IDEA-PLATFORM-OPTIMIZATION.md](docs/IDEA-PLATFORM-OPTIMIZATION.md) |
+| 接手这个项目 | [docs/SKILL-neovide-cursor-plugin-handoff.md](docs/SKILL-neovide-cursor-plugin-handoff.md) |
+
+### 历史留痕（不要当现状）
+
+`PROGRESS.md` / `VERSIONS.md` / `ROADMAP.md` / `LESSONS.md` /
+`0.9.8-TASKS.md` / `AUTONOMOUS-TASKS.md` / `ASSERTIONS.md` /
+`MANUAL-ACCEPTANCE-0.9.5.md` / `USER-FEEDBACK-0.9.5.md`
+
+这些停在 0.9.5 ~ 0.9.33 期间，只保留历史价值。
 
 ---
 
-## 8. 工作纪律（血的教训，见 `LESSONS.md`）
+## 4. 项目地形
 
-1. **改前先查** `LESSONS.md` 与对应批次契约
-2. **一次只改一个变量**
-3. **改完立刻构建 + 让用户验证**
-4. **不合意立刻回退**（脚本现成）
-5. **每次构建追加 `VERSIONS.md`**
-6. **不要凭直觉调参数** —— 这一路的失败全部源于此
+```
+src/main/java/com/github/yyyolo7a79/neovidecursor/
+  core/            物理引擎（DampedSpring / TrailCorner / NeovideConfig）
+                   ⚠️ NeovideConfig 零 diff（D0 门禁）
+  settings/        State / 预设 / 字段表
+  ui/              绘制 + 帧调度
+  ui/settings/     设置面板（~2700 行）
+```
 
-### 验证三件套（改代码后必跑）
+### 关键类
+
+| 类 | 职责 |
+|---|---|
+| `TrailCorner` | 一个角点的 X/Y 双弹簧 + 按 rank 分配时长 |
+| `SpringTrail` | 四个角的管理 + `assignRanks()` 排序 |
+| `DampedSpring` | 阻尼弹簧积分（`update()` 首句时长 <= dt 就归零） |
+| `CaretTrailPanel` | Java2D 绘制（辉光 + 主体填充） |
+| `CaretAnimator` | 每帧驱动 + 从 State 同步设置 |
+| `RenderScheduler` | 固定频率渲染线程（自愈：3 次异常置空线程） |
+| `NeovideCursorSettings` | State（30 个字段）+ 四层拷贝 |
+
+---
+
+## 5. 最近的关键发现（0.9.87）
+
+### 「左半边」的真相
+
+之前记的是「做不到，因为上游 2 角、我们 4 角」。**实测后发现更精确的结论**：
+
+```
+锁住的角        左边缘斜  右边缘斜  拉伸px
+基线            2.11     4.06     8.26
+TR+BR（前缘）   2.11     0.00    11.58   ← 前缘完全直 + 后缘斜 = 左半边
+TL+BL（后缘）   0.00     4.06     6.16   ← 后缘直 + 前缘斜 = 右半边
+```
+
+**锁「运动方向那一侧的两个角」，前缘斜度精确为 0.00，就是「左半边」。**
+而且拉伸从 8.26 涨到 11.58，效果更强。
+
+**不需要新机制** —— `DampedSpring.setAnimationLength()` 是 public，物理层本来就支持。
+缺的只是「锁哪两个角」的判断（按 alignment 选 rank 2/3）。
+
+**未做，等用户决定形态**：替换现有拖尾 / 做成开关 / 做成第四个预设。
+
+### 参数归属的三套清单
+
+```
+AnimPreset                    14 个观感参数
+SettingsField.PRESET_FIELDS   26 个（给自定义预设快照）
+applyAnimPresetFields 实写    13 个（给内置预设）
+```
+
+**26 ≠ 14 是两套机制，不是 bug。** 详见 `PARAMETER-MAP.md`。
+
+---
+
+## 6. 已知遗留
+
+### 9 个过期探针断言（不影响功能）
+
+| 探针 | 失败数 | 原因 |
+|---|---|---|
+| `VSnap` / `VDefects` | 10 / 6 | 量程表旧值 |
+| `VSepBound` | 7 | 分隔线逻辑已改 |
+| `VRegr2` | 2 | 平滑已移出预设域 |
+| `VReset2` | 2 | 重置逻辑已改 |
+| `VTools` / `VHints` / `VCustom` / `VSleep` | 各 1 | 字段数 / 文案 / 副本判据 |
+
+### 技术债
+
+| 项 | 说明 |
+|---|---|
+| `typingSmoothness` 是死数据 | 在 `AnimPreset` 里有字段但 `applyAnimPresetFields` 不写 |
+| 颜色三字段双写 | `tailColor`/`shadowColor`/`rgbGradient` 同时被动画预设和颜色预设写 |
+| 双拼强度是常量 | `DUAL_TONE_LUMA_FACTOR = 0.58f`，用户要求做成参数条（10 处改动） |
+
+---
+
+## 7. 工作方式（用户明确要求）
+
+1. **语义不清晰先问，不许猜** —— 本项目在「RGB/彩虹/双拼/辉光」上连猜错 6 次
+2. **看可维护性，不是最小改动** —— 两次「最小改动」累计产生 140 行死代码
+3. **加 UI 控件前先问**
+4. **删除/移动前先列清单确认**
+5. **文档写「为什么」，不只写「是什么」** —— 用户是自学者
+
+---
+
+## 8. 常用命令
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\tools\parity\run-parity.ps1"
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\tools\parity\run-audit.ps1"
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\tools\ime-probe\run-ime-geom-test.ps1"
+# 编译
+$libs='D:\deepseekwork\_idea-anim\idea-libs'
+$cp=(Get-ChildItem -LiteralPath $libs -Filter '*.jar' | ForEach-Object { $_.FullName }) -join ';'
+Get-ChildItem -Recurse -File -Filter *.java 'src\main\java' | ForEach-Object { $_.FullName } | Set-Content build\v2-probe\srcs.txt
+javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\classes "@build\v2-probe\srcs.txt"
+
+# 打包 + 安装（会清空配置，先跟用户确认）
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.87 -NoStart
 ```
-
-判据：
-- parity **三份逐字节一致**
-- 审计 **19 项只能有 `hideNativeCaret` 一项 DIFF**
-- IME 边界 **29 项全过**
-
-### 最重要的一条
-
-> **"我改了" ≠ "它生效了" ≠ "它没弄坏别的"**
->
-> 这三件事需要三种证据：`git diff` / **逐帧数值** / **parity 逐字节一致**。
-> 这一路三个真问题（淡出 no-op、`fading` 永不终止、`nextDueNanos` 慢 25%）
-> 全部是「代码看起来对但数值不对」，全部靠逐帧证据抓出。
-
----
-
-## 9. 构建方法（本机无可用 Gradle）
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File "D:\deepseekwork\neovim-cursor-pr\build\offline-build.ps1" `
-  -Version 0.9.4 `
-  -OutName "my.jar" `
-  -BaseJar "D:\deepseekwork\neovim-cursor-pr\dist\jetbrains-neovide-cursor-0.9.4-settings.jar"
-```
-
-前置：`javac 25.0.2` 在 PATH；`D:\deepseekwork\_idea-anim\idea-libs` 有 381 个 jar。
-
----
-
-## 10. 文档索引
-
-| 文件 | 什么时候读 |
-|---|---|
-| **本文件** | 开局必读 |
-| **`LESSONS.md`** | **改代码前必读**（踩坑 + 验证方法 + 上游差异） |
-| `VERSIONS.md` | 想知道某版改了什么 / 找可用 jar |
-| `OPTIM-BATCH1.md` | 批次1 契约（零观感优化的边界） |
-| `FIX-BATCH2.md` | 批次2 契约（IME 判据 / 淡出 / 默认值） |
-| `FIX-BATCH3.md` | 批次3 契约（几何判据） |
-| `VERIFY-BATCH1.md` / `VERIFY-BATCH2.md` | 独立验证报告（含 finding 与证据） |
-| `REVIEW-BATCH1.md` | 审查报告（含已更正的两处自身错误） |
-| **`SETTINGS-RESEARCH.md`** | 设置界面的调研（24 字段逐个过、Kotlin UI DSL 可 Java 调用已实测） |
-| **`SETTINGS-CONTRACT.md`** | 0.9.4 的实现契约 v2.1（16 项字段 / 三个前置改造 / 35 项禁改） |
-| **`VERIFY-SETTINGS.md`** | 0.9.4 独立验证报告（九项 + §12 jar 稳定指纹表） |
-| **`REVIEW-SETTINGS.md`** | 0.9.4 三轮审查报告（t5 抓出 2 个 high、t8 变异测试、t9 字节绑定） |
-| **`SETTINGS-UI-REDESIGN.md`** | 0.9.5 方案（真实参数调研 + 8 动画预设 × 5 颜色预设 + 布局线框） |
-| **`SETTINGS-UI-CONTRACT.md`** | 0.9.5 实现契约 v1.2（4 个缺陷修法 + §1.3.1 参考实现骨架） |
-| **`VERIFY-SETTINGS-V2.md`** | 0.9.5 独立验证（119 断言，含 5 条偏差裁决） |
-| **`REVIEW-SETTINGS-V2.md`** | 0.9.5 两轮审查（抓出 R-01/R-02/R-03/R-09/R-10） |
-| **`NEXT-REFACTOR.md`** | **下一版设置面板结构重构计划**（God Class 拆分，不改行为） |
-| `BUG-REPORT-CJK-IME.md` | IME 错位的原始取证（四组实验） |
-| `UPSTREAM-REPORT-2026-10-18.md` | 给上游的报告（含自我审查） |
-| `NEXT-TASK-IME.md` | 水杉输入法问题的交接（已被 0.9.3 解决，留作历史） |
-| `HANDOFF-FINAL.md` / `HANDOFF.md` | **已过时**，仅历史参考 |
-| `UPSTREAM-PITFALLS.md` | 上游 21 条结论（672 行，可 grep `STATUS=VIOLATED`） |
-
----
-
-## 11. 一句话给新会话
-
-**0.9.4 已装、能用、参数零改动。但设置界面有 4 个已实测缺陷（§6.5），那是下一轮的全部工作。**
-
-**改代码前先跑验证三件套。真正的瓶颈是 EDT 抢占，剩下的空间是"少做无用功"，不是"画得更快"。**
-
-**判据铁律**：`我改了` ≠ `它生效了` ≠ `它没弄坏别的` —— 三种证据：`git diff` / 逐帧数值 / parity 逐字节一致。

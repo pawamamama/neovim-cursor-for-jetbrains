@@ -2,7 +2,7 @@
 
 > 来源：子代理核查 JetBrains 官方文档 / Oracle 规范 / YouTrack ticket，
 > 本轮由我逐条对照本项目代码核实「是否踩到」。
-> 相关：[PERFORMANCE-FPS.md](../PERFORMANCE-FPS.md)（实测数据）
+> 相关：[PERFORMANCE-FPS.md](PERFORMANCE-FPS.md)（实测数据）
 
 ---
 
