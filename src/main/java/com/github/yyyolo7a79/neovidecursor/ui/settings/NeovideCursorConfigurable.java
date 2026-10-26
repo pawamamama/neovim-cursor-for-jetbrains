@@ -704,10 +704,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         previewConfig.animationLength = pending.animationLength;
         previewConfig.shortAnimationLength = pending.shortAnimationLength;
         previewConfig.trailSize = pending.trailSize;
-        // typingSmoothness / stretchRatioK 在 NeovideCursorSettings 里（不在 NeovideConfig），
-        // 它们的作用就是派生 trailFactors —— 这里直接算好写进预览配置。
+        // typingSmoothness / stretchRatioK / slopeTicks 在 NeovideCursorSettings 里
+        // （不在 NeovideConfig），它们的作用就是派生 trailFactors —— 这里直接算好写进预览配置。
+        //
+        // 【0.9.89 修复：漏传 slopeTicks】
+        // 原来调的是两参数重载 deriveTrailFactors(k, smooth)，
+        // 它内部走 deriveTrailFactors(k) —— **完全不看斜度**，
+        // 等于预览的斜度永远是最斜的那档。
+        // 用户实测「斜度拉到 0 了但预览还是斜的」，就是这个原因。
+        // 生产路径（CaretAnimator）一直用的是三参数版，所以只有预览错。
         previewConfig.trailFactors = NeovideCursorSettings.deriveTrailFactors(
-                pending.stretchRatioK, pending.typingSmoothness);
+                pending.stretchRatioK, pending.typingSmoothness, pending.slopeTicks);
     }
 
     /**
@@ -724,10 +731,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // RGB 是持久化配置（只在 State 里，NeovideConfig 没这个字段），
             // 所以必须由面板显式推送 —— 原来只推给了真实编辑器，预览收不到。
             inlinePreview.setRgbGradient(pending.rgbGradient);
+            // 【0.9.89】彩虹是**另一个字段**，也要推 ——
+            // 否则选「彩虹（动态）」时预览完全不变（用户报「彩虹没有到预览」）。
+            // 判据与 CaretAnimator.resolveRgbWash 一致：颜色匹配到的预设带 rgbWash 标记。
+            inlinePreview.setCursorRgbWash(isRainbowSelected());
         }
         if (crossPreview != null) {
             crossPreview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
             crossPreview.setRgbGradient(pending.rgbGradient);
+            crossPreview.setCursorRgbWash(isRainbowSelected());
+        }
+    }
+
+    /**
+     * 当前选中的颜色预设是不是「彩虹（动态）」。
+     *
+     * <p>判据与 {@code CaretAnimator.resolveRgbWash} 保持一致：
+     * 用 {@code matchColorPreset} 反推当前颜色属于哪个预设，看它的
+     * {@code rgbWash} 标记。匹配不上任何预设 → false（走双拼/纯色）。
+     */
+    private boolean isRainbowSelected() {
+        try {
+            CursorPresets.ColorPreset p = CursorPresetApplier.matchColorPreset(pending);
+            return p != null && p.rgbWash();
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 

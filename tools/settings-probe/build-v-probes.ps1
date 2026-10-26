@@ -104,7 +104,9 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 0.9.88 新增：锁 matchColorPreset 判据（彩虹与粉色 HEX 不再重叠）
         'VColorMatchBug',
         # 0.9.88 新增：锁「开渐变后所有纯色预设都是渐变」
-        'VGradAllPresets')
+        'VGradAllPresets',
+        # 0.9.89：预览必须收到 slopeTicks 与 cursorRgbWash
+        'VPreviewParity')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

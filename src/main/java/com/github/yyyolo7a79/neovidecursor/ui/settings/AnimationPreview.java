@@ -220,6 +220,36 @@ public final class AnimationPreview extends JComponent {
     }
 
     /**
+     * 当前是否走彩虹（色相循环）。与 {@link #rgbGradient}（双拼）互斥 ——
+     * 语义与 {@code CaretTrailPanel.setCursorRgbWash} 完全一致。
+     */
+    private boolean cursorRgbWash;
+
+    /**
+     * 设置是否走彩虹（面板在 refreshPreviews 里推送）。
+     *
+     * <p><b>0.9.89 新增</b>：原来预览只看 {@code rgbGradient}，
+     * 而彩虹是另一个字段（{@code State} 里没有，由预设反推），
+     * 所以选「彩虹（动态）」时预览完全不变 —— 用户报「彩虹没有到预览」。
+     *
+     * <p>推送方式与 {@link #setRgbGradient} 一致：由面板显式推，不从 config 读
+     * （{@code NeovideConfig} 里没有这个字段）。
+     */
+    public void setCursorRgbWash(boolean on) {
+        if (cursorRgbWash == on) {
+            return;
+        }
+        cursorRgbWash = on;
+        panel.setCursorRgbWash(on);
+        repaint();
+    }
+
+    /** 供探针断言 */
+    public boolean cursorRgbWashForProbe() {
+        return cursorRgbWash;
+    }
+
+    /**
      * 设置用户的光标尺寸，并立即重排。
      *
      * @param widthPx     1~5；传 -1 表示沿用自动值
