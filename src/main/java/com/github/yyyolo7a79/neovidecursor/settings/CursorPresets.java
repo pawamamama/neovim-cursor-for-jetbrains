@@ -631,7 +631,19 @@ public final class CursorPresets {
             new ColorPreset("薄荷",     "#6EE7B7", "#34D399"),
             new ColorPreset("藕荷",     "#C4B5FD", "#A78BFA"),
             new ColorPreset("暖沙",     "#FDE68A", "#FCD34D"),
-            new ColorPreset("彩虹（动态）", "#FFC0CB", "#FFC0CB", true),
+            // 【0.9.88 修复：给彩虹独立的 HEX】
+            //
+            // 原来它和「原版粉色」都是 #FFC0CB/#FFC0CB，只能靠
+            // `rgbWash() == rgbGradient` 区分。而 0.9.85 起 rgbGradient
+            // 从「走色相循环」变成「光标渐变开关」，判据失效 ——
+            // 实测「粉色+开渐变」会被误认成彩虹、「彩虹+关渐变」会被误认成粉色。
+            //
+            // 改法：给彩虹一对**独有**的 HEX，判据退回纯 HEX 比对即可。
+            //
+            // 为什么这两个值不影响彩虹效果：rgbWash=true 时走色相循环，
+            // 两个 HEX 都不参与绘制，只在「关掉动态后回到什么颜色」时用到。
+            // 取天蓝/紫罗兰 —— 是彩虹的典型代表色，关掉动态后落到这个色也不突兀。
+            new ColorPreset("彩虹（动态）", "#4FC3F7", "#B388FF", true),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */

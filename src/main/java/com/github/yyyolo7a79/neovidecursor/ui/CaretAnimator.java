@@ -1870,7 +1870,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 多光标：每个光标都要补画（原生光标被全局隐藏，不补画就彻底不可见）
         // RGB 开关与弹簧路径保持同一语义：控制台光标也是我们画的，配色要一致
         panel.setRgbEnabled(rgbGradient);
-                panel.setCursorRgbWash(cursorRgbWash);
+        panel.setCursorRgbWash(cursorRgbWash);
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
             trail.snapToTarget();
@@ -2007,7 +2007,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
         panel.setEffectiveGlowLayers(effectiveGlowLayers);
         panel.setRgbEnabled(rgbGradient);
-                panel.setCursorRgbWash(cursorRgbWash);
+        panel.setCursorRgbWash(cursorRgbWash);
         // 【诊断必须报告本帧真正生效的层数】
         //
         // 这个字段原来只在 tickStaticCaret 里被赋值，弹簧路径从不写 ——

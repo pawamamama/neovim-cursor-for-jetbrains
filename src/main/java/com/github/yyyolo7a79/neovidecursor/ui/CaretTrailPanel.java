@@ -178,9 +178,6 @@ public class CaretTrailPanel extends JComponent {
         return cursorRgbWash;
     }
 
-    /** RGB 渐变的终止色（保留兼容；新版按色相循环生成，不再使用单色终点） */
-    private static final java.awt.Color RGB_END_COLOR = new java.awt.Color(0x7B68EE);
-
     // ==================== RGB 色相循环（0.9.75）====================
     //
     // 【设计取舍：为什么不照抄 dsh-claude-style】

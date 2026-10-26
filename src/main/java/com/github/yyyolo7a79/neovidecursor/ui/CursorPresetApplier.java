@@ -224,13 +224,33 @@ public final class CursorPresetApplier {
         if (s == null || s.tailColor == null || s.shadowColor == null) {
             return null;
         }
+        // ==================== 0.9.88 修复：判据失效 ====================
+        //
+        // 【原判据】
+        //     p.rgbWash() == s.rgbGradient
+        //
+        // 「彩虹」与「原版粉色」两个 HEX 完全相同（都是 #FFC0CB），
+        // 0.9.79 加这个判据是为了区分它们 —— 当时 rgbGradient 就表示「走不走色相循环」。
+        //
+        // 【为什么失效】0.9.85 起 rgbGradient 改了语义：
+        //   旧：「走色相循环」
+        //   新：「光标渐变（双拼）开关」
+        // 于是它不再等于 rgbWash，判据变成掷硬币。实测两条都错：
+        //   粉色 + 光标渐变开 → 误匹配成「彩虹」
+        //   彩虹 + 光标渐变关 → 误匹配成「原版粉色」
+        // 守门探针 VColorMatchBug 复现了这两条。
+        //
+        // 【新判据：纯 HEX 比对】
+        //
+        // 0.9.88 给彩虹换成了独有的 HEX（#4FC3F7 / #B388FF），
+        // 与任何纯色预设都不再重叠 —— 所以不需要额外维度，比 HEX 就够。
+        //
+        // 为什么不比 rgbWash / rgbGradient：那个字段的语义已被
+        // 「光标渐变开关」占用，拿它做判据就是纪律四-D 说的
+        // 「一个字段承担两个职责」。判据必须建立在**不会被复用**的信息上。
         for (CursorPresets.ColorPreset p : CursorPresets.COLOR_PRESETS) {
-            // 【0.9.79】必须同时比对 rgbWash，否则：
-            // 「彩虹」与「原版粉色」的两个 HEX 完全相同（都是 #FFC0CB），
-            // 只比 HEX 会导致菜单里两个预设同时勾选，或者切到彩虹后仍显示「原版粉色」。
             if (p.tailColor().equalsIgnoreCase(s.tailColor)
-                    && p.shadowColor().equalsIgnoreCase(s.shadowColor)
-                    && p.rgbWash() == s.rgbGradient) {
+                    && p.shadowColor().equalsIgnoreCase(s.shadowColor)) {
                 return p;
             }
         }

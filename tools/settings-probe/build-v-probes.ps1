@@ -65,7 +65,15 @@ if (Test-Path -LiteralPath $probeDir) { Remove-Item -LiteralPath $probeDir -Recu
 New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
 $vprobes = @(Get-ChildItem -LiteralPath $toolDir -Filter 'V*.java' | ForEach-Object { $_.FullName })
 Step "javac V 探针（$($vprobes.Count) 个）"
-& javac --release 21 -nowarn -encoding UTF-8 -classpath "$classesDir;$cp" -d $probeDir $vprobes 2>&1 | Out-Null
+# 【0.9.88 修复：命令行超长】
+#
+# 直接把 87 个绝对路径当参数交给 javac，Windows 的命令行上限（32767 字符）
+# 被撑爆，报「文件名或扩展名太长」，整份门禁**从未跑过第二步**。
+# 改成 @argfile（javac 自己读的参数文件），这是 JDK 官方给的解法。
+$vprobeArgFile = Join-Path $tmpRoot 'vprobes.args'
+$vprobes | ForEach-Object { '"' + ($_ -replace '\\', '\\') + '"' } |
+    Set-Content -LiteralPath $vprobeArgFile -Encoding UTF8
+& javac --release 21 -nowarn -encoding UTF-8 -classpath "$classesDir;$cp" -d $probeDir "@$vprobeArgFile" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'V 探针编译失败' }
 
 # ---------- 3. 跑探针 ----------
@@ -87,7 +95,16 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 已知有失败但覆盖有效功能，保留运行以便跟踪：
         'VReset2', 'VSepBound', 'VSleep',
         # 0.9.86~0.9.87 新增
-        'VRainbowSep', 'VFpsPersist', 'VSwitchKeysGap'
+        'VRainbowSep', 'VFpsPersist', 'VSwitchKeysGap',
+        # 【0.9.88 补回】VReset 写好了但从来没进过这张表 —— 与上面 0.9.83 那次
+        # 「写了但从不运行」是同一类漏。它当前有 1 条失败（R-16），
+        # 失败原因已查清并记录在 docs/CODE-AUDIT-0.9.87.md，
+        # 按纪律「不许改成警告绕过」，所以放在通过门内 —— 红就是红。
+        'VReset',
+        # 0.9.88 新增：锁 matchColorPreset 判据（彩虹与粉色 HEX 不再重叠）
+        'VColorMatchBug')
+        # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
+        #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：
 # 82（旧出厂默认）→ 100（消除「凭空多出副本」），用户真实值原样保留。
 # VSlopePreset 锁「斜度进预设域」：
