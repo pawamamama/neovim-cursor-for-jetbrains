@@ -388,11 +388,33 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         NeovideConfig c = com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager.getConfig();
         State s = state;
 
-        // 【0.9.9 / B3】从 SettingsField 表派生（原来是 17 行手写赋值）。
-        // 谁参与由表项的 syncsToConfig 标志决定；不参与的两类见 SettingsField 注释
-        // （stretchRatioK / typingSmoothness 派生成 trailFactors）。
+        // 【0.9.88】这里接 CursorDiag.configChanged —— 它原本零调用，
+        // 于是 WORK-DISCIPLINE 四-C 表里承诺的 [config] 前缀从来没输出过一行。
+        //
+        // 判据（为什么接在这里、而不是每帧路径）：
+        //   · 本方法是「State → CONFIG」的唯一入口，用户点一次应用才跑一次，
+        //     不在 125fps 的热路径上 —— 逐字段打印不会刷屏；
+        //   · 它正是「改了却没生效」这类投诉的第一现场：只要 [config] 里
+        //     那个字段的 旧值→新值 是真的，问题就在消费侧而不在同步侧。
+        //
+        // 只打【真的变了】的字段：把整张表原样打一遍等于制造噪声，
+        // 而"值没变"本身不是信息（syncStateToConfig 会被 applyConfig 无条件调用）。
+        // 【必须先用 hasConfigMapping() 过滤】不参与 CONFIG 的字段没有 CONFIG 侧读值，
+        // 拿它们去比较会让 same.test 在 boolean/float 上抛 ClassCastException ——
+        // 等于把一个诊断功能变成同步路径的崩溃点。诊断关闭时整段短路，零开销。
+        boolean diag = com.github.yyyolo7a79.neovidecursor.ui.CursorDiag.enabled();
         for (SettingsField f : SettingsField.FIELDS) {
-            f.stateToConfig(s, c);
+            if (diag && f.hasConfigMapping()) {
+                Object before = f.readStateFromConfig(c);
+                f.stateToConfig(s, c);
+                Object after = f.readStateFromConfig(c);
+                if (!f.sameValue(before, after)) {
+                    com.github.yyyolo7a79.neovidecursor.ui.CursorDiag
+                            .configChanged(f.key, before, after);
+                }
+            } else {
+                f.stateToConfig(s, c);
+            }
         }
 
         // 派生量：新建数组，绝不复用 State 的对象引用

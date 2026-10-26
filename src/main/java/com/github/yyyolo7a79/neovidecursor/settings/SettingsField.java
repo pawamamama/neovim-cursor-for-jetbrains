@@ -135,6 +135,35 @@ public final class SettingsField {
         return getState.apply(s);
     }
 
+    /** 本字段是否有 {@code CONFIG} 侧映射（诊断日志据此决定能不能打印旧值→新值）。 */
+    public boolean hasConfigMapping() {
+        return getConfig != null;
+    }
+
+    /**
+     * 读 {@code CONFIG} 的当前值（诊断用）。
+     *
+     * <p><b>调用前必须先用 {@link #hasConfigMapping()} 过滤</b>：不参与 CONFIG 的字段
+     * （{@code stretchRatioK} / {@code typingSmoothness} / 各类只进 State 的运行期开关）
+     * 没有 getConfig，这里会 NPE —— 故意不静默返回 null，因为把它当成"值就是 null"
+     * 会让 {@link #sameValue} 在 boolean/float 字段上抛 ClassCastException，
+     * 把一个诊断功能变成同步路径的崩溃点。
+     */
+    public Object readStateFromConfig(NeovideConfig c) {
+        return getConfig.apply(c);
+    }
+
+    /**
+     * 用本字段自己的比较语义判等 —— 供诊断日志判断「这个字段到底变没变」。
+     *
+     * <p>不能直接用 {@code Objects.equals}：HEX 需要忽略大小写、float 需要
+     * {@link Float#compare}（NaN 与 -0.0f 两个边界）。本表项携带的 {@code same}
+     * 就是全项目唯一那份比较语义，复用它才不会出现"日志说没变、实际变了"。
+     */
+    public boolean sameValue(Object a, Object b) {
+        return same.test(a, b);
+    }
+
     /**
      * 编码成可持久化的短字符串。
      *

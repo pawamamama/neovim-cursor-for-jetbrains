@@ -301,19 +301,19 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private SpringTrail cameraTrail;
 
-    /**
-     * 块选区的固定 key。
-     *
-     * <p>块选区恒定只有 1 个拖尾（一个整体矩形），因此用常量 key ——
-     * 选区扩大/缩小时 key 不变，同一个拖尾继续拉伸，
-     * 这是「一整个斜阶梯」观感的物理前提。
-     *
-     * <p>取一个不可能与 {@code Caret} 对象碰撞的字符串常量。
-     */
-    private static final Object BLOCK_SELECTION_KEY = new Object();
-
-    /** 块选区的上一帧偏移（用于所有行共享同一个 charsMoved） */
-    private int lastBlockOffset = -1;
+    // 【0.9.88 删除两个块选区死字段】
+    //
+    //     private static final Object BLOCK_SELECTION_KEY = new Object();
+    //     private int lastBlockOffset = -1;
+    //
+    // BLOCK_SELECTION_KEY 是「块选区整块共用一个拖尾」时代的常量 key。
+    // 后来块选区改成【每行一条线 + 行号 key】（见 refreshTarget 里与 useBlock 相关的
+    // 循环），key 变成 Integer.valueOf(-1000000 - lineNo)，这个常量再没有读者。
+    //
+    // lastBlockOffset 只在 updateBlockCharsMoved 里被写一次，注释写着「只为诊断保留」，
+    // 但全仓没有任何读者 —— 诊断日志读的是 SpringTrail 的 maxOffset，不是它。
+    //
+    // 核实方法（全仓 src + tools 逐个符号计数，见提交说明）。
 
     /**
      * 块选区的字符移动量 —— 所有行共享同一个值。
@@ -324,7 +324,7 @@ public class CaretAnimator implements Disposable, CaretListener {
      *
      * <p>块选区在语义上是一次整体移动，所有行移动的字符数必然相同。
      */
-    private int updateBlockCharsMoved(int caretOffset) {
+    private int updateBlockCharsMoved() {
         // 【0.9.56 修复：多光标横向拉伸比单行长得多的根因】
         //
         // TrailCorner.jump() 的分支判据是：
@@ -338,9 +338,10 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 修法：块选区只传 -1，让 jump() 走归一化兜底分支 ——
         // 那里按 deltaX/width、deltaY/height 判断，
         // 块选区同一行内移动天然满足 |jumpY| <= 0.001，能正确走短跳。
-        if (caretOffset >= 0) {
-            lastBlockOffset = caretOffset;   // 只为诊断保留
-        }
+        //
+        // 【0.9.88】原来这个方法收一个 caretOffset 参数，唯一用途是写给
+        // lastBlockOffset（那个字段零读者，已删）。参数随之失去意义 ——
+        // 留着会让后来者以为「块选区的 offset 在这里被用到了」。
         return -1;
     }
 
@@ -371,6 +372,43 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 多光标上限：防止「全选文件」时创建上万条拖尾 */
     private static final int MAX_TRAILS = 64;
+
+    /**
+     * 本帧该建几条拖尾 —— <b>生产路径真正在用的判据</b>。
+     *
+     * <p>块选区（Alt+鼠标拖拽列选）在平台层只产生 1 个 Caret，
+     * 行信息全在 {@code SelectionModel.getBlockSelectionStarts()} 里；
+     * 普通多光标（Alt+点击）则相反，{@code getAllCarets()} 直接返回 N 个。
+     * 两者都折算成「条数」，截断到 {@link #MAX_TRAILS}。
+     *
+     * <p>块选区优先：它有 N 行就必须画 N 条线，即使 carets 只有 1 个。
+     * 两者不会同时存在（平台互斥）。
+     */
+    public static int trailSlotCount(boolean useBlock, int blockStartCount, int caretCount) {
+        return useBlock
+                ? Math.min(blockStartCount, MAX_TRAILS)
+                : Math.min(caretCount, MAX_TRAILS);
+    }
+
+    /**
+     * 块选区每一行的拖尾 key —— <b>生产路径真正在用的 key 规则</b>。
+     *
+     * <p>为什么必须用「行号」而不是 offset：输入中文后每行的 offset 都会变，
+     * key 一变就被当成新光标、每帧重建 SpringTrail ——
+     * 用户报的「多光标不支持中文，最后一行输出、其他不动，按 tab 像重定位」
+     * 就是它造成的（2026-10-24 实测）。
+     *
+     * <p>为什么不能用固定 key：块选区现在是「每行一条线」，
+     * 固定 key 会让所有行挤在同一个拖尾上。
+     *
+     * @param lineNo      该行行号；{@code < 0} 表示文档查询失败
+     * @param blockStart  该行的块选区起点 offset（行号取不到时的退路）
+     */
+    public static Object blockTrailKey(int lineNo, int blockStart) {
+        return (lineNo >= 0)
+                ? Integer.valueOf(-1000000 - lineNo)
+                : Integer.valueOf(blockStart);
+    }
 
     /**
      * 是否为「静态光标」模式 —— 用于控制台类编辑器（{@link EditorKind#CONSOLE}）。
@@ -1449,9 +1487,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 已恢复为「每行一条线」。
             //
             // 第二轮的「前三个慢后三个快」是 startFrom 造成的（已修：块选区不 startFrom）。
-            int count = useBlock
-                    ? Math.min(blockStarts.length, MAX_TRAILS)
-                    : Math.min(carets.size(), MAX_TRAILS);
+            int count = trailSlotCount(useBlock, blockStarts.length, carets.size());
             boolean changed = count != activeTrails.size();
 
             activeTrails.clear();
@@ -1485,9 +1521,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     try {
                         lineNo = editor.getDocument().getLineNumber(blockStarts[i]);
                     } catch (Throwable ignored) { }
-                    key = (lineNo >= 0)
-                            ? Integer.valueOf(-1000000 - lineNo)
-                            : Integer.valueOf(blockStarts[i]);
+                    key = blockTrailKey(lineNo, blockStarts[i]);
                 } else {
                     key = carets.get(i);
                 }
@@ -1630,7 +1664,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 因此统一用主行（第 0 行）的移动量。
                     int charsMoved;
                     if (useBlock) {
-                        charsMoved = updateBlockCharsMoved(caretOff);
+                        charsMoved = updateBlockCharsMoved();
                     } else {
                         charsMoved = trail.updateCharsMoved(caretOff);
                     }
@@ -2262,7 +2296,11 @@ public class CaretAnimator implements Disposable, CaretListener {
             targetFps = s.targetFps;
             // 【0.9.86】彩虹与双拼互斥：从「当前颜色匹配哪个预设」反推
             cursorRgbWash = resolveRgbWash(s);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // 【0.9.88】这里原来叫 ignored，但它是「改了设置却没生效」的头号可疑点 ——
+            // 四项全局设置读不到时会静默退回默认值，用户看到的是「我调了宽度它自己变回去」。
+            // 接进 CursorDiag.swallowed：诊断开启时留一行 [error]，关着就是零成本。
+            CursorDiag.swallowed("syncGlobalSettings", t);
             multiCursorNoGlow = false;
             cursorWidthPx = 2;
             cursorHeightRatio = 1.0f;
@@ -2286,7 +2324,10 @@ public class CaretAnimator implements Disposable, CaretListener {
                     com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier
                             .matchColorPreset(s);
             return p != null && p.rgbWash();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // 【0.9.88】这里也接进 swallowed：取预设失败会让「彩虹」静默变成双拼/纯色，
+            // 用户看到的是「选了彩虹但颜色不对」，而日志里一个字都没有。
+            CursorDiag.swallowed("resolveRgbWash", t);
             return false;
         }
     }
@@ -2345,33 +2386,19 @@ public class CaretAnimator implements Disposable, CaretListener {
         return allCornersScratch;
     }
 
-    /**
-     * 单个光标的辉光强度。
-     *
-     * <p><b>为什么不能直接用全局 {@code glowStrength}</b>：多光标时每个光标独立运动，
-     * 有的在动（辉光满强度）、有的已静止（辉光应为 0）。若共用全局值，
-     * 静止的光标也会发光。
-     *
-     * <p>实现：把该光标自己的 maxOffset 映射到 [0,1]；若整体已在淡出阶段
-     * （{@code fading}），则用全局的有效强度（因为淡出是 overlay 级别的行为）。
-     */
-    private float glowStrengthFor(SpringTrail trail, float globalStrength,
-                                  float effectiveGlow, boolean fading) {
-        if (fading) {
-            return effectiveGlow;
-        }
-        double off = trail.maxOffset();
-        // 注意：调用方已按组传入 trail 自己的偏移；
-        // 若需要组内共享，见 tickSpring 里的 groupMaxOffset 用法。
-        float s = (float) ((off - GLOW_FADE_START) / (GLOW_FADE_END - GLOW_FADE_START));
-        if (s < 0f) {
-            return 0f;
-        }
-        if (s > 1f) {
-            return 1f;
-        }
-        return s;
-    }
+    // 【0.9.88 删除 glowStrengthFor(SpringTrail, float, float, boolean)】
+    //
+    // 它曾是「每个光标按自己的 maxOffset 算辉光」的实现，参数里还带一个
+    // {@code globalStrength} —— 但方法体内一次都没用过那个参数。
+    // 多光标分组落地后，tickSpring 改成先算组内最大偏移、再统一走
+    // glowStrengthForValue(offset, effectiveGlow, fading)（见本类末尾），
+    // 本方法从此零调用。
+    //
+    // 核实方法：全仓 src 里 "glowStrengthFor(" 的调用点数为 0（只剩
+    // glowStrengthForValue 这个同名前缀的另一个方法）；tools 下唯一提到它的是
+    // VMCDiff，而那是用反射 getDeclaredMethods() 遍历"名字碰巧相同"，
+    // 从不调用（它的 D-5 断言只看存在性，见该探针第 81-83 行的 INFO 分支）。
+    // 由于该探针在找不到时只打 INFO 不打 FAIL，删除不会改变它的断言结果。
 
     void refreshGlowPadding() {
         if (disposed || staticCaret) {
@@ -2461,56 +2488,17 @@ public class CaretAnimator implements Disposable, CaretListener {
         return Math.max(w, 1.0);
     }
 
-    /**
-     * 决定「本帧该画几个光标、每个在哪」—— 把块选区与普通多光标统一到一处。
-     *
-     * <p><b>为什么需要这个抽象</b>：用户实测报「Alt+拖拽列选没有多光标」。
-     * 根因是两者在平台层是<b>完全不同</b>的机制：
-     * <ul>
-     *   <li><b>多光标</b>（Alt+点击 / Alt+Shift+点击）→ {@code getAllCarets()} 返回 N 个</li>
-     *   <li><b>块选区</b>（Alt+鼠标拖拽）→ 仍然只有 1 个 caret，
-     *       列信息在 {@code SelectionModel.getBlockSelectionStarts()}</li>
-     * </ul>
-     * 若只读 {@code getAllCarets()}，块选区永远只有 1 个光标。
-     *
-     * <p><b>块选区优先</b>：它有 N 行就必须画 N 条拖尾，
-     * 即使 carets 只有 1 个。两者不会同时存在（平台互斥）。
-     *
-     * @param caretOffsets  {@code getAllCarets()} 的 offset；空表示无光标
-     * @param blockStarts   块选区起点数组；null 或无块选区时传 null
-     * @param blockEnds     块选区终点数组
-     * @param toPoint       把 offset 换算成像素坐标的函数（行首 x/y）
-     * @return 每项 [x, y]；空数组表示本帧没有可画的光标
-     */
-    public static List<double[]> collectTrailTargets(int[] caretOffsets,
-                                              int[] blockStarts, int[] blockEnds,
-                                              java.util.function.IntFunction<double[]> toPoint) {
-        List<double[]> out = new ArrayList<>();
-
-        // 块选区优先：N 行 → N 个目标
-        if (blockStarts != null && blockStarts.length > 1) {
-            int n = Math.min(blockStarts.length, MAX_TRAILS);
-            for (int i = 0; i < n; i++) {
-                double[] pt = toPoint.apply(blockStarts[i]);
-                if (pt != null) {
-                    out.add(pt);
-                }
-            }
-            return out;
-        }
-
-        // 普通光标 / 单光标退化
-        if (caretOffsets != null) {
-            int n = Math.min(caretOffsets.length, MAX_TRAILS);
-            for (int i = 0; i < n; i++) {
-                double[] pt = toPoint.apply(caretOffsets[i]);
-                if (pt != null) {
-                    out.add(pt);
-                }
-            }
-        }
-        return out;
-    }
+    // 【0.9.88 删除 collectTrailTargets】
+    //
+    // 它是「本帧该画几个光标、各自在哪」的纯函数抽象，但**生产路径从来没调过它** ——
+    // 真正的实现在 refreshTarget() 里内联展开（见该方法中 useBlock 相关的整段：
+    // 块选区按行号 key 建 trail、普通多光标按 Caret 对象建 trail，两者共用一个循环）。
+    //
+    // 为什么必须删掉而不是留着：探针 VBlock 当时调的就是这个并行实现，
+    // 于是 7 条断言全绿，却证明不了生产路径任何事 —— 这正是
+    // docs/WORK-DISCIPLINE.md 四-G 说的「探针验收生产不用的平行实现」。
+    // 按纪律二.6「改方向不删断言」：VBlock 的断言改成验证真实路径
+    // （CaretAnimator.blockTrailKey 与 trailSlotCount），不再依赖本方法。
 
     /**
      * 把「行号数组」分组：相邻行（差 ≤ 1）归为一组。
@@ -2553,8 +2541,8 @@ public class CaretAnimator implements Disposable, CaretListener {
     /**
      * 由「偏移量」直接算辉光强度（不含 fading 时用 effectiveGlow）。
      *
-     * <p>与 {@link #glowStrengthFor} 的区别：那个读 trail 自己的 maxOffset，
-     * 这个由调用方显式传入 —— 多光标分组后需要传「组内最大值」，
+     * <p>由调用方显式传入偏移量（而不是像已删除的 {@code glowStrengthFor} 那样
+     * 自己去读 trail 的 maxOffset）—— 多光标分组后需要传「组内最大值」，
      * 让同组光标呈现为同一个整体亮度。
      */
     private float glowStrengthForValue(double offset, float effectiveGlow, boolean fading) {

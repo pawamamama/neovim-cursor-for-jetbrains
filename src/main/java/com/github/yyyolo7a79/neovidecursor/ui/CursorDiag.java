@@ -393,9 +393,26 @@ eovide-cursor-diag.log}
     }
 
     /**
-     * 异常兜底 —— 任何被 catch 吞掉的异常都要留痕。
+     * 异常兜底 —— 被 catch 吞掉的异常要留痕。
      *
-     * <p>纪律：异常不许静默。诊断开启时至少写一行。
+     * <p>纪律：异常不许静默。诊断开启时至少写一行；关着时零成本（先判 {@link #enabled()}）。
+     *
+     * <p><b>【0.9.88】不是所有 catch 都该接这里</b>，判据两条，缺一不可：
+     * <ol>
+     *   <li><b>不是每帧路径</b>。{@code refreshTarget} 里那几个 try 每秒跑 125 次，
+     *       接进来会把独立日志刷成一片，真正的线索被埋掉 —— 那等于从"没有日志"
+     *       变成"日志没用"，比原来更糟。</li>
+     *   <li><b>静默失败有用户可见后果</b>。压栈失败、销毁时 remove 失败这类，
+     *       失败本身就是可接受的结局，接了只会制造噪声。</li>
+     * </ol>
+     *
+     * <p>当前接线点（都满足上面两条，且已带兜底值所以不会崩）：
+     * <ul>
+     *   <li>{@code CaretAnimator.syncGlobalSettings} —— 读不到设置就退回默认值，
+     *       表现为「我调了光标宽度它自己变回去」</li>
+     *   <li>{@code CaretAnimator.resolveRgbWash} —— 取预设失败则彩虹静默失效，
+     *       表现为「选了彩虹但颜色不对」</li>
+     * </ul>
      */
     public static void swallowed(String where, Throwable t) {
         if (!enabled()) {
