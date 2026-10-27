@@ -280,6 +280,25 @@ public final class VUi {
         return (i >= 0 && i < textFields.size()) ? textFields.get(i) : null;
     }
 
+    /**
+     * 按滑块取同一行里的数值标签（与 {@link #textFieldOf} 对称）。找不到返回 null。
+     *
+     * <p><b>为什么需要它</b>：探针原来写 {@code ui.valueLabels.get(0)} 来取
+     * 「第一个滑块」的标签，隐含假设「索引 0 = 想测的那个字段」。这个假设在
+     * 面板渲染顺序变更后立刻破裂 —— 0 变成了 {@code shortAnimationLength}，
+     * 于是「键入 333」测的是一个量程 2..25 的字段，报错变成看不懂的 {@code slider=25}。
+     *
+     * <p>按 key 定位则与顺序解耦：{@code labelOf(sliderByKey("cursorDisappearDelay"))}
+     * 无论面板怎么重排都指向同一个字段。
+     */
+    public JLabel labelOf(JSlider slider) {
+        if (slider == null) {
+            return null;
+        }
+        int i = sliders.indexOf(slider);
+        return (i >= 0 && i < valueLabels.size()) ? valueLabels.get(i) : null;
+    }
+
     /** 文案包含判断：忽略 null、忽略首尾空白。 */
     private static boolean labelContains(String text, String part) {
         if (text == null || part == null) {

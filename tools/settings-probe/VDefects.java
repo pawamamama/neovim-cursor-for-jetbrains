@@ -264,8 +264,21 @@ public final class VDefects {
         conf.reset();
         VUi ui3 = VUi.build(conf);
         int shown = ui3.sliderByKey("cursorDisappearDelay").getValue();
-        String text = ui3.textFields.get(0) == null ? "" : ui3.textFields.get(0).getText();
-        String label = ui3.valueLabels.get(0) == null ? "" : ui3.valueLabels.get(0).getText();
+        // 【按 key 定位，不用 get(0)】
+        //
+        // 原来写的是 ui3.textFields.get(0) / ui3.valueLabels.get(0)，隐含假设
+        // 「索引 0 = cursorDisappearDelay」。这个假设曾经是对的（SPECS 数组第一项是它），
+        // 但【面板渲染顺序】改成 Inline 组在前之后，索引 0 变成了 shortAnimationLength
+        // （量程 2..25）。于是「键入 333」打在一个 2..25 的字段上，被 clamp 到 25 ——
+        // 报错长成 tf="11" label="0.11 s"，完全看不出是定位错了。
+        //
+        // 上一行 sliderByKey 一直是对的，所以 V11-3a（滑块 350）一直是绿的，
+        // 只有这两行错 —— 这正是「同一个定位器，两种写法」的典型隐患。
+        JSlider sl333 = ui3.sliderByKey("cursorDisappearDelay");
+        JTextComponent tf333 = ui3.textFieldOf(sl333);
+        JLabel lbl333 = ui3.labelOf(sl333);
+        String text = tf333 == null ? "" : tf333.getText();
+        String label = lbl333 == null ? "" : lbl333.getText();
         boolean m3 = conf.isModified();
         // 【0.9.9】失败时把「哪个字段被判脏」直接打出来 —— 否则只看到 true/false，
         // 排查要重跑半个探针（这次就是这么找问题的）。

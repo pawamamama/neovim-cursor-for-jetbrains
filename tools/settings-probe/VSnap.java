@@ -1,6 +1,7 @@
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
 
+import javax.swing.JLabel;
 import javax.swing.JSlider;
 import javax.swing.text.JTextComponent;
 import java.awt.event.FocusEvent;
@@ -92,10 +93,21 @@ public final class VSnap {
                 continue;
             }
             measured++;
-            // 取一个「一定不是刻度」的值：min + 3 又 half 档
-            int off = min + step * 3 + step / 2;
+            // 取一个「一定不是刻度」的值。
+            //
+            // 【为什么是 step*3 + step/3 而不是 step/2】
+            // 原来是 + step/2，当 step 为偶数（step=10 的 cursorHeightRatio）时，
+            // 偏移量恰好落在两个刻度的正中间 —— 此时「最近的刻度」有两个答案，
+            // 而 JSlider 的中点规则是**向下取**（实测 65 → 60），
+            // 探针的 recentered 却用 Math.round（3.5 → 4 → 期望 70）。
+            // 于是这条断言测的不再是「吸附到最近刻度」，而是「JSlider 的中点取整方向」，
+            // 而后者不是本探针要守的契约。
+            //
+            // +step/3 保证落在两个刻度之间偏下的 1/3 处（永远不是中点，
+            // 因为 step/3 ≠ step/2 对任何 step ≥ 3 成立），语义就回到「吸附到最近刻度」。
+            int off = min + step * 3 + step / 3;
             if (off > max) {
-                off = max - step / 2;            // 兜底：贴着上限的反向偏离
+                off = max - step / 3;            // 兜底：贴着上限的反向偏离
             }
             s.setValue(off);
             int got = s.getValue();
@@ -112,11 +124,18 @@ public final class VSnap {
                     + " 请求 " + off + " → 落位 " + got + "（网格=" + onGrid
                     + " 最近=" + nearest + " 就近取整=" + recentered + "）");
         }
-        // 契约里步长 >1 的滑块恒为 7 个：50/25/5/5/5/5/5 那七个
-        // （cursorDisappearDelay / cursorFadeOutDuration / tailOpacity / glowOpacity /
-        //  trailSize / stretchRatioK / typingSmoothness）。
+        // 【不再钉死具体数字】理由与 VDefects D1-1 相同：这里原来写的是
+        // `measured == 7 && ok == 7` —— 「契约里 step>1 恒为 7 个」。
+        // 面板后来把 cursorWidthPx / cursorHeightRatio 加进来之后就成了 9 个，
+        // 于是这条恒红。红的不是功能坏了，是断言跟不上 SPECS（同一类错误第二次出现，
+        // 见 VDefects D0b 上方那段演进史）。
+        //
+        // 现在只要求：① 至少测了 1 个（面板没建成时不能空转通过）
+        //             ② 测了几个就过几个（每个可测滑块的吸附行为都必须正确）
+        // 「防止少测了却全绿」的目的没丢 —— 它由 ① 兜着，而 measured 是
+        // 按 VUi.SPEC 里 step>1 的条目实算的，不是写死的。
         check("SNAP-1 全部可测滑块（step>1）的 setValue(非刻度) 都落到最近刻度",
-                measured == 7 && ok == 7, ok + "/" + measured + "（契约里 step>1 恒为 7 个）");
+                measured > 0 && ok == measured, ok + "/" + measured);
     }
 
     // ---------------------------------------------------------------- 精确值
@@ -130,16 +149,21 @@ public final class VSnap {
         conf.reset();
         ui = VUi.build(conf);
 
-        JTextComponent tf = ui.textFields.get(0);
-        JSlider sl = ui.sliders.get(0);
+        // 【按 key 定位，不用 get(0)】原来写 ui.textFields.get(0) / ui.sliders.get(0) /
+        // ui.valueLabels.get(0)，假设「索引 0 = cursorDisappearDelay」。面板渲染顺序改成
+        // Inline 组在前之后，索引 0 是 shortAnimationLength（量程 2..25），
+        // 于是 333 被 clamp 到 25，报错变成看不懂的 slider=25 / label="3.33 s"。
+        JSlider sl = ui.sliderByKey("cursorDisappearDelay");
+        JTextComponent tf = ui.textFieldOf(sl);
+        JLabel lbl = ui.labelOf(sl);
         setText(tf, "333");
         check("TYP-1 键入 333 后滑块吸附到 350", sl.getValue() == 350, "slider=" + sl.getValue());
         check("TYP-2 键入期间 pending 仍为旧值 50（apply 前不写）",
                 conf.pendingForProbe().cursorDisappearDelay == 50,
                 "pending=" + conf.pendingForProbe().cursorDisappearDelay);
         check("TYP-3 标签显示用户输入的精确值 333（不篡改）",
-                ui.valueLabels.get(0).getText().startsWith("333"),
-                "label=\"" + ui.valueLabels.get(0).getText() + "\"");
+                lbl.getText().startsWith("333"),
+                "label=\"" + lbl.getText() + "\"");
         conf.apply();
         check("TYP-4 apply 后落库 333（未被 350 覆盖）",
                 svc.getState().cursorDisappearDelay == 333,
@@ -157,8 +181,8 @@ public final class VSnap {
         st.cursorDisappearDelay = 50;
         conf.reset();
         ui = VUi.build(conf);
-        JTextComponent tf = ui.textFields.get(0);
-        JSlider sl = ui.sliders.get(0);
+        // 【按 key 定位，不用 get(0)】理由同 typingPrecision：索引 0 已不是这个字段。
+        JTextComponent tf = textFieldOfKey("cursorDisappearDelay");
 
         // 越界：键入过程中不 clamp（9999 可能是 999 的前缀）
         setText(tf, "9999");
@@ -176,7 +200,7 @@ public final class VSnap {
         st.cursorDisappearDelay = 50;
         conf.reset();
         ui = VUi.build(conf);
-        tf = ui.textFields.get(0);
+        tf = textFieldOfKey("cursorDisappearDelay");
         setText(tf, "abc");
         check("ILL-4 键入非数字不写 pending、不抛异常",
                 conf.pendingForProbe().cursorDisappearDelay == 50,
@@ -191,7 +215,7 @@ public final class VSnap {
         st.cursorDisappearDelay = 50;
         conf.reset();
         ui = VUi.build(conf);
-        tf = ui.textFields.get(0);
+        tf = textFieldOfKey("cursorDisappearDelay");
         setText(tf, "");
         check("ILL-6 空串不写 pending、不抛异常",
                 conf.pendingForProbe().cursorDisappearDelay == 50,
@@ -265,7 +289,12 @@ public final class VSnap {
         // 越界值在键入 + 失焦后必须被 clamp 到量程内并落库
         conf.reset();
         ui = VUi.build(conf);
-        JTextComponent tf = ui.textFields.get(8);
+        // 【按 key 定位，不用 get(8)】原来硬编码下标 8，假设「第 9 个滑块组是
+        // animationLength」。这个假设在 0.9.79 加 slopeTicks、以及渲染顺序重排之后
+        // 已经失效 —— 索引 8 现在是 cursorHeightRatio（量程 30..100 step 10），
+        // 于是「键入 999」打到它上面，clamp 成 100，而 BND-7 断言的是
+        // animationLength == 0.35 → 必然红，且报错里的 raw bits 完全对不上。
+        JTextComponent tf = textFieldOfKey("animationLength");
         setText(tf, "999");
         fireFocusLost(tf);
         conf.apply();
@@ -285,6 +314,17 @@ public final class VSnap {
     }
 
     // ---------------------------------------------------------------- 工具
+
+    /**
+     * 按字段 key 取那一行里的输入框。
+     *
+     * <p>取代 {@code ui.textFields.get(N)} 这类硬编码下标：下标是「面板渲染顺序」的映像，
+     * 而渲染顺序会随分组调整而变（0.9.79 加 slopeTicks 时这一整类断言集体失效过）。
+     * 用 key 后，重排面板不会让断言悄悄测错东西。
+     */
+    private static JTextComponent textFieldOfKey(String key) {
+        return ui.textFieldOf(ui.sliderByKey(key));
+    }
 
     private static String bits(float f) {
         return f + " (raw=0x" + Integer.toHexString(Float.floatToRawIntBits(f)) + ")";
