@@ -35,6 +35,7 @@
 | **连续输入时拖尾跳变的修复方案** | [TYPING-JITTER-PLAN.md](TYPING-JITTER-PLAN.md) | 290 |
 | VSnap 十条红的根因诊断 | [VSNAP-DIAGNOSIS.md](VSNAP-DIAGNOSIS.md) | 157 |
 | 分支该怎么整理（2026-10-27） | [BRANCH-AUDIT-20261027.md](BRANCH-AUDIT-20261027.md) | 280 |
+| **做 runtimeSwitch 重构（新会话交接）** | [HANDOFF-REFACTOR-RUNTIME-SWITCH.md](HANDOFF-REFACTOR-RUNTIME-SWITCH.md) | 320 |
 
 ---
 
