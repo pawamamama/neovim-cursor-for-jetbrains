@@ -23,7 +23,10 @@ public final class VSlopeMigration {
         NeovideCursorSettings.State o1 = new NeovideCursorSettings.State();
         o1.slopeTicks = 82;
         s1.loadState(o1);
-        check("82（0.9.80 出厂默认）→ 100", s1.getState().slopeTicks == 100,
+        // 【0.9.91 改方向：目标值 100 → 0，断言没删只改期望（纪律二.6）】
+        // 理由：用户两次要求「不要单行斜拉伸」，且按四-K 没有老用户需要「对齐上游」。
+        // 82 是 0.9.80 的出厂默认（不是用户选择），归到新默认 0 才对。
+        check("82（0.9.80 出厂默认）→ 0（新默认：纯矩形）", s1.getState().slopeTicks == 0,
                 "读回 = " + s1.getState().slopeTicks);
 
         // 用户真调过的值原样保留
@@ -36,12 +39,13 @@ public final class VSlopeMigration {
                     "读回 = " + sv.getState().slopeTicks);
         }
 
-        // 旧值 -1 → 100
+        // 旧值 -1 → 0（越界回落与 State 默认一致）
+        // 【0.9.91 改方向：100 → 0，理由同上】
         NeovideCursorSettings s2 = new NeovideCursorSettings();
         NeovideCursorSettings.State o2 = new NeovideCursorSettings.State();
         o2.slopeTicks = -1;
         s2.loadState(o2);
-        check("旧值 -1 → 100", s2.getState().slopeTicks == 100,
+        check("旧值 -1 → 0（越界回落与新默认一致）", s2.getState().slopeTicks == 0,
                 "读回 = " + s2.getState().slopeTicks);
 
         System.out.println();

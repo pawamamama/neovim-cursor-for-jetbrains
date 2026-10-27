@@ -2,6 +2,45 @@
 
 ---
 
+## 2026-10-27 第二批：斜拉伸修复 + 新纪律
+
+### 根因（详见 docs/BRANCH-AUDIT-20261027.md）
+
+**不是分支问题，是默认值不一致。**
+
+```
+出厂 State.slopeTicks（斜度）  = 100  ← 全新安装用它，会斜
+「基础」预设声明 slope         = 0    ← 只有点了才生效
+```
+
+生产路径 `syncStateToConfig()` 读的是 State，不是预设。
+
+### 改了什么
+
+| # | 位置 | 改前 → 改后 |
+|---|---|---|
+| 1 | `NeovideCursorSettings:901` | `slopeTicks = 100` → **`0`** |
+| 2 | `NeovideCursorSettings:218/223` 迁移 | `82→100`、`-1→100` → **都改 0** |
+| 3 | `SettingsField:411` 越界回落 | `: 100` → **`: 0`** |
+| 4 | `VDefaultFreeze` 金表 | `"slopeTicks"→"100"` → **`"0"`** |
+| 5 | `VDefaultFreeze` F-5 | 13 项比对**漏 slope** → **补上** |
+| 6 | `VSlopePreset` / `VSlopeMigration` / `VerifyApplyConfig` V7-1 | 断言期望值跟着改方向 |
+
+### 变异测试
+
+把 `slopeTicks` 改回 100 → **F-1 与 F-5 双双变红**，
+F-1 精确报 `漂移=[slopeTicks: 冻结=0 实际=100]`。
+
+### 新纪律（三条，已写入 WORK-DISCIPLINE.md + CLAUDE.md 8.4）
+
+| 纪律 | 内容 |
+|---|---|
+| **四-K** | 只有用户一个，不为不存在的「老用户」写兼容代码 |
+| **四-L** | 问产品决策（观感变不变），不问实现细节（哪个字段怎么迁移） |
+| **四-M** | 字段名必须带中文：`slopeTicks（斜度）`、`stretchRatioK（拉伸强度）` |
+
+---
+
 ## 2026-10-27 自主任务（今晚）
 
 | 项 | 值 |

@@ -83,9 +83,15 @@ public final class VSlopePreset {
                 afterBase == 0 && afterSmooth == 100,
                 "基础后=" + afterBase + " 纯平滑后=" + afterSmooth);
 
-        // 7) State 默认 100
-        check("State 默认 slopeTicks = 100",
-                new NeovideCursorSettings.State().slopeTicks == 100, "");
+        // 7) State 默认 0（= 纯矩形拉伸，不斜）
+        //
+        // 【0.9.91 改方向：100 → 0，断言没删只改期望值（纪律二.6）】
+        // 用户 2026-10-26/27 两次要求「只有纯平滑输入倾斜，其余不斜」。
+        // 原断言写 100，而「基础」「缎带」预设早已声明 0 ——
+        // 两者不一致正是 0.9.90「全新安装会斜」的根因（见 BRANCH-AUDIT-20261027.md）。
+        int defSlope = new NeovideCursorSettings.State().slopeTicks;
+        check("State 默认 slopeTicks = 0（纯矩形，不斜）",
+                defSlope == 0, "实际 = " + defSlope);
 
         System.out.println();
         System.out.printf("=== 结果：PASS %d，FAIL %d ===%n", pass, fail);

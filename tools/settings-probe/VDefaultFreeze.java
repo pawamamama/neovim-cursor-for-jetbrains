@@ -58,7 +58,7 @@ public final class VDefaultFreeze {
         //   0.9.79 → -1（跟随 k）
         //   0.9.80 →  82（当时公式下 82 == 上游）
         //   0.9.81 → 100（语义改为「0=纯矩形 / 100=完全斜」，100 才等于上游）
-        GOLDEN.put("slopeTicks", "100");
+        GOLDEN.put("slopeTicks", "0");
         GOLDEN.put("overlayFadeOut", "true");
         GOLDEN.put("cursorDisappearDelay", "50");
         GOLDEN.put("cursorFadeOutDuration", "0.075");
@@ -177,7 +177,14 @@ public final class VDefaultFreeze {
                 && Math.abs(def.tailOpacity - base.tailOpacity()) < 1e-4f
                 && def.cursorDisappearDelay == base.cursorDisappearDelay()
                 && Math.abs(def.cursorFadeOutDuration - base.cursorFadeOutDuration()) < 1e-4f
-                && Math.abs(def.typingSmoothness - base.typingSmoothness()) < 1e-4f;
+                && Math.abs(def.typingSmoothness - base.typingSmoothness()) < 1e-4f
+                // 【0.9.91 补入：斜度（slopeTicks）】
+                //
+                // 这是 0.9.90 那个真 bug 的直接原因。F-5 原来比了 13 个字段，
+                // 唯独漏了 slopeTicks —— 而「基础」预设声明 slope=0，
+                // State 初值却是 100，于是**全新安装会斜、点过预设的不斜**。
+                // 断言存在、绿着，却对最关键的字段视而不见（假的安全感）。
+                && def.slopeTicks == base.slopeTicksValue();
         check("F-5 出厂默认 == 「基础」预设（首次安装看到的就是基础）",
                 baseMatch,
                 "anim=" + def.animationLength + "/" + base.animationLength()

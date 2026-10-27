@@ -333,12 +333,26 @@ public final class VerifyApplyConfig {
         NeovideConfig cfg = NeovideCaretManager.getConfig();
         svc.getState().stretchRatioK = 4.5f;
         svc.syncStateToConfig();
-        float[] expect = {1.0f, 0.72f, 0.42f, 0.22f};
+        // 【0.9.91 改方向：期望值随斜度（slopeTicks）默认值一起变，断言没删只改期望（纪律二.6）】
+        //
+        // 原来期望 {1.0, 0.72, 0.42, 0.22} —— 那是 slope=100（完全斜）的产物。
+        // 0.9.91 起 State 默认 slope=0（纯矩形，不斜），派生结果变成
+        // {0.86, 0.86, 0.32, 0.32}：同侧两角等速 → 左右边缘垂直 → 矩形，
+        // 但 rank0 与 rank2 之间仍有差 → **拉伸保留**。
+        //
+        // 两个数组的差别正是「斜 vs 不斜」的数值体现：
+        //   1.00/0.72/0.42/0.22  四档互不相同 → 平行四边形
+        //   0.86/0.86/0.32/0.32  两两相等     → 规整矩形
+        //
+        // 实测（2026-10-27，deriveTrailFactors(4.5f, 0f, 0f)）：
+        //   raw = 0x3F5C28F6 / 0x3F5C28F6 / 0x3EA3D70A / 0x3EA3D70A
+        //   与字面量 0.86f / 0.32f 逐位相同，所以下面的 raw 比较可靠。
+        float[] expect = {0.86f, 0.86f, 0.32f, 0.32f};
         boolean same = cfg.trailFactors.length == 4;
         for (int i = 0; i < 4; i++) {
             same &= Float.floatToRawIntBits(cfg.trailFactors[i]) == Float.floatToRawIntBits(expect[i]);
         }
-        check("V7-1 stretchRatioK=4.5 ⇒ CONFIG.trailFactors 逐位 == {1.0f,0.72f,0.42f,0.22f}（审计 A 段依赖此）",
+        check("V7-1 拉伸强度 k=4.5、斜度=0 ⇒ CONFIG.trailFactors 逐位 == {0.86f,0.86f,0.32f,0.32f}（纯矩形）",
                 same, arr(cfg.trailFactors));
         float[] first = cfg.trailFactors;
         svc.syncStateToConfig();

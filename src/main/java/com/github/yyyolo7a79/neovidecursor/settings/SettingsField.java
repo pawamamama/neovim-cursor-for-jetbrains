@@ -406,9 +406,11 @@ public final class SettingsField {
         out.add(ints("targetFps", s -> s.targetFps,
                 (s, v) -> s.targetFps = (v == 144) ? 144 : 125,
                 null, null));
-        // 斜度：0..100，越界回落 100（= 完全斜 = 对齐上游，与 State 默认值一致）
+        // 斜度（slopeTicks）：0..100，越界回落到 State 的默认值 0（纯矩形拉伸，不斜）。
+        // 回落目标必须与 State 默认一致 —— 原来回落 100，而 State 默认已改成 0，
+        // 两者不一致会让「手改 XML 塞个坏值」的用户得到一个和全新安装不同的观感。
         out.add(ints("slopeTicks", s -> s.slopeTicks,
-                (s, v) -> s.slopeTicks = (v >= 0 && v <= 100) ? v : 100,
+                (s, v) -> s.slopeTicks = (v >= 0 && v <= 100) ? v : 0,
                 null, null));
         out.add(bools("overlayFadeOut", s -> s.overlayFadeOut, (s, v) -> s.overlayFadeOut = v,
                 c -> c.overlayFadeOut, (c, v) -> c.overlayFadeOut = v));
