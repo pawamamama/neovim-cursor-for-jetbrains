@@ -180,11 +180,11 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File D:\deepseekwork\neovim-cursor-pr\t
 | **PROJECT-GUIDE.md**（本文） | 工作区地图 + 硬约束 |
 | `docs/RESUME-HERE.md` | 下次开工指令 |
 | `docs/NEXT-DEVELOPMENT.md` | 待开发功能 |
-| `VERSIONS.md` | 版本核对命令 |
+| `docs/archive/VERSIONS.md` | 版本核对命令（已归档，0.9.4 时代） |
 | `docs/design/MULTICURSOR-RESEARCH.md` | 上游多光标调研 |
 | `docs/design/MULTICURSOR-PROGRESS.md` | 多光标进度 |
-| `LESSONS.md` | 踩坑记录 |
-| `ASSERTIONS.md` | 断言清单 |
+| `LESSONS.md` | 踩坑记录（根目录，权威汇总，仍有效） |
+| `docs/archive/ASSERTIONS.md` | 断言清单（已归档，早期） |
 
 ### 历史归档（**只读，勿当现状**）
 
@@ -194,7 +194,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File D:\deepseekwork\neovim-cursor-pr\t
 |---|---|
 | `ARCHIVE-PERFORMANCE.md` | 性能数据来自旧版，已修正过 5 处错误结论 |
 | `ARCHIVE-SMOOTH-CONCLUSION.md` | 第 4 节有失效横幅 |
-| `PROGRESS.md`（根目录） | 停在 2026-10-22（0.9.9 时代） |
+| `PROGRESS.md` | 停在 2026-10-22（0.9.9 时代）。2026-10-27 从根目录移入本目录 |
+| `VERSIONS.md` / `ROADMAP.md` / `0.9.8-TASKS.md` 等 | 2026-10-27 从根目录批量移入本目录，历史提交完整保留 |
 
 ### 上游资料
 

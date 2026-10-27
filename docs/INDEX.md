@@ -58,22 +58,29 @@
 
 这些停在 0.9.5 ~ 0.9.33 期间。只保留历史价值。
 
+**【2026-10-27】下列 8 个根目录文档与 `docs/TONIGHT-*.md` 已移入 `docs/archive/`。**
+移动方式为 `git mv`，提交历史完整保留。
+
 ```
-PROGRESS.md              停在 0.9.9，自己标注了「已过时」
-VERSIONS.md              停在 0.9.4 附近，但「三个版本陷阱」一节仍有价值
-ROADMAP.md               停在 2026-10-21
-LESSONS.md               612 行，踩坑记录（部分已升级进 WORK-DISCIPLINE）
-0.9.8-TASKS.md           当时的任务清单
-AUTONOMOUS-TASKS.md      同上
-ASSERTIONS.md            早期断言清单
-MANUAL-ACCEPTANCE-0.9.5.md   手工验收用例
-USER-FEEDBACK-0.9.5.md       用户反馈记录
-docs/TONIGHT-*.md            某晚的工作记录
-docs/archive/*               归档
-docs/design/OPTIM-BATCH1.md  1022 行优化批次记录
-docs/design/SETTINGS-CONTRACT.md  75.9 KB 契约（0.9.19 时代的权威）
-docs/design/SETTINGS-UI-CONTRACT.md  96.5 KB（同上）
+docs/archive/PROGRESS.md              停在 0.9.9，自己标注了「已过时」
+docs/archive/VERSIONS.md              停在 0.9.4 附近，但「三个版本陷阱」一节仍有价值
+docs/archive/ROADMAP.md               停在 2026-10-21
+docs/archive/0.9.8-TASKS.md           当时的任务清单
+docs/archive/AUTONOMOUS-TASKS.md      同上
+docs/archive/ASSERTIONS.md            早期断言清单
+docs/archive/MANUAL-ACCEPTANCE-0.9.5.md   手工验收用例
+docs/archive/USER-FEEDBACK-0.9.5.md       用户反馈记录
+docs/archive/TONIGHT-*.md             某晚的工作记录
+docs/archive/                         归档目录
+docs/design/OPTIM-BATCH1.md           1022 行优化批次记录
+docs/design/SETTINGS-CONTRACT.md      75.9 KB 契约（0.9.19 时代的权威）
+docs/design/SETTINGS-UI-CONTRACT.md   96.5 KB（同上）
 ```
+
+**一个例外留在根目录**：`LESSONS.md`（612 行，踩坑记录）。
+它自称「权威汇总·遇到问题先查这里」，被 `START-HERE.md` / `docs/PROJECT-GUIDE.md`
+等 14 个文件当参考链接引用 —— 是活文档，只是内容停在 0.9.5。
+部分内容已升级进 `docs/WORK-DISCIPLINE.md`，但**它本身仍然有效，不要归档**。
 
 ---
 

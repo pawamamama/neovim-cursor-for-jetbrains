@@ -93,11 +93,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools\\settings-probe\\build-v-pro
 
 ### 历史留痕（不要当现状）
 
-`PROGRESS.md` / `VERSIONS.md` / `ROADMAP.md` / `LESSONS.md` /
+已移入归档：[`docs/archive/`](docs/archive/) 下的
+`PROGRESS.md` / `VERSIONS.md` / `ROADMAP.md` /
 `0.9.8-TASKS.md` / `AUTONOMOUS-TASKS.md` / `ASSERTIONS.md` /
-`MANUAL-ACCEPTANCE-0.9.5.md` / `USER-FEEDBACK-0.9.5.md`
+`MANUAL-ACCEPTANCE-0.9.5.md` / `USER-FEEDBACK-0.9.5.md` / `TONIGHT-*.md`
 
 这些停在 0.9.5 ~ 0.9.33 期间，只保留历史价值。
+
+**例外：[LESSONS.md](LESSONS.md) 仍在根目录** —— 612 行踩坑记录，
+自称「权威汇总·遇到问题先查这里」，是活文档（只是内容停在 0.9.5），不要归档。
 
 ---
 

@@ -462,13 +462,21 @@ RGB 换成色相循环  -> 140 行死代码 + 功能与名字对不上
 ## 历史留痕（**不要当现状**）
 
 ```
-PROGRESS.md / VERSIONS.md / ROADMAP.md / LESSONS.md
-0.9.8-TASKS.md / AUTONOMOUS-TASKS.md / ASSERTIONS.md
-MANUAL-ACCEPTANCE-0.9.5.md / USER-FEEDBACK-0.9.5.md
-docs/archive/*  docs/TONIGHT-*.md
+docs/archive/PROGRESS.md / VERSIONS.md / ROADMAP.md
+docs/archive/0.9.8-TASKS.md / AUTONOMOUS-TASKS.md / ASSERTIONS.md
+docs/archive/MANUAL-ACCEPTANCE-0.9.5.md / USER-FEEDBACK-0.9.5.md
+docs/archive/TONIGHT-*.md
+docs/archive/  （整目录）
 ```
 
 这些停在 0.9.5 ~ 0.9.33 期间。
+
+**例外：`LESSONS.md`（612 行）留在根目录。** 它自称「权威汇总·遇到问题先查这里」，
+被 `START-HERE.md` / `docs/PROJECT-GUIDE.md` 等 14 个文件当参考链接引用 ——
+是活文档，只是内容停在 0.9.5。**不要把它归进 archive。**
+
+> 【2026-10-27】上面 8 个根目录文档与 `docs/TONIGHT-*.md` 已 `git mv` 到 `docs/archive/`。
+> 移动而非删除：历史完整保留，只是根目录不再被历史留痕占位。
 
 ---
 
