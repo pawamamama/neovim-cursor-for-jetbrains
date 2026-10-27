@@ -31,6 +31,10 @@
 | 接手这个项目 | [SKILL-neovide-cursor-plugin-handoff.md](SKILL-neovide-cursor-plugin-handoff.md) | 153 |
 | 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 146 |
 | 探针覆盖度怎么补回来的 | [DEAD-PROBE-CLEANUP.md](DEAD-PROBE-CLEANUP.md) | 83 |
+| **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 200 |
+| **连续输入时拖尾跳变的修复方案** | [TYPING-JITTER-PLAN.md](TYPING-JITTER-PLAN.md) | 290 |
+| VSnap 十条红的根因诊断 | [VSNAP-DIAGNOSIS.md](VSNAP-DIAGNOSIS.md) | 157 |
+| 分支该怎么整理（2026-10-27） | [BRANCH-AUDIT-20261027.md](BRANCH-AUDIT-20261027.md) | 280 |
 
 ---
 
