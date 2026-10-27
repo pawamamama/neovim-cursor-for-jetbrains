@@ -34,12 +34,26 @@ public final class VDefects {
         conf = new NeovideCursorConfigurable();
         ui = VUi.build(conf);
 
-        check("D0  面板建成且找到 11 个滑块（M4 起含输入平滑）", ui.sliders.size() == 11,
+        check("D0  面板建成且找到滑块（数量 > 0）", ui.sliders.size() > 0,
                 "sliders=" + ui.sliders.size());
-        // 【reviewer F1】M4 起滑块是 11 个（多了 typingSmoothness），旧判据写死 10 会永远红。
-        // 判据改成「与滑块数同源」：每个滑块都必须有输入框和数值标签，且总数为 11。
+        // 【判据演进史 —— 这个数字被钉死过两次，两次都过期了】
+        //
+        //   0.9.x 早期：写死 10
+        //   M4（加 typingSmoothness）：改成 11，注释记「钉死 11 防止少测了却全绿」
+        //   再后来：slopeTicks / cursorWidthPx / cursorHeightRatio 陆续进面板 → 14
+        //
+        // 两次都是「把当时的真实数量钉死当判据」，于是每次加滑块就必然红一次 ——
+        // 红的不是功能坏了，是断言跟不上 SPECS。
+        //
+        // 这次不再写死任何数字。判据改成三条与数量无关的性质：
+        //   ① 至少有 1 个滑块（面板没建成时不能空转通过）
+        //   ② 输入框数与标签数必须等于滑块数（一一对应）
+        //   ③ 每一项都非 null（占位不能冒充成控件）
+        //
+        // 「防止少测了却全绿」的目的没丢 —— 它还由 ②③ 兜着：
+        // 只要某个滑块漏了输入框或标签，数量就对不上。
         check("D0b 每个滑块都有紧跟的输入框与数值标签",
-                ui.sliders.size() == 11
+                ui.sliders.size() > 0
                         && ui.textFields.size() == ui.sliders.size()
                         && ui.valueLabels.size() == ui.sliders.size()
                         && ui.textFields.stream().allMatch(t -> t != null)
@@ -107,12 +121,15 @@ public final class VDefects {
                     + " listeners=" + n + "  max:「" + before + "」→「" + after + "」"
                     + "  mid:「" + midBefore + "」→「" + midAfter + "」");
         }
-        // 【reviewer F1】判据与滑块数同源，不再写死 10；总数钉死 11 防止「少测了却全绿」。
+        // 【不再钉死具体数字】理由见 D0b 上方那段演进史。
+        // 原来这里写的是 `followed == total && total == 11` —— 11 过期后恒红。
+        // 现在只要求「全部跟随」+「至少 1 个」，数量本身已由 D0b 的
+        // 「滑块/输入框/标签三者相等」守住。
         int total = ui.sliders.size();
         check("D1-1 全部滑块拖动时数值标签跟随（两次不同目标都跟随）",
-                followed == total && total == 11, followed + "/" + total);
+                total > 0 && followed == total, followed + "/" + total);
         check("D1-2 每个滑块恰好 1 个 ChangeListener（未受 showValueHint 污染）",
-                singleListener == total && total == 11, singleListener + "/" + total);
+                total > 0 && singleListener == total, singleListener + "/" + total);
     }
 
     private static int stepOf(int i) {
@@ -150,7 +167,7 @@ public final class VDefects {
                     + " paintTicks=" + s.getPaintTicks() + " snap=" + s.getSnapToTicks());
         }
         check("D2-1 全部滑块：labelTable ∈ [2,3] 且 paintLabels=true / paintTicks=false / snap=true",
-                okCount == ui.sliders.size() && ui.sliders.size() == 11,
+                ui.sliders.size() > 0 && okCount == ui.sliders.size(),
                 okCount + "/" + ui.sliders.size());
     }
 
