@@ -1,6 +1,62 @@
 # PROGRESS —— 当前指针
 
-> ⚠️ **本文已过时（停在 2026-10-22 / 0.9.9 时代）。**
+---
+
+## 2026-10-27 自主任务（今晚）
+
+| 项 | 值 |
+|---|---|
+| 分支 | `claude/d0-gate-probe-status-caadda` |
+| D0 门禁 | **exit=0 PASS** |
+| 全量探针 | **89 个 / 8 个未通过 / 81 个通过**（基线 88/8，新增 VFontScale 全绿） |
+| 已装 jar | **未改动**（R3：本晚不产出、不安装） |
+
+### 已完成
+
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | **Ctrl+滚轮改字号 → 光标纵向漂移**（用户报告） | ✅ 已修 `8d3e787` |
+| 2 | F7 取代证明文档 | ✅ `docs/F7-SUPERSEDED.md` |
+| 3 | VDefects 断言改方向 | ⬜ 未开始 |
+| 4 | VSnap 诊断（不改断言） | ⬜ 未开始 |
+
+### 任务 1（漂移）的关键发现
+
+**根因是两道快速路径，不止一道。** 只改顶层早退（`!forceResync && cameraTrail.isAt(...)`）
+探针仍三红 —— 循环内的 `needsUpdate = forceResync || !trail.isInitialized() || !trail.isAt(...)`
+照样把重算拦下。两道都接上 `fontScaleChanged` 才生效。
+
+**另一个坑：不能用 `forceResync` 传这个信号。** 后面的 `forceResync = false;`
+会把它一笔勾销，实测完全无效。改用局部变量。
+
+**顺带修了一个真实隐患**：`trailSlotCount(useBlock, blockStarts.length, ...)`
+在 `useBlock=false` 时 `blockStarts` 可能是 null（`getBlockSelectionStarts()`
+抛异常时停在初值）→ NPE。线上没炸是因为真实 IDEA 承诺返回空数组，但无契约保护。
+
+### 原任务 1（摘 F7 patch）为什么改成写文档
+
+**F7 早就修完并提交在当前分支历史里了**（`ca48301`），而且它修的那个 bug
+随 `bc903e1` 的预设模型重构一起消失了 —— 覆盖表机制被整体删除，
+`animPresetOverrides` 生产代码零引用。
+
+`VOverride` 探针也一起被删（-121 行），它断言的三个 API 已不存在。
+要让「7 条全绿」只能回退 `bc903e1`，远超 R6 且触碰 R1。
+
+详见 [docs/F7-SUPERSEDED.md](docs/F7-SUPERSEDED.md)。
+
+### 基线数字（用于控变量对比）
+
+```
+2026-10-26 实测：87 个探针 / 8 个未通过 / 79 个通过
+2026-10-27 实测：89 个探针 / 8 个未通过 / 81 个通过（+VFontScale 5 绿）
+未通过始终是这 8 个：VDefects(6) VSnap(10) VTools(1) VHints(1) VCustom(1)
+                      VReset2(2) VSepBound(7) VSleep(1)
+另有 VRegr2 为红（FAIL=2 + NPE 崩溃）但脚本归入 informational，不计入 8
+```
+
+---
+
+> ⚠️ **以下内容已过时（停在 2026-10-22 / 0.9.9 时代）。**
 > **当前状态看 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。**
 > 保留本文仅为历史留痕，不要把这里的版本号当现状。
 
