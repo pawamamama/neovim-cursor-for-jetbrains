@@ -1,8 +1,16 @@
-# runtimeSwitch 重构 —— 交接报告（本地已提交，未推送）
+# runtimeSwitch 重构 —— 交接报告（**已合并，本文仅供追溯**）
+
+> ⚠️ **本文描述的改动已于 2026-10-27 合入 `main`（`4bbbcfc` merge commit）。**
+>
+> **不要执行本文第六节的回退命令。** `git reset --hard a3e678a` 会把
+> 已合并到 main 的重构成果连同后续提交一起打回重构前状态。
+> 要回退这次重构，请 `git revert 4bbbcfc`（或在 main 上 revert 那两个提交）。
+>
+> 本文保留的价值：说明「当时为什么这么改、怎么验证的」。**状态与路径均已过时。**
 
 > 2026-10-27 · 给决策会话
-> 代码位置：worktree `D:\deepseekwork\neovim-cursor-pr\.claude\worktrees\quizzical-raman-7c159c`
-> 分支 `claude/quizzical-raman-7c159c` · 提交 `016046a` · 工作区干净 · **未推送**
+> 代码位置（**已失效**）：worktree `...\quizzical-raman-7c159c`
+> 分支 `claude/quizzical-raman-7c159c` · 提交 `016046a` · **已合并进 main 4bbbcfc**
 
 ---
 

@@ -1,6 +1,7 @@
 # 文档索引
 
-> 本项目有 **103 个** md 文件（根 9 + docs 28 + docs/design 37 + docs/archive 29，另加 plans 2 个），
+> 本项目有 **113 个** git 跟踪的 md 文件
+> （根 9 + docs 28 + docs/design 37 + docs/archive 29 + plans 2 + build 8），
 > 其中大部分是历史留痕。
 > **只读这张表标记为「必读」的，其他按需查。**
 >
@@ -13,7 +14,7 @@
 | 文档 | 行数 | 内容 |
 |---|---|---|
 | [START-HERE.md](../START-HERE.md) | 215 | **唯一的状态入口**。现状 / 门禁 / 地形 / 能做什么不能做什么 |
-| [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | 741 | **动手前必读**。14 条纪律 + 本项目踩过的所有坑 |
+| [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | 741 | **动手前必读**。13 条编号纪律 + 13 个专题（四-B~四-M） |
 | [PARAMETER-MAP.md](PARAMETER-MAP.md) | 164 | 每个参数是否跟随预设，含字段归属表 |
 | [NEXT-STEPS.md](NEXT-STEPS.md) | 163 | 当前状态 / 已完成 / 已放弃 / 待办 |
 

@@ -93,16 +93,17 @@
 
 ---
 
-## 四、剩余 9 个探针失败（都是过期基线，非新 bug）
+## 四、剩余 6 个探针失败（都是过期基线，非新 bug）
 
 | 探针 | 失败数 | 原因 |
 |---|---|---|
-| `VSnap` | 10 | `VUi` 量程表与面板渲染顺序仍未完全同步 |
-| `VSepBound` | 7 | 分隔线逻辑已改 |
-| `VDefects` | 6 | 同 `VSnap` |
-| `VRegr2` | 2 | 平滑已移出预设域 |
-| `VReset2` | 2 | 重置逻辑已改 |
+| `VSepBound` | 7 | 预设名含分隔符被静默丢弃 |
+| `VReset2` | 2 | 勾选换预设丢失 / 派生存活 |
 | `VTools`/`VHints`/`VCustom`/`VSleep` | 各 1 | 字段数 / 文案 / 副本判据 |
+
+> `VRegr2`（13 通过 / 2 失败）是 **informational**，不计入。
+> `VDefects` 与 `VSnap` 已于 2026-10-27 修绿 —— 它们的红不是「过期断言」，
+> 而是**索引契约破裂**（探针用 `get(0)` / `get(8)` 定位控件，面板重排后指向了别的字段）。
 
 **预计工作量**：半天。不影响用户功能，但能降低噪声。
 
@@ -162,7 +163,7 @@ TR（前缘单角）   2.11     7.43    11.58
 
 | 文档 | 内容 |
 |---|---|
-| [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | **工作纪律（必读）** 570 行，12 条纪律 |
+| [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | **工作纪律（必读）** 741 行，13 条编号纪律 + 13 个专题 |
 | [design/RANK-COLLAPSE-FIX.md](design/RANK-COLLAPSE-FIX.md) | 为什么单行打字画不出斜缎带 |
 | [design/UPSTREAM-VSCODE-RESEARCH.md](design/UPSTREAM-VSCODE-RESEARCH.md) | 上游四版本对比 + 我们还缺什么 |
 | [design/RGB-WASH-REFERENCE.md](design/RGB-WASH-REFERENCE.md) | 上游 wash 实现参数 |

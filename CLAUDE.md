@@ -119,13 +119,24 @@ VReset2(2)  VSepBound(7)  VSleep(1)
 
 ## 编译
 
+**⚠️ 先看你在哪：** 如果在 worktree 里工作，**不要**执行 `Set-Location` 到主仓库 ——
+那会把后续所有编译/门禁都作用在主仓库上（而主仓库代码可能不是你要的那份）。
+
 ```powershell
-Set-Location D:\deepseekwork\neovim-cursor-pr
+# 只在你确实要操作主仓库时执行；在 worktree 里请跳过这行
+# Set-Location D:\deepseekwork\neovim-cursor-pr
+
+# 目录必须先存在（build/v2-probe 是可清理的产物目录，删过就要重建）
+New-Item -ItemType Directory -Force -Path build\v2-probe\classes | Out-Null
+
 $libs='D:\deepseekwork\_idea-anim\idea-libs'
 $cp=(Get-ChildItem -LiteralPath $libs -Filter '*.jar' | ForEach-Object { $_.FullName }) -join ';'
 Get-ChildItem -Recurse -File -Filter *.java 'src\main\java' | ForEach-Object { $_.FullName } | Set-Content build\v2-probe\srcs.txt
 javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\classes "@build\v2-probe\srcs.txt"
 ```
+
+> **更省事的做法**：直接跑 `build-v-probes.ps1`，它会自己建目录、编译源码树 + 探针。
+> 上面这组裸 javac 命令只在你只想「快速验证能编译」时才用。
 
 ## 三道门禁（改完必跑）
 
@@ -134,17 +145,18 @@ javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\c
 git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java
 
 # ② 全量探针（唯一权威入口）
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probes.ps1
+#    ⚠️ 在 worktree 里必须带 -Repo，否则脚本默认编译主仓库代码 → 假绿
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probes.ps1 -Repo <你的仓库根>
 ```
 
 **⚠️ 不要并发跑两次门禁。** 两份门禁共用 `build\v2-probe\classes`，
 编译那步会先删除目录 —— 另一份正在加载探针主类时会 ClassNotFoundException，
-失败数从 8 暴涨到 18/19，看起来像你引入了巨大回归。**这是假象**（见纪律四-G-2）。
+失败数从 6 暴涨到 16/17，看起来像你引入了巨大回归。**这是假象**（见纪律四-G-2）。
 
 ## 打包安装
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.90 -NoStart
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <本次版本> -NoStart
 ```
 
 **⚠️ 这个脚本每次都会清空用户配置**（用户 0.9.70 明确要求的行为）。
@@ -189,7 +201,7 @@ cursorRgbWash = false
 ## 4.3 辉光的真相
 
 ```java
-glowColor = NeovideColors.parse(config.shadowColor, 1.0f);   // 第 385 行
+glowColor = NeovideColors.parse(config.shadowColor, 1.0f);   // CaretTrailPanel.java:453
 ```
 
 **辉光始终用 `shadowColor`，从引入到现在从未跟随过光标本体色。**
@@ -273,7 +285,7 @@ applyAnimPresetFields 实写    13 个（内置预设只写观感）
 
 **26 ≠ 14 是两套机制，不是 bug。** 完整归属表见 `docs/PARAMETER-MAP.md`。
 
-## 陷阱 8：`RUNTIME_SWITCH_KEYS` 太短
+## 陷阱 8：设备/环境开关清单太短
 
 恢复自定义预设时要跳过「设备/环境开关」。原来只有 4 项，漏了 5 个：
 
@@ -282,6 +294,13 @@ targetFps  cursorWidthPx  cursorHeightRatio  diagLogging  multiCursorNoGlow
 ```
 
 0.9.87 补到 9 项。判据：**这个字段改变的是「光标长什么样」，还是「插件怎么跑」？**
+
+> **【2026-10-27 重构】** 原来这份清单是一个独立的 `String[] RUNTIME_SWITCH_KEYS` 数组，
+> 与字段表分家维护 —— 这正是「补了 4 项忘了 5 项」的根因。现在它已**删除**，
+> 改由 `SettingsField` 每个字段自身的 `boolean runtimeSwitch` 标志表达
+> （判定标准不变，仍是这 9 个字段）。加字段时标志就写在它那一行旁边，忘不掉也拼不错。
+>
+> **如果你在找 `RUNTIME_SWITCH_KEYS`：它不存在了。**
 
 ## 陷阱 9：`invokeLater` 抛出 → 永久活锁
 
@@ -393,7 +412,7 @@ TR（前缘单角）   2.11     7.43    11.58
 
 | 项 | 说明 |
 |---|---|
-| 8 个过期断言 | 逐个查为什么红，改断言方向 |
+| 6 个过期断言 | 逐个查为什么红，改断言方向 |
 | `build/` 下 150+ 一次性脚本 | 可清理，但先列清单给用户确认 |
 
 ---
@@ -514,11 +533,11 @@ docs/archive/  （整目录）
 | 四角弹簧的积分 | `core/DampedSpring.java` | `update(dt)` —— 首句 `animationLength <= dt` 就归零 |
 | 单角时长分配 | `core/TrailCorner.java` | `jump(w, h, cx, cy, rank)` |
 | 四角排名 | `ui/SpringTrail.java` | `assignRanks()` —— 稳定排序 + 索引 tiebreak |
-| 系数派生 | `settings/NeovideCursorSettings.java` | `deriveTrailFactors(k, smooth, slope)` 第 605 行 |
+| 系数派生 | `settings/NeovideCursorSettings.java` | `deriveTrailFactors(k, smooth, slope)` 第 598 行 |
 | 绘制（辉光+主体） | `ui/CaretTrailPanel.java` | `paintQuad` / `drawQuadGlow` / `buildRgbWashPaint` / `buildDualTonePaint` |
 | 帧调度 | `ui/RenderScheduler.java` | `loop()` / `dispatchDue()` |
 | 每帧驱动 | `ui/CaretAnimator.java` | `runTick()` / `syncGlobalSettings()` / `resolveRgbWash()` |
-| State 字段表 | `settings/SettingsField.java` | `FIELDS` / `PRESET_FIELDS` / `RUNTIME_SWITCH_KEYS` |
+| State 字段表 | `settings/SettingsField.java` | `FIELDS` / `PRESET_FIELDS` / 字段自身的 `runtimeSwitch` 标志 |
 | 预设表 | `settings/CursorPresets.java` | `ANIM_PRESETS` / `COLOR_PRESETS` |
 | 设置面板 | `ui/settings/NeovideCursorConfigurable.java` | `createPanel()` + 各 `build*Group()` |
 | 预览 | `ui/settings/AnimationPreview.java` | `assignRanks()` / `onConfigChanged()` |

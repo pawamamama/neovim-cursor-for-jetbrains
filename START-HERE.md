@@ -77,7 +77,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools\\settings-probe\\build-v-pro
 | 文档 | 什么时候读 |
 |---|---|
 | **本页** | 任何时候，先读 |
-| [docs/WORK-DISCIPLINE.md](docs/WORK-DISCIPLINE.md) | **动手前必读**，570 行 / 12 条纪律 |
+| [docs/WORK-DISCIPLINE.md](docs/WORK-DISCIPLINE.md) | **动手前必读**，741 行 / 13 条编号纪律 + 13 个专题 |
 | [docs/PARAMETER-MAP.md](docs/PARAMETER-MAP.md) | 改任何参数归属前 |
 | [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md) | 想知道下一步做什么 |
 
@@ -174,15 +174,16 @@ applyAnimPresetFields 实写    13 个（给内置预设）
 
 ## 6. 已知遗留
 
-### 9 个过期探针断言（不影响功能）
+### 6 个过期探针断言（不影响功能）
 
 | 探针 | 失败数 | 原因 |
 |---|---|---|
-| `VSnap` / `VDefects` | 10 / 6 | 量程表旧值 |
-| `VSepBound` | 7 | 分隔线逻辑已改 |
-| `VRegr2` | 2 | 平滑已移出预设域 |
-| `VReset2` | 2 | 重置逻辑已改 |
+| `VSepBound` | 7 | 预设名含分隔符被静默丢弃 |
+| `VReset2` | 2 | 勾选换预设丢失 / 派生存活 |
 | `VTools` / `VHints` / `VCustom` / `VSleep` | 各 1 | 字段数 / 文案 / 副本判据 |
+
+> `VRegr2`（13 通过 / 2 失败）是 **informational**，不计入上面这 6 个。
+> `VDefects` 与 `VSnap` 已于 2026-10-27 修绿（改断言方向，不删断言）。
 
 ### 技术债
 
@@ -214,5 +215,5 @@ Get-ChildItem -Recurse -File -Filter *.java 'src\main\java' | ForEach-Object { $
 javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\classes "@build\v2-probe\srcs.txt"
 
 # 打包 + 安装（会清空配置，先跟用户确认）
-pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.87 -NoStart
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <本次版本> -NoStart
 ```

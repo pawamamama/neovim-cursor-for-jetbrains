@@ -1,6 +1,6 @@
 ---
 name: neovide-cursor-plugin-handoff
-description: 接手 D:\deepseekwork\neovim-cursor-pr 这个 JetBrains 光标拖尾插件项目时先读。覆盖三件事：项目的地形（34 个生产文件 / 80 个探针 / 三份参数清单）、动任何代码前必须跑的门禁（D0 零 diff + PhysicsParity + 全量探针）、以及这个项目特有的六类陷阱（参数归属混乱、探针复刻逻辑、预设两套机制、颜色/动画域重叠、字段四层拷贝、改预设不动断言）。当用户要求修改这个插件的观感参数、加设置项、改预设、修手感问题时使用。
+description: 接手 D:\deepseekwork\neovim-cursor-pr 这个 JetBrains 光标拖尾插件项目时先读。覆盖三件事：项目的地形（34 个生产文件 / 91 个探针 / 三份参数清单）、动任何代码前必须跑的门禁（D0 零 diff + PhysicsParity + 全量探针）、以及这个项目特有的六类陷阱（参数归属混乱、探针复刻逻辑、预设两套机制、颜色/动画域重叠、字段四层拷贝、改预设不动断言）。当用户要求修改这个插件的观感参数、加设置项、改预设、修手感问题时使用。
 ---
 
 # 接手这个项目之前
@@ -8,8 +8,8 @@ description: 接手 D:\deepseekwork\neovim-cursor-pr 这个 JetBrains 光标拖�
 ## 一、先认清地形
 
 ```
-生产代码    src/main/java/.../neovidecursor/    34 文件 / ~14k 行
-探针        tools/settings-probe/V*.java        80 个（71 通过）
+生产代码    src/main/java/.../neovidecursor/    34 文件 / 15,164 行
+探针        tools/settings-probe/*.java        106 文件 / 23,570 行（91 个 V*.java）
 基准程序    tools/bench/Bench*.java             16 个（性能实测用）
 ```
 
@@ -39,7 +39,8 @@ java -cp "build\parity;build\v2-probe\classes;<idea-libs>" PhysicsParity
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probes.ps1
 ```
 
-**当前基线**：探针 71/80 通过，9 个已知失败都是过期断言（见 `docs/NEXT-STEPS.md`）。
+**当前基线**：探针 **6 红** —— `VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`，
+全是过期断言（见 `docs/NEXT-STEPS.md`）。`VRegr2` 是 informational，不计入。
 
 ---
 
@@ -144,7 +145,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.93 
 
 | 文档 | 什么时候读 |
 |---|---|
-| `WORK-DISCIPLINE.md` | **动手前必读**（570 行，含 12 条纪律） |
+| `WORK-DISCIPLINE.md` | **动手前必读**（741 行，含 13 条编号纪律 + 13 个专题） |
 | `PARAMETER-MAP.md` | 改任何参数归属前 |
 | `NEXT-STEPS.md` | 想知道当前状态 / 下一步做什么 |
 | `design/UPSTREAM-VSCODE-RESEARCH.md` | 想对齐上游手感前 |
