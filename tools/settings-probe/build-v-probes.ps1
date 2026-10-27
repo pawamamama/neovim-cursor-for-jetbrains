@@ -106,7 +106,10 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 0.9.88 新增：锁「开渐变后所有纯色预设都是渐变」
         'VGradAllPresets',
         # 0.9.89：预览必须收到 slopeTicks 与 cursorRgbWash
-        'VPreviewParity')
+        'VPreviewParity',
+        # 0.9.90：Ctrl+滚轮改字号后光标必须重新贴合行位置
+        # （快速路径只看行/列/文档戳，缩放时三者全不变 → 早退 → 纵向漂移）
+        'VFontScale')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

@@ -644,6 +644,26 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private boolean forceResync = false;
 
+    /**
+     * 上一次 refreshTarget 看到的行高；{@code -1} = 尚未测量。
+     *
+     * <p><b>为什么需要单独记它（Ctrl+滚轮缩放导致光标纵向漂移）</b>：
+     * 快速路径的判据是「行号 + 列号 + 文档修改戳都没变 → 这一帧不用重算」。
+     * 但 <b>Ctrl+滚轮改字号</b>时这三个一样都没变（光标还在同一行同一列，文档也没改），
+     * 快速路径于是早退，后面的 {@code editor.getLineHeight()} 与
+     * {@code cy = cp.y + lineHeight / 2.0} 全都不重读 —— 覆盖层仍按<b>旧行高</b>
+     * 的旧坐标绘制，视觉上就是「光标纵向漂移」。
+     *
+     * <p>为什么只漂纵向：{@code cy} 的两个加数（{@code cp.y} 与 {@code lineHeight}）
+     * 都由行高直接决定，行高一变误差立刻按比例放大；而 {@code cx} 由字符宽度决定，
+     * 相对误差小得多。
+     *
+     * <p>为什么窗口缩放那条（{@code refreshTarget()} 里的面板尺寸比对）覆盖不到它：
+     * 那条比的是 {@code panel} 的宽高。改字号只改行高，面板尺寸可能分毫未动，
+     * 于是判据为假 —— 这正是本字段要补的缺口。
+     */
+    private int lastLineHeight = -1;
+
     public CaretAnimator(@NotNull Editor editor, @NotNull NeovideConfig config) {
         this.editor = editor;
         this.config = config;
@@ -1253,8 +1273,31 @@ public class CaretAnimator implements Disposable, CaretListener {
             // —— 这正是「单行没有跟随」的真正原因。
             //
             // 这里恢复为 getVisualPosition()（与 0.9.21 一致）。
+            // 【Ctrl+滚轮改字号 → 光标纵向漂移】几何指纹校验，必须在快速路径判定【之前】。
+            //
+            // 快速路径只看「行号 + 列号 + 文档修改戳」。Ctrl+滚轮缩放时这三样
+            // 一样都没变，于是它判定「没动」并早退 —— 但行高变了，光标本该在
+            // 屏幕上重新落位。早退后 cp.y 与 lineHeight 都不重读，覆盖层继续按
+            // 旧行高的旧坐标画，用户看到的就是「光标纵向漂移」。
+            //
+            // 【为什么用局部变量而不是直接置 forceResync】
+            // 下面 :1413 有一句 `forceResync = false;`（「已进入慢路径，标志使命完成」），
+            // 它会把这里置位一笔勾销 —— 实测过，那样改完全无效（VFontScale 三红）。
+            // 字号判据只关心「本帧要不要走快速路径」，不该跟 forceResync 的生命周期纠缠。
+            //
+            // 放在这里而不是循环内：它只读一个 int，且 getLineHeight() 不在
+            // P0-5 / A9b~A9d 的昂贵调用名单上（那几条只管 getOffset /
+            // visualPositionToXY / offsetToXY），满足快速路径帧的调用约束。
+            int currentLineHeight = editor.getLineHeight();
+            boolean fontScaleChanged = lastLineHeight != -1 && currentLineHeight != lastLineHeight;
+            if (fontScaleChanged) {
+                CursorDiag.fontScaleResync(lastLineHeight, currentLineHeight);
+            }
+            lastLineHeight = currentLineHeight;
+
             VisualPosition vp = editor.getCaretModel().getVisualPosition();
-            if (!forceResync && cameraTrail != null && cameraTrail.isInitialized()
+            if (!forceResync && !fontScaleChanged
+                    && cameraTrail != null && cameraTrail.isInitialized()
                     && cameraTrail.isAt(vp.line, vp.column,
                             editor.getDocument().getModificationStamp())) {
                 // 【多光标补充】主光标没变，但光标集合可能变了（Alt+拖拽新增、
@@ -1487,7 +1530,15 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 已恢复为「每行一条线」。
             //
             // 第二轮的「前三个慢后三个快」是 startFrom 造成的（已修：块选区不 startFrom）。
-            int count = trailSlotCount(useBlock, blockStarts.length, carets.size());
+            // 【NPE 防守】useBlock 为 false 时 blockStarts 可能仍是 null ——
+            // 上面那个 try/catch 在 getBlockSelectionStarts() 抛异常（或
+            // getSelectionModel() 返回 null）时会让它停在初值 null，
+            // 而 useBlock 的判据正是「不为 null 且长度 > 1」。
+            // 直传 blockStarts.length 就是空指针（探针 VFontScale 实测复现）。
+            // 真实 IDEA 里 getBlockSelectionStarts() 承诺返回空数组而非 null，
+            // 所以线上没炸过；但这条路径没有契约保护，不该靠运气。
+            int count = trailSlotCount(useBlock,
+                    useBlock ? blockStarts.length : 0, carets.size());
             boolean changed = count != activeTrails.size();
 
             activeTrails.clear();
@@ -1640,7 +1691,11 @@ public class CaretAnimator implements Disposable, CaretListener {
 
                 // 快速路径：视觉位置 + 文档修改戳都没变就跳过坐标换算。
                 // resync / forceResync 时强制重算全部光标。
+                //
+                // 【字号变化也必须算进来】Ctrl+滚轮缩放时 line/column/stamp 全不变，
+                // 但行高变了 —— cp.y 与 height 都得重算。详见 fontScaleChanged 的说明。
                 boolean needsUpdate = forceResync
+                        || fontScaleChanged
                         || !trail.isInitialized()
                         || !trail.isAt(cvp.line, cvp.column, stamp);
 

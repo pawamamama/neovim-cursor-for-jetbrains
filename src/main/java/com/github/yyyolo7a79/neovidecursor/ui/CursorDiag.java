@@ -179,6 +179,25 @@ eovide-cursor-diag.log}
      * @param offset 当前 caret offset
      * @param offX   offsetToXY 给出的 x（与 vpX 不同才会走到这里）
      */
+    /**
+     * 行高变化触发的强制重同步（Ctrl+滚轮缩放字号）。
+     *
+     * <p><b>为什么值得记一行</b>：这条判据命中说明「快速路径差点把光标留在旧位置」。
+     * 若日志出现大量本行，说明字号在频繁变化；若用户报漂移却<b>没有</b>本行，
+     * 说明问题不在字号判据上，要去查别处 —— 与本项目既有的
+     * {@link #imeSkipPicked} 同一套排查思路。
+     *
+     * @param fromLineHeight 变化前的行高
+     * @param toLineHeight   变化后的行高
+     */
+    static void fontScaleResync(int fromLineHeight, int toLineHeight) {
+        if (!enabled()) {
+            return;
+        }
+        LOG.info("[font-scale] 行高 " + fromLineHeight + " -> " + toLineHeight
+                + "，强制重算光标几何");
+    }
+
     static void imeSkipPicked(int skipN, int vpX, int offset, int offX) {
         if (!enabled()) {
             return;
