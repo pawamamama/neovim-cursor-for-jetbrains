@@ -88,13 +88,50 @@ public final class SettingsField {
      */
     public final boolean inPreset;
 
+    /**
+     * 是否是「运行环境开关」—— 恢复自定义预设时<b>必须跳过</b>。
+     *
+     * <p>从本次重构起，这个判断从 {@code RUNTIME_SWITCH_KEYS} 字符串数组搬到了
+     * 字段自己身上：加字段时标志就写在它那一行旁边，忘不掉，也拼不错。
+     *
+     * <p><b>判定标准</b>：这个字段改变的是「光标长什么样」，还是「插件怎么跑 /
+     * 在什么设备上跑」？后者一律为 {@code true}。
+     * 按此标准，{@code cursorWidthPx（光标宽度）} 与 {@code cursorHeightRatio（高度比例）}
+     * 虽然影响观感，但它们跟着<b>屏幕 / 字体</b>走而不是跟着<b>风格</b>走 ——
+     * 换机器该保持，所以仍是 {@code true}。
+     *
+     * <p><b>为什么必须跳过</b>：快照整份还原会造成
+     * <ul>
+     *   <li>{@code enabled} —— 快照里 {@code false} 时，点一下预设<b>把整个插件关掉</b>；
+     *       反向则把已经关掉的插件点开</li>
+     *   <li>{@code hideNativeCaret} —— 改写 IDEA 全局配色方案（不可逆、会落盘）</li>
+     *   <li>{@code targetFps} —— 带白名单 setter（只收 125 / 144），
+     *       恢复时会把历史值静默改成 125</li>
+     * </ul>
+     * 内置预设路径（{@code applyAnimPresetFields}）从不碰这些字段，两条路径语义必须一致。
+     *
+     * <p><b>历史</b>：0.9.87 之前这份清单只有 4 项（{@code enabled} /
+     * {@code hideNativeCaret} / {@code trailMode} / {@code alwaysHighFps}），
+     * 是从 {@code CursorPresetApplier} 的硬写清单原样搬过来时没按同一标准重新审视，
+     * 漏了 5 个设备级字段 —— 切自定义预设会把用户的帧率和光标尺寸一起改掉。
+     * 补到 9 项修好了，但「两份清单各自维护」的病根还在，于是有了本次重构。
+     *
+     * <p><b>不在本清单里的三个颜色字段</b>（{@code tailColor} / {@code shadowColor} /
+     * {@code rgbGradient}）是另一回事：它们属于<b>颜色预设</b>域。目前它们同时在
+     * {@code inPreset} 里，导致自定义<b>动画</b>预设也会写它们 —— 这是已知的机制重叠
+     * （见 docs/PARAMETER-MAP.md），暂不改，因为改了会破坏
+     * 「自定义预设恢复全部观感」的预期。
+     */
+    public final boolean runtimeSwitch;
+
     private SettingsField(String key, Kind kind,
                           Function<NeovideCursorSettings.State, Object> getState,
                           BiConsumer<NeovideCursorSettings.State, Object> setState,
                           Function<NeovideConfig, Object> getConfig,
                           BiConsumer<NeovideConfig, Object> setConfig,
                           BiPredicate<Object, Object> same,
-                          boolean syncsToConfig, boolean inPreset) {
+                          boolean syncsToConfig, boolean inPreset,
+                          boolean runtimeSwitch) {
         this.key = key;
         this.kind = kind;
         this.getState = getState;
@@ -104,6 +141,7 @@ public final class SettingsField {
         this.same = same;
         this.syncsToConfig = syncsToConfig;
         this.inPreset = inPreset;
+        this.runtimeSwitch = runtimeSwitch;
     }
 
     /** 两个 {@code State} 在这个字段上是否不同。 */
@@ -307,18 +345,32 @@ public final class SettingsField {
     }
 
     // ==================== 工厂 ====================
+    //
+    // 每个工厂有两版：
+    //   · 6 参数版 —— 非「运行环境开关」字段用，runtimeSwitch 由内部填 false
+    //   · 7 参数版 —— 运行环境开关字段用，末尾多一个 runtimeSwitch=true
+    // 这样 17 个普通字段的调用点一字不动，diff 与审计面都更小。
 
     private static SettingsField bools(String key,
                                        Function<NeovideCursorSettings.State, Boolean> gs,
                                        BiConsumer<NeovideCursorSettings.State, Boolean> ss,
                                        Function<NeovideConfig, Boolean> gc,
                                        BiConsumer<NeovideConfig, Boolean> sc) {
+        return bools(key, gs, ss, gc, sc, false);
+    }
+
+    private static SettingsField bools(String key,
+                                       Function<NeovideCursorSettings.State, Boolean> gs,
+                                       BiConsumer<NeovideCursorSettings.State, Boolean> ss,
+                                       Function<NeovideConfig, Boolean> gc,
+                                       BiConsumer<NeovideConfig, Boolean> sc,
+                                       boolean runtimeSwitch) {
         return new SettingsField(key, Kind.BOOL,
                 s -> gs.apply(s), (s, v) -> ss.accept(s, (Boolean) v),
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (Boolean) v),
                 (a, b) -> ((Boolean) a).booleanValue() == ((Boolean) b).booleanValue(),
-                gc != null, true);
+                gc != null, true, runtimeSwitch);
     }
 
     private static SettingsField ints(String key,
@@ -326,12 +378,21 @@ public final class SettingsField {
                                       BiConsumer<NeovideCursorSettings.State, Integer> ss,
                                       Function<NeovideConfig, Integer> gc,
                                       BiConsumer<NeovideConfig, Integer> sc) {
+        return ints(key, gs, ss, gc, sc, false);
+    }
+
+    private static SettingsField ints(String key,
+                                      Function<NeovideCursorSettings.State, Integer> gs,
+                                      BiConsumer<NeovideCursorSettings.State, Integer> ss,
+                                      Function<NeovideConfig, Integer> gc,
+                                      BiConsumer<NeovideConfig, Integer> sc,
+                                      boolean runtimeSwitch) {
         return new SettingsField(key, Kind.INT,
                 s -> gs.apply(s), (s, v) -> ss.accept(s, (Integer) v),
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (Integer) v),
                 (a, b) -> ((Integer) a).intValue() == ((Integer) b).intValue(),
-                gc != null, true);
+                gc != null, true, runtimeSwitch);
     }
 
     private static SettingsField floats(String key,
@@ -339,12 +400,21 @@ public final class SettingsField {
                                         BiConsumer<NeovideCursorSettings.State, Float> ss,
                                         Function<NeovideConfig, Float> gc,
                                         BiConsumer<NeovideConfig, Float> sc) {
+        return floats(key, gs, ss, gc, sc, false);
+    }
+
+    private static SettingsField floats(String key,
+                                        Function<NeovideCursorSettings.State, Float> gs,
+                                        BiConsumer<NeovideCursorSettings.State, Float> ss,
+                                        Function<NeovideConfig, Float> gc,
+                                        BiConsumer<NeovideConfig, Float> sc,
+                                        boolean runtimeSwitch) {
         return new SettingsField(key, Kind.FLOAT,
                 s -> gs.apply(s), (s, v) -> ss.accept(s, (Float) v),
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (Float) v),
                 (a, b) -> Float.compare((Float) a, (Float) b) == 0,
-                gc != null, true);
+                gc != null, true, runtimeSwitch);
     }
 
     private static SettingsField hexColors(String key,
@@ -352,12 +422,21 @@ public final class SettingsField {
                                            BiConsumer<NeovideCursorSettings.State, String> ss,
                                            Function<NeovideConfig, String> gc,
                                            BiConsumer<NeovideConfig, String> sc) {
+        return hexColors(key, gs, ss, gc, sc, false);
+    }
+
+    private static SettingsField hexColors(String key,
+                                           Function<NeovideCursorSettings.State, String> gs,
+                                           BiConsumer<NeovideCursorSettings.State, String> ss,
+                                           Function<NeovideConfig, String> gc,
+                                           BiConsumer<NeovideConfig, String> sc,
+                                           boolean runtimeSwitch) {
         return new SettingsField(key, Kind.HEX,
                 s -> gs.apply(s), (s, v) -> ss.accept(s, (String) v),
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (String) v),
                 (a, b) -> a == null ? b == null : ((String) a).equalsIgnoreCase((String) b),
-                gc != null, true);
+                gc != null, true, runtimeSwitch);
     }
 
     private static SettingsField enums(String key,
@@ -365,12 +444,21 @@ public final class SettingsField {
                                        BiConsumer<NeovideCursorSettings.State, NeovideConfig.TrailMode> ss,
                                        Function<NeovideConfig, NeovideConfig.TrailMode> gc,
                                        BiConsumer<NeovideConfig, NeovideConfig.TrailMode> sc) {
+        return enums(key, gs, ss, gc, sc, false);
+    }
+
+    private static SettingsField enums(String key,
+                                       Function<NeovideCursorSettings.State, NeovideConfig.TrailMode> gs,
+                                       BiConsumer<NeovideCursorSettings.State, NeovideConfig.TrailMode> ss,
+                                       Function<NeovideConfig, NeovideConfig.TrailMode> gc,
+                                       BiConsumer<NeovideConfig, NeovideConfig.TrailMode> sc,
+                                       boolean runtimeSwitch) {
         return new SettingsField(key, Kind.ENUM,
                 s -> gs.apply(s), (s, v) -> ss.accept(s, (NeovideConfig.TrailMode) v),
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (NeovideConfig.TrailMode) v),
                 (a, b) -> a == b,
-                gc != null, true);
+                gc != null, true, runtimeSwitch);
     }
 
     /** 预设基准下标：参与 apply / 判脏，但<b>不进快照</b>（它是「选中了谁」的指针）。 */
@@ -379,7 +467,9 @@ public final class SettingsField {
                 s -> s.animPresetBase, (s, v) -> s.animPresetBase = (Integer) v,
                 null, null,
                 (a, b) -> ((Integer) a).intValue() == ((Integer) b).intValue(),
-                false, false);
+                false, false,
+                // 指针既不进快照，也不属于「运行环境开关」—— 两个标志都为 false。
+                false);
     }
 
     // ==================== 表本体 ====================
@@ -394,18 +484,18 @@ public final class SettingsField {
         List<SettingsField> out = new ArrayList<>();
 
         out.add(bools("enabled", s -> s.enabled, (s, v) -> s.enabled = v,
-                c -> c.enabled, (c, v) -> c.enabled = v));
+                c -> c.enabled, (c, v) -> c.enabled = v, true));
         out.add(enums("trailMode", s -> s.trailMode, (s, v) -> s.trailMode = v,
-                c -> c.trailMode, (c, v) -> c.trailMode = v));
+                c -> c.trailMode, (c, v) -> c.trailMode = v, true));
         out.add(bools("hideNativeCaret", s -> s.hideNativeCaret, (s, v) -> s.hideNativeCaret = v,
-                c -> c.hideNativeCaret, (c, v) -> c.hideNativeCaret = v));
+                c -> c.hideNativeCaret, (c, v) -> c.hideNativeCaret = v, true));
         out.add(bools("alwaysHighFps", s -> s.alwaysHighFps, (s, v) -> s.alwaysHighFps = v,
-                c -> c.alwaysHighFps, (c, v) -> c.alwaysHighFps = v));
+                c -> c.alwaysHighFps, (c, v) -> c.alwaysHighFps = v, true));
         // 【0.9.76 新增 targetFps】只允许 125 / 144 两个值。
         // 写入时做白名单校验，避免手改 XML 塞进 240（那个档位实测达不到）。
         out.add(ints("targetFps", s -> s.targetFps,
                 (s, v) -> s.targetFps = (v == 144) ? 144 : 125,
-                null, null));
+                null, null, true));
         // 斜度（slopeTicks）：0..100，越界回落到 State 的默认值 0（纯矩形拉伸，不斜）。
         // 回落目标必须与 State 默认一致 —— 原来回落 100，而 State 默认已改成 0，
         // 两者不一致会让「手改 XML 塞个坏值」的用户得到一个和全新安装不同的观感。
@@ -423,18 +513,18 @@ public final class SettingsField {
         // CONFIG 两个映射传 null：它不需要进 NeovideConfig
         // （CursorDiag 直接读 State）。
         out.add(bools("diagLogging", s -> s.diagLogging, (s, v) -> s.diagLogging = v,
-                null, null));
+                null, null, true));
 
         // 【多光标不辉光】同样是「只进 State、不进 CONFIG」的运行期开关 ——
         // CONFIG 里没有对应字段（生效逻辑在 CaretAnimator 里读 State）。
         out.add(bools("multiCursorNoGlow", s -> s.multiCursorNoGlow,
-                (s, v) -> s.multiCursorNoGlow = v, null, null));
+                (s, v) -> s.multiCursorNoGlow = v, null, null, true));
 
         // 【光标尺寸】只进 State（绘制时读 State，不进 CONFIG）
         out.add(ints("cursorWidthPx", s -> s.cursorWidthPx,
-                (s, v) -> s.cursorWidthPx = v, null, null));
+                (s, v) -> s.cursorWidthPx = v, null, null, true));
         out.add(floats("cursorHeightRatio", s -> s.cursorHeightRatio,
-                (s, v) -> s.cursorHeightRatio = v, null, null));
+                (s, v) -> s.cursorHeightRatio = v, null, null, true));
         out.add(bools("rgbGradient", s -> s.rgbGradient,
                 (s, v) -> s.rgbGradient = v, null, null));
         out.add(ints("cursorDisappearDelay", s -> s.cursorDisappearDelay, (s, v) -> s.cursorDisappearDelay = v,
@@ -583,85 +673,29 @@ public final class SettingsField {
     }
 
     /**
-     * 同 {@link #restore}，但<b>跳过指定的键</b>。
+     * 同 {@link #restore}，但<b>跳过所有「运行环境开关」字段</b>。
      *
-     * <p><b>为什么需要它（第三轮审查 ②，high）</b>：自定义预设快照存的是全部 19 个参数，
-     * 其中包含 {@code enabled} / {@code hideNativeCaret} / {@code trailMode} /
-     * {@code alwaysHighFps} 这四个<b>运行环境开关</b>。
-     *
-     * <p>直接整份 restore 会造成：
+     * <p><b>为什么需要它（第三轮审查 ②，high）</b>：自定义预设快照存的是全部预设域参数，
+     * 其中包含 {@code enabled} / {@code hideNativeCaret} / {@code trailMode} 这类
+     * <b>运行环境开关</b>。直接整份 restore 会造成：
      * <ul>
      *   <li>快照里 {@code enabled=false} → 点一下预设<b>把整个插件关掉</b>；</li>
      *   <li>反向：已经关掉的插件被点开；</li>
      *   <li>{@code hideNativeCaret} 被改动会写 IDEA 配色方案（不可逆副作用）。</li>
      * </ul>
      *
-     * <p>而内置预设路径（{@code applyAnimPreset}）<b>从不碰</b>这四个字段 ——
+     * <p>而内置预设路径（{@code applyAnimPreset}）<b>从不碰</b>这些字段 ——
      * 两条路径语义必须一致，否则「切内置预设安全、切自定义预设危险」。
      *
-     * @param skip 要跳过的字段 key（可变参数，null 安全）
+     * <p><b>跳过哪些</b>由字段自身的 {@link #runtimeSwitch} 决定，判定标准与历史见该字段的 javadoc。
+     * 本次重构前是一份独立的 {@code RUNTIME_SWITCH_KEYS} 字符串数组，与字段表分家维护，
+     * 漏过一次 5 个字段 —— 现在判断跟字段定义同处一行，不可能再漂移。
+     *
      * @return 成功写入的字段数
      */
-    /**
-     * 「运行环境开关」字段 —— 恢复自定义预设时<b>必须跳过</b>。
-     *
-     * <p><b>为什么提成常量</b>：原来这份清单硬写在
-     * {@code CursorPresetApplier} 里，而设置面板那条路径忘了跳过 ——
-     * 于是「Tools 菜单切预设安全、设置面板切预设会把插件关掉」。
-     * 两条路径必须用同一份清单，否则迟早再漂移一次。
-     *
-     * <p><b>这些字段为什么不能进预设快照</b>：
-     * <ul>
-     *   <li>{@code enabled} —— 快照里 false 时，切到该预设会把整个插件关掉</li>
-     *   <li>{@code hideNativeCaret} —— 会改写 IDEA 全局配色方案（不可逆、会落盘）</li>
-     *   <li>{@code trailMode} / {@code alwaysHighFps} —— 性能策略，不是观感</li>
-     * </ul>
-     * 内置预设路径（{@code applyAnimPresetFields}）从不碰这几个，所以自定义路径也必须一致。
-     *
-     * <p><b>【0.9.87 补齐 5 项】</b>
-     *
-     * <p>上一版只有 4 项，是「从 CursorPresetApplier 的硬写清单提成常量」时原样搬过来的，
-     * 没有回头按同一标准重新审视。核实后发现另有 5 个字段同样属于「设备/环境级」：
-     * <ul>
-     *   <li>{@code targetFps} —— 跟屏幕刷新率绑定。而且它带白名单 setter
-     *       （只接受 125/144），恢复时会把历史值静默改成 125</li>
-     *   <li>{@code cursorWidthPx} —— State 注释明写「设备级设置，不进预设」</li>
-     *   <li>{@code cursorHeightRatio} —— 同上，与字形/字号相关</li>
-     *   <li>{@code diagLogging} —— 排查开关，长期开会撑大 idea.log，不是观感</li>
-     *   <li>{@code multiCursorNoGlow} —— State 注释明写「不随预设变化」</li>
-     * </ul>
-     *
-     * <p><b>判定标准</b>：这个字段改变的是「光标长什么样」，还是「插件怎么跑 / 在什么设备上跑」？
-     * 后者一律进本清单。按此标准，{@code cursorWidthPx} 与 {@code cursorHeightRatio}
-     * 虽然影响观感，但它们跟着**屏幕/字体**走而不是跟着**风格**走 —— 换机器该保持，
-     * 所以仍在清单内。
-     *
-     * <p><b>不在清单里的三个颜色字段</b>（{@code tailColor} / {@code shadowColor} /
-     * {@code rgbGradient}）是另一回事：它们属于**颜色预设**域，由颜色预设路径写。
-     * 目前它们同时在 {@code inPreset} 里，导致自定义**动画**预设也会写它们 ——
-     * 这是已知的机制重叠（见 docs/PARAMETER-MAP.md），暂不改，因为改了会破坏
-     * 「自定义预设恢复全部观感」的预期。
-     */
-    public static final String[] RUNTIME_SWITCH_KEYS = {
-            // 全局开关 / 环境
-            "enabled", "hideNativeCaret", "trailMode", "alwaysHighFps",
-            // 0.9.87 补齐：设备级
-            "targetFps", "cursorWidthPx", "cursorHeightRatio",
-            "diagLogging", "multiCursorNoGlow"
-    };
-
-    public static int restoreSkipping(NeovideCursorSettings.State s, String snapshot,
-                                      String... skip) {
+    public static int restoreSkipping(NeovideCursorSettings.State s, String snapshot) {
         if (s == null || snapshot == null || snapshot.isEmpty()) {
             return 0;
-        }
-        java.util.Set<String> skipSet = new java.util.HashSet<>();
-        if (skip != null) {
-            for (String k : skip) {
-                if (k != null) {
-                    skipSet.add(k);
-                }
-            }
         }
         int applied = 0;
         for (String entry : snapshot.split(";")) {
@@ -674,12 +708,12 @@ public final class SettingsField {
                 continue;
             }
             String key = e.substring(0, eq).trim();
-            if (skipSet.contains(key)) {
-                continue;                   // 明确的运行环境开关：预设无权改动
-            }
             SettingsField f = byKey(key);
             if (f == null || !f.inPreset) {
                 continue;
+            }
+            if (f.runtimeSwitch) {
+                continue;                   // 运行环境开关：预设无权改动
             }
             if (f.decode(s, e.substring(eq + 1))) {
                 applied++;

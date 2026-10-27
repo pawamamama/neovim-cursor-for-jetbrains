@@ -1771,9 +1771,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 而 Tools 菜单那条路径（CursorPresetApplier）早已用 restoreSkipping 修过。
             // 两条路径语义必须一致，否则「菜单切预设安全、面板切预设危险」。
-            // 跳过清单统一放在 SettingsField.RUNTIME_SWITCH_KEYS，避免再次漂移。
-            SettingsField.restoreSkipping(pending, e.snapshot,
-                    SettingsField.RUNTIME_SWITCH_KEYS);
+            // 【runtimeSwitch 重构】跳过清单已搬进字段自身（f.runtimeSwitch），
+            // 调用方不再传数组，两条路径也不可能再各自维护一份。
+            SettingsField.restoreSkipping(pending, e.snapshot);
             pending.animCustomName = e.name;
         }
         syncAllControlsFromPending();
