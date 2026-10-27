@@ -8,7 +8,7 @@
 |---|---|
 | 分支 | `claude/d0-gate-probe-status-caadda` |
 | D0 门禁 | **exit=0 PASS** |
-| 全量探针 | **89 个 / 8 个未通过 / 81 个通过**（基线 88/8，新增 VFontScale 全绿） |
+| 全量探针 | **89 个 / 8 个未通过 / 断言 FAIL 31→26**（新增 VFontScale 全绿，VDefects 6→1） |
 | 已装 jar | **未改动**（R3：本晚不产出、不安装） |
 
 ### 已完成
@@ -17,8 +17,8 @@
 |---|---|---|
 | 1 | **Ctrl+滚轮改字号 → 光标纵向漂移**（用户报告） | ✅ 已修 `8d3e787` |
 | 2 | F7 取代证明文档 | ✅ `docs/F7-SUPERSEDED.md` |
-| 3 | VDefects 断言改方向 | ⬜ 未开始 |
-| 4 | VSnap 诊断（不改断言） | ⬜ 未开始 |
+| 3 | VDefects 断言改方向 | ✅ `e7eeec8`（FAIL 6→1） |
+| 4 | VSnap 诊断（不改断言） | ✅ `e7eeec8` + [docs/VSNAP-DIAGNOSIS.md](docs/VSNAP-DIAGNOSIS.md) |
 
 ### 任务 1（漂移）的关键发现
 
@@ -47,12 +47,23 @@
 ### 基线数字（用于控变量对比）
 
 ```
-2026-10-26 实测：87 个探针 / 8 个未通过 / 79 个通过
-2026-10-27 实测：89 个探针 / 8 个未通过 / 81 个通过（+VFontScale 5 绿）
-未通过始终是这 8 个：VDefects(6) VSnap(10) VTools(1) VHints(1) VCustom(1)
+2026-10-26 实测：87 个探针 / 8 个未通过 / 总 FAIL 31
+2026-10-27 实测：89 个探针 / 8 个未通过 / 总 FAIL 26
+  +VFontScale（5 条全绿，新加）
+  VDefects FAIL 6 → 1（V11-3b 与 VSnap 同源，已归入诊断报告）
+未通过始终是这 8 个：VDefects(1) VSnap(10) VTools(1) VHints(1) VCustom(1)
                       VReset2(2) VSepBound(7) VSleep(1)
 另有 VRegr2 为红（FAIL=2 + NPE 崩溃）但脚本归入 informational，不计入 8
 ```
+
+### 留给用户的决定（下一步）
+
+**`cursorHeightRatio` 请求 65 → 实际 60。** 65 距 60 和 70 并列，
+当前 `snapToTick` 不做顺便取整，JSlider 默认向下取。两种选择：
+- 认为「滑块就该吸附整十」→ 现在是对的，只需改探针期望
+- 认为「我设 65 就该 65」→ 需改 `snapToTick` 的就近取整逻辑（属观感，R1 范围）
+
+详见 [docs/VSNAP-DIAGNOSIS.md](docs/VSNAP-DIAGNOSIS.md) 第五节。
 
 ---
 
