@@ -109,11 +109,11 @@ public final class CursorPresetApplier {
         // 实测：快照里 enabled=false 时点该预设会把插件整体关掉；
         // 反向会把已经关掉的插件打开；hideNativeCaret 还会触发配色方案的不可逆写入。
         //
-        // 内置预设路径（applyAnimPreset）从不碰这四个字段，所以自定义路径也必须一致。
+        // 内置预设路径（applyAnimPreset）从不碰这些字段，所以自定义路径也必须一致。
         // 这四个是「运行环境开关」，不是「观感参数」—— 不该被预设快照带走。
-        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.restoreSkipping(
-                s, snap,
-                com.github.yyyolo7a79.neovidecursor.settings.SettingsField.RUNTIME_SWITCH_KEYS);
+        // 【runtimeSwitch 重构】跳过清单已搬进字段自身（f.runtimeSwitch），
+        // 调用方不再传数组 —— 判定标准见 SettingsField.runtimeSwitch 的 javadoc。
+        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.restoreSkipping(s, snap);
         s.animCustomName = name;
         svc.persistQuietly();
         NeovideCaretManager.applyConfig();

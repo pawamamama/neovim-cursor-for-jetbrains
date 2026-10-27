@@ -96,11 +96,18 @@ public final class VLoadState {
                 svc3.getState().animPresetBase == CursorPresets.ANIM_PRESET_DEFAULT_INDEX,
                 "读回 = " + svc3.getState().animPresetBase);
 
-        // L-5：运行期开关跳跃清单必须存在且非空（供两条 restore 路径共用）
-        check("L-5 SettingsField.RUNTIME_SWITCH_KEYS 已定义（两条 restore 路径共用）",
-                SettingsField.RUNTIME_SWITCH_KEYS != null
-                        && SettingsField.RUNTIME_SWITCH_KEYS.length >= 4,
-                "清单 = " + java.util.Arrays.toString(SettingsField.RUNTIME_SWITCH_KEYS));
+        // L-5：恢复自定义预设时必须跳过的「运行环境开关」清单必须存在且完整。
+        // 【runtimeSwitch 重构】判据从 RUNTIME_SWITCH_KEYS 字符串数组改成
+        // SettingsField.runtimeSwitch 字段标志 —— 清单现在长在字段自己身上。
+        int runtimeCount = 0;
+        for (SettingsField f : SettingsField.FIELDS) {
+            if (f.runtimeSwitch) {
+                runtimeCount++;
+            }
+        }
+        check("L-5 SettingsField.runtimeSwitch 已标注（9 项，两条 restore 路径共用）",
+                runtimeCount == 9,
+                "带 runtimeSwitch 标志的字段 = " + runtimeCount + " 项");
 
         System.out.println();
         System.out.printf("=== V-LOAD-STATE 结果：PASS %d，FAIL %d ===%n", pass, fail);
