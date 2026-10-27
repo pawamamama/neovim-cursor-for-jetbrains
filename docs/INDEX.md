@@ -1,9 +1,10 @@
 # 文档索引
 
-> 本项目有 40+ 个 md 文件，其中大部分是历史留痕。
+> 本项目有 **103 个** md 文件（根 9 + docs 28 + docs/design 37 + docs/archive 29，另加 plans 2 个），
+> 其中大部分是历史留痕。
 > **只读这张表标记为「必读」的，其他按需查。**
 >
-> 最后更新：v0.9.87 / 2026-10-25
+> 最后更新：v0.9.93 / 2026-10-27
 
 ---
 
@@ -11,10 +12,10 @@
 
 | 文档 | 行数 | 内容 |
 |---|---|---|
-| [START-HERE.md](../START-HERE.md) | 205 | **唯一的状态入口**。现状 / 门禁 / 地形 / 能做什么不能做什么 |
-| [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | 570 | **动手前必读**。12 条纪律 + 本项目踩过的所有坑 |
-| [PARAMETER-MAP.md](PARAMETER-MAP.md) | 165 | 每个参数是否跟随预设，含字段归属表 |
-| [NEXT-STEPS.md](NEXT-STEPS.md) | 150 | 当前状态 / 已完成 / 已放弃 / 待办 |
+| [START-HERE.md](../START-HERE.md) | 215 | **唯一的状态入口**。现状 / 门禁 / 地形 / 能做什么不能做什么 |
+| [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | 741 | **动手前必读**。14 条纪律 + 本项目踩过的所有坑 |
+| [PARAMETER-MAP.md](PARAMETER-MAP.md) | 164 | 每个参数是否跟随预设，含字段归属表 |
+| [NEXT-STEPS.md](NEXT-STEPS.md) | 163 | 当前状态 / 已完成 / 已放弃 / 待办 |
 
 ---
 
@@ -22,20 +23,22 @@
 
 | 任务 | 文档 | 行数 |
 |---|---|---|
-| 改物理 / rank / 斜度 | [design/RANK-COLLAPSE-FIX.md](design/RANK-COLLAPSE-FIX.md) | 158 |
-| 对齐上游手感 | [design/UPSTREAM-VSCODE-RESEARCH.md](design/UPSTREAM-VSCODE-RESEARCH.md) | 168 |
-| 改颜色 / 渐变 / 彩虹 | [COLOR-STATE-DECISIONS.md](COLOR-STATE-DECISIONS.md) | 114 |
-| 优化性能（含已证伪方向） | [PERFORMANCE-FPS.md](PERFORMANCE-FPS.md) | 112 |
-| 理解 IDEA 平台限制 | [IDEA-PLATFORM-OPTIMIZATION.md](IDEA-PLATFORM-OPTIMIZATION.md) | 261 |
-| 发版 | [RELEASE-SAFETY.md](RELEASE-SAFETY.md) | 162 |
-| 接手这个项目 | [SKILL-neovide-cursor-plugin-handoff.md](SKILL-neovide-cursor-plugin-handoff.md) | 153 |
+| 改物理 / rank / 斜度 | [design/RANK-COLLAPSE-FIX.md](design/RANK-COLLAPSE-FIX.md) | 196 |
+| 对齐上游手感 | [design/UPSTREAM-VSCODE-RESEARCH.md](design/UPSTREAM-VSCODE-RESEARCH.md) | 165 |
+| 改颜色 / 渐变 / 彩虹 | [COLOR-STATE-DECISIONS.md](COLOR-STATE-DECISIONS.md) | 113 |
+| 优化性能（含已证伪方向） | [PERFORMANCE-FPS.md](PERFORMANCE-FPS.md) | 111 |
+| 理解 IDEA 平台限制 | [IDEA-PLATFORM-OPTIMIZATION.md](IDEA-PLATFORM-OPTIMIZATION.md) | 260 |
+| 发版 | [RELEASE-SAFETY.md](RELEASE-SAFETY.md) | 161 |
+| 接手这个项目 | [SKILL-neovide-cursor-plugin-handoff.md](SKILL-neovide-cursor-plugin-handoff.md) | 152 |
 | 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 146 |
-| 探针覆盖度怎么补回来的 | [DEAD-PROBE-CLEANUP.md](DEAD-PROBE-CLEANUP.md) | 83 |
-| **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 200 |
-| **连续输入时拖尾跳变的修复方案** | [TYPING-JITTER-PLAN.md](TYPING-JITTER-PLAN.md) | 290 |
-| VSnap 十条红的根因诊断 | [VSNAP-DIAGNOSIS.md](VSNAP-DIAGNOSIS.md) | 157 |
-| 分支该怎么整理（2026-10-27） | [BRANCH-AUDIT-20261027.md](BRANCH-AUDIT-20261027.md) | 280 |
-| **做 runtimeSwitch 重构（新会话交接）** | [HANDOFF-REFACTOR-RUNTIME-SWITCH.md](HANDOFF-REFACTOR-RUNTIME-SWITCH.md) | 320 |
+| 探针覆盖度怎么补回来的 | [DEAD-PROBE-CLEANUP.md](DEAD-PROBE-CLEANUP.md) | 82 |
+| **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 266 |
+| **设置系统重构分步方案** | [../plans/settings-refactor.md](../plans/settings-refactor.md) | 830 |
+| 清理清单与执行记录 | [../plans/cleanup-inventory.md](../plans/cleanup-inventory.md) | 222 |
+| **连续输入时拖尾跳变的修复方案** | [TYPING-JITTER-PLAN.md](TYPING-JITTER-PLAN.md) | 303 |
+| VSnap 十条红的根因诊断 | [VSNAP-DIAGNOSIS.md](VSNAP-DIAGNOSIS.md) | 178 |
+| 分支该怎么整理（2026-10-27） | [BRANCH-AUDIT-20261027.md](BRANCH-AUDIT-20261027.md) | 281 |
+| **做 runtimeSwitch 重构（新会话交接）** | [HANDOFF-REFACTOR-RUNTIME-SWITCH.md](HANDOFF-REFACTOR-RUNTIME-SWITCH.md) | 398 |
 
 ---
 

@@ -1,6 +1,6 @@
 # 开发档案 —— 从这里开始
 
-> **版本：v0.9.87** · 最后更新：2026-10-25 深夜
+> **版本：v0.9.93** · 最后更新：2026-10-27
 >
 > 这是本项目唯一的状态入口。如果你是新会话，读完这一页就知道该干什么。
 
@@ -12,12 +12,13 @@
 光标移动时不是简单平移，而是四角各自挂阻尼弹簧、按运动方向分配不同时长，
 把矩形拉成平行四边形 —— 视觉上就是「拖尾」，不是叠加残影。
 
-**技术栈**：Java 21，**无 Gradle**，`javac` 直接编译 + 手写 `plugin.xml`。
+**技术栈**：Java 21。日常用 `javac` 直接编译 + 手写 `plugin.xml`（快）；
+Gradle 也完整入库（`build.gradle.kts` / `gradlew` / `gradle/wrapper/`），需要平台构件时用它。**两条路径并存。**
 
-**规模**：
+**规模**（2026-10-27 实测）：
 ```
-生产代码   src/main/java/.../neovidecursor/   34 文件 / ~14k 行
-探针       tools/settings-probe/V*.java       83 个（74 通过）
+生产代码   src/main/java/.../neovidecursor/   34 文件 / 15,164 行
+探针       tools/settings-probe/*.java        106 文件 / 23,570 行（91 个 V*.java）
 基准程序   tools/bench/Bench*.java            16 个
 ```
 
@@ -35,8 +36,9 @@ git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/N
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools\\settings-probe\\build-v-probes.ps1
 ```
 
-**当前基线**：探针 74/83。9 个失败都是过期断言（`VSnap` / `VDefects` / `VSepBound` 等），
-见 §6，不算新问题。
+**当前基线**：探针 **6 红** —— `VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`。
+全是过期断言（不是功能故障），见 §6，不算新问题。
+（`VDefects` 与 `VSnap` 已于 2026-10-27 按「改方向不删断言」修绿。）
 
 ---
 

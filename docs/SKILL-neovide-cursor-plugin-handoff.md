@@ -128,14 +128,14 @@ applyAnimPresetFields 实写    13 个（给内置预设）
 ## 六、常用命令
 
 ```powershell
-# 编译（无 Gradle，直接 javac）
+# 编译（日常走 javac；Gradle 也已完整入库，需要平台构件时可用）
 $libs='D:\deepseekwork\_idea-anim\idea-libs'
 $cp=(Get-ChildItem -LiteralPath $libs -Filter '*.jar' | ForEach-Object { $_.FullName }) -join ';'
 Get-ChildItem -Recurse -File -Filter *.java 'src\main\java' | ForEach-Object { $_.FullName } | Set-Content build\v2-probe\srcs.txt
 javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\classes "@build\v2-probe\srcs.txt"
 
 # 打包 + 安装（会清空配置，先跟用户确认）
-pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.87 -NoStart
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.93 -NoStart
 ```
 
 ---

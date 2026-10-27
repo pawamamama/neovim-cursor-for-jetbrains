@@ -53,17 +53,19 @@ do not hold back on token usage.
 ```
 项目根目录   D:\deepseekwork\neovim-cursor-pr
 语言         Java 21
-构建         **无 Gradle** —— javac 直接编译 + 手写 plugin.xml
+构建         **两条路径并存**：① 日常用 javac 直接编译 + 手写 plugin.xml（快）
+             ② Gradle 也完整入库（build.gradle.kts / settings.gradle.kts /
+                gradlew / gradle/wrapper/），IDE 集成或需要平台构件时用它
 仓库         https://github.com/pawamamama/neovim-cursor-for-jetbrains
-分支         fix/f7-override-read（一直在这个分支，没有 main）
+分支         main（2026-10-27 起；此前长期在 fix/f7-override-read）
 ```
 
-## 规模（实测）
+## 规模（实测 · 2026-10-27）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    34 文件 / 15,053 行
-探针       tools/settings-probe/V*.java        90 文件 / 18,044 行
-基准       tools/bench/*.java                 16 文件
+生产代码   src/main/java/.../neovidecursor/    34 文件 / 15,164 行
+探针       tools/settings-probe/*.java        106 文件 / 23,570 行
+基准       tools/bench/*.java                  16 文件
 ```
 
 **探针比生产代码还多。** 这个项目的核心工作方式是「改任何行为都要有守门探针」。
@@ -82,23 +84,32 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 # 二、当前状态（用这组数字判断一切）
 
 ```
-版本         v0.9.89（本地已装）
-HEAD         6895655
-远程         fork/main = 6895655（同步）
+版本         v0.9.93（IDEA 里已装；读 jar 内 META-INF/plugin.xml 确认）
+             dist 最新 jar = 0.9.92（2026-10-27 06:46）
+             git tag 停在 v0.9.83 —— 0.9.84~0.9.93 共 10 个版本没打 tag
+HEAD         4bbbcfc（main）
+远程         fork/main 落后本地若干提交（2026-10-27 未推送）
 工作区       干净
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         87 个运行 / 8 个失败 / 79 个通过（那 8 个都是过期断言，不是功能故障）
+探针         91 个 V*.java / 6 个失败（那 6 个都是过期断言，不是功能故障）
 ```
 
-## 那 8 个失败的探针（**不要试图让它们变绿**）
+## 那 6 个失败的探针（**不要试图让它们变绿**）
 
 ```
-VDefects(6)  VSnap(10)  VTools(1)  VHints(1)
-VCustom(1)   VReset2(2) VSepBound(7)  VSleep(1)
+VTools(1)   VHints(1)   VCustom(1)
+VReset2(2)  VSepBound(7)  VSleep(1)
 ```
+
+> `VRegr2`（13 通过 / 2 失败）是 **informational**，不计入这 6 个。
 
 它们断言的是 0.9.7x 时代的行为，后来功能改了但断言没跟上。
 **修它们要做的是「改断言方向 + 写清为什么」，不是改代码迁就断言，更不是删断言。**
+
+> 【2026-10-27】`VDefects` 与 `VSnap` 已按此原则修绿：它们的 11 条红不是「过期断言」，
+> 而是**索引契约破裂** —— 探针用 `sliders.get(0)` / `textFields.get(8)` 定位控件，
+> 而面板渲染顺序改过后索引指向了别的字段。改成按 key 定位（`sliderByKey` + `textFieldOf`）
+> 后断言一字未改，双双全绿。**这是「改方向不删断言」的标准案例。**
 
 这是纪律二.6：**改方向不删断言。**
 
@@ -294,15 +305,31 @@ targetFps  cursorWidthPx  cursorHeightRatio  diagLogging  multiCursorNoGlow
 
 **规则**：文档里的数字要能复现。写之前先跑一遍。
 
-## 陷阱 13：注意 build/ 目录的 150+ 个一次性脚本
+## 陷阱 13：`build/` 下的一次性脚本（**只在主仓库磁盘上，未入库**）
 
-`build/*.ps1` 里有大量 `cb*.ps1` / `snap*.ps1` / `i5*.ps1` 之类的一次性排查脚本。
-**它们不是项目的一部分**，不要试图理解或维护。真正要用的只有：
+先分清两个地方（2026-10-27 实测）：
 
 ```
-build/install.ps1          打包 + 安装
+主仓库 D:\deepseekwork\neovim-cursor-pr\build\
+  207 MB / 14,609 文件 / 250 个顶层子目录
+  其中 145 个顶层 .ps1（cb* / snap* / i5* / inst* …）全是未跟踪的一次性脚本
+  ⚠️ 这批里 mut-*.ps1 会 Set-Content 覆写 core/NeovideConfig.java（D0 门禁文件）
+
+任何 worktree 的 build/
+  只有 20 个 git 跟踪的文件（见下），其余全是门禁产物
+```
+
+**入库的只有这几个，它们是资产：**
+
+```
+build/install.ps1          打包 + 安装（2026-10-27 才入库，此前从未进过 git）
 build/offline-build.ps1    只打包
+build/rollback-*.ps1 × 10  版本回退
+build/*.md                  release notes 与 issue 正文（8 个）
 ```
+
+`cb*.ps1` / `snap*.ps1` / `i5*.ps1` / `inst*.ps1` 那批**不是项目的一部分**，不要试图理解或维护。
+抽样确认它们全部写死了具体版本号 + 绝对路径 + AppData 路径，只在当时那台机器那个时刻有意义。
 
 ## 陷阱 14：D0 门禁不能破
 
@@ -516,9 +543,32 @@ docs/archive/  （整目录）
 · NEXT-STEPS 说「探针 72/82 通过」—— 那份脚本从没跑过
 · UPSTREAM 报告说 useHardSnap「可做、风险可控」—— 实测做不到
 · 多处文档说「辉光跟随光标」—— 从未存在过
+· 本文自己写「v0.9.89」，实际早已是 0.9.93（2026-10-27 才发现）
 ```
 
 **所以：任何数字，自己跑一遍再信。任何结论，找到证据再改。**
+
+## 状态数字的自检命令（写文档前必跑）
+
+**问题的根不是「数字错了」，是「没有东西阻止它再错」。**
+本项目已知至少 3 次「文档数字来自从未执行的脚本」，每次都是有人手抄了上一个数字。
+
+写「当前版本 / 探针数量 / 通过数」之前，跑这三条：
+
+```bash
+# ① 已装版本 —— 不要信文件名（恒为 0.9.8.jar，是加载机制要求），读 jar 内部
+unzip -p "$APPDATA/JetBrains/IntelliJIdea2026.1/plugins/neovide-cursor-pawamamama/lib/jetbrains-neovide-cursor-0.9.8.jar" META-INF/plugin.xml | grep -o "<version>[^<]*"
+
+# ② dist 里最新打的 jar
+ls -lt dist/*.jar | head -3
+
+# ③ 探针文件数 + 基线（唯一权威，看最后一行 RESULT）
+ls tools/settings-probe/V*.java | wc -l
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools/settings-probe/build-v-probes.ps1 -Repo <你的目录>
+```
+
+**还有一个已知缺口**：`git tag` 停在 `v0.9.83`，而实际已发到 0.9.93 —— 中间 10 个版本没有 tag。
+补 tag 需要逐个确认版本对应的 commit，是独立工作。**在那之前，不要用 tag 判断版本。**
 
 写完这份文档我核对时发现**自己写错两处**（探针通过数、两份文档行数），
 已修正。这不是谦虚 —— 是想说明这条规则的强度：
