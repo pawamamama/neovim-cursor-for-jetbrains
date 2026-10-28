@@ -566,7 +566,7 @@ public final class AnimationPreview extends JComponent {
                 break;
             case 1:                                  // 停顿结束 → 开始连续删
                 phase = 2;
-                setInterval(BACKSPACE_MS);
+                setInterval(jitter(BACKSPACE_MS));
                 break;
             case 2:                                  // 逐字退格
                 if (typed > 0) typed--;
@@ -579,7 +579,7 @@ public final class AnimationPreview extends JComponent {
                 chinese = !chinese;
                 phase = 0;
                 typed = 0;
-                setInterval(TYPE_MS);
+                setInterval(jitter(TYPE_MS));
                 break;
         }
 
@@ -691,6 +691,30 @@ public final class AnimationPreview extends JComponent {
 
     /** 跨行判定必然越过的字符数（> typingMaxChars=3 即可，取 99 表明"这是换行"） */
     private static final int CROSS_CHARS_MOVED = 99;
+
+    /**
+     * 打字 / 退格节奏的抖动源。
+     *
+     * <p><b>为什么需要（用户 2026-10-28）</b>：预览原本用固定间隔
+     * （打字 {@code TYPE_MS}、退格 {@code BACKSPACE_MS}）驱动，观感像机器在敲 ——
+     * 用户原话「实时预览不是真实打字删除的感觉」「节奏机械」。
+     * 真人打字的间隔是不均匀的，这里给它 ±30% 的抖动。
+     *
+     * <p><b>为什么用固定种子</b>：观感上一样随机（相邻间隔都不同），但序列可复现 ——
+     * 出问题时能重复看到同一个节奏，也方便以后写守门探针。
+     */
+    private final java.util.Random rhythmRandom = new java.util.Random(20261028L);
+
+    /**
+     * 给「打字 / 退格」的间隔加 ±30% 抖动。
+     *
+     * <p><b>只抖动这两处</b>：{@code HOLD_AFTER_TYPE_MS}（打完停顿）、
+     * {@code SWITCH_PAUSE_MS}（换语种）、{@code CROSS_MS}（跨行演示）保持恒定 ——
+     * 它们是演示的节拍点，随机化只会让人等得更烦。
+     */
+    private int jitter(int baseMs) {
+        return (int) Math.round(baseMs * (0.7 + rhythmRandom.nextDouble() * 0.6));
+    }
 
     private void setInterval(int ms) {
         if (ms == actionInterval || actionTimer == null) return;

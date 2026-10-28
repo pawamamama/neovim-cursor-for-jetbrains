@@ -287,18 +287,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     // 做法：预设区顶部一段总说明 + 两个可复用的标签常量。
     // **只给「不随预设」的项加标签**，随预设的默认不标（用户要求：随预设不用写）。
     //
-    // 说明文本走 DslLabel（JEditorPane，按 HTML 渲染），所以能用 <b>；
+    // 说明文本走 DslLabel（JEditorPane，按 HTML 渲染），所以能用 <b> 与 <font color>；
     // 换行必须写 <br/>（字面 \n 会被折叠成空格）。
     //
-    // 【为什么不用 <font color>】第一版给标签上了蓝灰/土黄两色，用户实测认为不对：
-    // ① 面板说明文字本来全是主题灰，突兀出现彩色反而像链接或警告；
-    //   ② IDE 的链接色是 #589DF6，蓝灰标签容易被当成可点；
-    //   ③ 深色/浅色主题下固定色号的对比度无法两全。
-    // 现在只用加粗方括号 —— 与正文靠「[ ] + 加粗」区分，主题无关。
+    // 颜色：用户 2026-10-28 确认「蓝色和橙色很好看」，保留。
+    // （中途我曾误以为「蓝色不对」= 不要彩色，去掉了两个标签的颜色，被用户纠正。）
+    // 选蓝灰/土黄而不是红绿：红绿在深色主题下容易与警告色混淆。
     /** 全局设置标签（设备开关 + 输入平滑）。 */
-    private static final String TAG_GLOBAL = "<b>[全局]</b> ";
+    private static final String TAG_GLOBAL =
+            "<font color=\"#6C8EBF\"><b>[全局]</b></font> ";
     /** 颜色预设域标签（拖尾色 / 辉光色 / 光标渐变）。 */
-    private static final String TAG_COLOR = "<b>[颜色预设]</b> ";
+    private static final String TAG_COLOR =
+            "<font color=\"#C08A3E\"><b>[颜色预设]</b></font> ";
 
     /** 预设区顶部的总说明。 */
     private static final String PRESET_SCOPE_HINT =
