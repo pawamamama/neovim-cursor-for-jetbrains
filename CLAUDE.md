@@ -60,13 +60,16 @@ do not hold back on token usage.
 分支         main（2026-10-27 起；此前长期在 fix/f7-override-read）
 ```
 
-## 规模（实测 · 2026-10-27）
+## 规模（实测 · 2026-10-28）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    34 文件 / 15,164 行
-探针       tools/settings-probe/*.java        106 文件 / 23,570 行
+生产代码   src/main/java/.../neovidecursor/    35 文件 / 16,166 行
+探针       tools/settings-probe/*.java        110 文件 / 24,657 行（95 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
+
+> 这几个数字与「状态块」一样，**改完代码就重新量一遍**，不要沿用上一版：
+> `ls tools/settings-probe/V*.java | wc -l`、`cat tools/settings-probe/*.java | wc -l`。
 
 **探针比生产代码还多。** 这个项目的核心工作方式是「改任何行为都要有守门探针」。
 
@@ -94,7 +97,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         94 个 V*.java（新增 VInlay / VFieldDomain / VBoot）/ **ALL PASS（0 失败）**
+探针         95 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck）/ **ALL PASS（0 失败）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）

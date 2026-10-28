@@ -41,6 +41,9 @@ $productInfo | Set-Content -Encoding UTF8 -LiteralPath (Join-Path $fakeHome 'pro
 $jvm = @(
     '-Dfile.encoding=UTF-8',
     '-Djava.awt.headless=true',
+    # 【2026-10-28】给 VDocCheck 用：它要读 CLAUDE.md / START-HERE.md / docs/NEXT-STEPS.md，
+    # 而 java 进程的 cwd 不一定是仓库根（脚本可能从别处被调用）。
+    "-Dneovide.repo=$repoRoot",
     "-Didea.home.path=$fakeHome",
     '--add-opens=java.desktop/javax.swing=ALL-UNNAMED',
     '--add-opens=java.desktop/java.awt=ALL-UNNAMED',
@@ -120,7 +123,10 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         'VFieldDomain',
         # 【BUG-007】首用诊断实测：不可见编辑器在 alwaysHighFps 下仍按 144fps 空转
         # （5 个隐藏标签页 = 720 次 EDT 任务/秒）。VBoot 守「不可见必须降到空闲档」。
-        'VBoot')
+        'VBoot',
+        # 【2026-10-28】把「文档里的状态数字」也纳入门禁：三处状态块版本一致、
+        # 探针数一致且等于磁盘实测、状态文档里不写死 commit hash。
+        'VDocCheck')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：
