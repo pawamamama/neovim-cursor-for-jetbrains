@@ -244,6 +244,10 @@ inlay 出现**之前**的 `cp.y` 绘制 → 屏幕上比真实位置高 1 个行
 （`VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`），
 逐字一致，没有新增红，也没有顺手去修它们。
 
+> **事后注（2026-10-28 晚）**：那 6 个已在同日后续一轮里全部修绿 —— 只改探针、生产代码零改动，
+> 门禁现为 `V-PROBES RESULT: ALL PASS`。本段保留当时的逐字输出作审计痕迹，
+> 不要据此认为它们现在还是红的；逐条根因见 `docs/NEXT-STEPS.md` §7.1.1。
+
 **D0**：`core/NeovideConfig.java` 零 diff。
 
 ### 仍未验证的部分（不要当成已修）
@@ -363,6 +367,9 @@ B-5 ≥ 120ms。断言调用 `CaretAnimatorProbe.hiddenTierDelayNs(...)`（生�
 名单仍是 `VTools / VHints / VCustom / VReset2 / VSepBound / VSleep`，逐字不变
 （`VRegr2` 2 红仍按 informational 不计入）。`VBoot` 5/5 绿。
 D0：`core/NeovideConfig.java` 零 diff。
+
+> **事后注（2026-10-28 晚）**：上面这份名单已在同日后续一轮修绿，门禁现为 `ALL PASS`；
+> 本段是 BUG-007 那一轮的门禁快照，保留原文不改。见 `docs/NEXT-STEPS.md` §7.1.1。
 
 ### 真机复验（0.9.100，2026-10-28 19:56 一次采集）
 

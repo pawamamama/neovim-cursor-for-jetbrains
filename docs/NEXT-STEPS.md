@@ -1,6 +1,6 @@
 # 下一步做什么
 
-> 状态：**v0.9.98 本地已装**（未发布）· 远端 fork/main 已同步 aaa1f1e · git tag 停在 0.9.83
+> 状态：**v0.9.102 本地已装**（未发布）· fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· git tag 停在 0.9.83
 > 本文最后更新：2026-10-27
 
 > ⚠️ **本文的数字曾长期失真，请勿直接采信或转抄。**
@@ -19,8 +19,8 @@
 | 版本 | **v0.9.98**（读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
 | dist 最新 jar | 0.9.92（2026-10-27 06:46） |
 | git tag | 停在 **v0.9.83**（0.9.84~0.9.98 缺 15 个，版本未发布） |
-| 探针文件 | **91 个 `V*.java`**（全部 .java 106 个） |
-| 探针基线 | **6 红**：`VTools` `VHints` `VCustom` `VReset2` `VSepBound` `VSleep` |
+| 探针文件 | **94 个 `V*.java`**（全部 .java 109 个，2026-10-28 实测） |
+| 探针基线 | **ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针，见 §7.1 第 1 项 |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
 | PhysicsParity | PASS |
 | 生产代码 | **15,164 行 / 34 文件** |
@@ -166,7 +166,7 @@ TR（前缘单角）   2.11     7.43    11.58
 **改完还要做的事**：
 - `VDefaultFreeze` 的金表逐字段登记（不加就红，那是契约变更，不是缺陷）；
 - 若三档预设的**字段集合**没变（只是数值变），`VPreset` 的字段数断言（30）不用动；
-- 跑全量门禁，确认 6 红名单没变（`VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`）。
+- 跑全量门禁，确认基线仍是 `ALL PASS`（2026-10-28 起 0 红；此前的「6 红名单」已全部修绿，见 §7.1.1）。
 
 **当前状态：用户调参中，数值尚未提供。不要凭猜测写入任何数字。**
 
@@ -250,7 +250,7 @@ TR（前缘单角）   2.11     7.43    11.58
 
 | # | 项 | 位置 | 备注 |
 |---|---|---|---|
-| 1 | 6 个过期断言探针仍红：`VTools / VHints / VCustom / VReset2 / VSepBound / VSleep` | `tools/settings-probe/` | 需「改断言方向 + 写清为什么」，不是改代码迁就断言（§四） |
+| 1 | ✅ **已完成 2026-10-28**：6 个过期断言探针全部修绿 —— `VTools / VHints / VCustom / VReset2 / VSepBound / VSleep` | `tools/settings-probe/` | 只改探针、**生产代码零改动**；门禁 `V-PROBES RESULT: ALL PASS`（另有一次独立复跑核对，非本人自证）。逐条根因与修法见 §7.1.1。提交号见 `git log -1` |
 | 2 | 旧 `[trail]` 日志仍是「每 15 次慢路径一条、无上限」 | `CaretAnimator.tickSpring` | 本轮新增的 trace 已有 5000 行上限 + `[clear]` 去重，**旧行未动** |
 | 3 | 「半边拖尾」开关（`leadingSnap`，默认关） | 5 个落点见 §四-B | 用户已决定形态，但**先不做** |
 | 4 | 三版基础预设的最终手感数值落库 | `CursorPresets.ANIM_PRESETS` + `State` 默认值 | 等用户给数值（§四-C） |
@@ -258,6 +258,37 @@ TR（前缘单角）   2.11     7.43    11.58
 | 6 | 预览窗「节奏：慢 / 正常 / 快」三档 | `AnimationPreview` | 加下拉会让 `VAddSetting:115` 的 `combos == 4`、`VerifyPanel:108` 变红——契约变更，按 §7.0 B 表改常数 |
 | 7 | 设置页打赏入口 | `PluginInfoBar` | 约束：**发布之后**再做；图片打进 jar，不联网加载 |
 | 8 | `targetFps=144` 的端到端帧率验证 | 诊断日志 `activeFps` / `real fps` | 工具已具备（本轮新增 `[tick]`），但未正式跑一次留档 |
+
+#### 7.1.1 六个探针的根因与修法（2026-10-28 存档，供日后复查）
+
+两类根因，修法不同（分类判据见 `CLAUDE.md` §7.0 的 B/C 两节）：
+
+| 探针:断言 | 类别 | 原来为什么红（实测证据） | 改成了什么方向 |
+|---|---|---|---|
+| `VHints:H-6` | **索引契约破裂** | 写死 `ui.sliders.get(8)`；而 `VUi.KEYS[8]` 是 `cursorHeightRatio`（量程 30..100），`animationLength` 在 `[5]`。写 `28` 被夹到 30 → 跨行提示仍是 100 ms | 改 `sliderByKey("animationLength")`，**断言原文一字未动**（与 VDefects/VSnap 那 11 条红同一修法） |
+| `VReset2:A-1` | **索引契约破裂** | 启发式「点一下再 apply、digest 不变」返回下标 3 = **多光标不辉光**（绑定控件）；性能诊断其实在 `[7]`（反射 `paintDiagCheck` 证实）。绑定控件的未提交勾选被 `super.reset()` 回灌，是**正确**行为 | 改用组件身份定位（同 `VReset.findPaintDiagCheckbox`）；A-1 断言不变 |
+| `VReset2:A-4` / `VCustom:C-19` | 过期基线（装置） | 装置手工只写 6~8 个字段，而 `matchAnimPreset` 现在比 13 个（`CursorPresetApplier:195-222`）→「一切等于内置预设」前提不成立，一 refresh 就派生「基础 副本」 | 改用生产入口 `pickAnimPresetForProbe(base)` 整体对齐；**断言不变** |
+| `VTools:M-11` | 过期基线（清单） | 手抄的「预设域」只有 9 个键，实测 `slopeTicks 0→100`、`stretchRatioK 8.0→2.0` → 报「域外变化=2」 | 改为遍历 `SettingsField.PRESET_FIELDS` + `animPresetBase`（表内容由 `VFieldDomain` 独立锁定，不算自证） |
+| `VCustom:C-5` / `VSepBound:B-9b` | 过期基线（夹具） | 夹具拿 `tailColor` 当「第二个合法项」，但颜色字段 2026-10-28 起 `inPreset=false` → `restore` 按定义跳过，写入数 2→1 | 换成仍在预设域内的键（`trailSize` / `tailOpacity`）；**断言不变** |
+| `VSepBound:B-3a/B-3b/B-11c` | 过期基线（行为已变） | `CustomPresets.format` 改成「跳过非法名条目 + 写 warn 日志」（`CustomPresets.format:163-178`），旧断言要求该条目活下来 | 锁定新契约：只跳过那一条、合法条目逐字保留；B-3b 改为直接验 warn 日志出现 |
+| `VSepBound:B-10a/B-10b` | 过期基线（行为已变） | `isValidName` 补了 XML 1.0 码点校验，U+000B 在入口即被拒 → 旧断言「建立成功」的前提已不可能成立 | 锁定「入口拒绝 + 落盘回读后没有孤儿条目」 |
+| `VSepBound:B-13a/B-13b` | 过期基线（契约已定） | `uniqueName` 只去重、不净化（javadoc 即如此），非法 base 原样返回；`put` 入口拒绝 | 锁定「uniqueName 不偷偷改名」「入口拒绝后原表一条不多也一条不坏」 |
+| `VSleep:S-4` | 过期基线（环境） | 旧判据 `timerMed > 10.0`（假定 15.6 ms 时钟台阶），本机 JDK 21 实测 **6.00 ms** | 双向边界 `4ms ≤ 中位 < 15ms`：既排除「Timer 一次都没触发（-1）」，也排除「被抬到 15.6」 |
+
+**变异测试（生产代码改坏 → 探针必须红；验证完已逐条还原，`git status` 只剩 6 个探针文件）**
+
+| 变异 | 应当红 | 实测 |
+|---|---|---|
+| 跨行提示后缘写死 `100` | `VHints:H-6` | ✅ 仅 H-6 |
+| `syncAllControlsFromPending` 里强行 `paintDiagCheck.setSelected(false)` | `VReset2:A-1` | ✅ 仅 A-1 |
+| `applyAnimPresetFields` 里写成 `tailOpacity + 0.01f`（写与 match 判据分家） | `VCustom:C-19` | ✅ C-19（另有 VPreset/VOrtho/VFieldDomain 连带红，都属正确报警） |
+| 对「纯平滑输入」多写一个域外字段 `cursorWidthPx` | `VTools:M-11` | ✅ 仅 M-11（域外变化 = 1） |
+| 删掉 `format` 的非法名校验分支 | `VSepBound:B-3a/B-3b/B-11c` | ✅ 恰好这三条 |
+
+`VSleep:S-4` 没有生产变异点 —— 它量的是 OS/JVM 的定时器分辨率，不是插件行为，判据靠上面的双向边界自证。
+
+**仍然红、但不在本次范围**：`VRegr2`（13 通过 / 2 失败：R-5 漏看 `typingSmoothness`、R-6 派生缺失）。
+它在 `build-v-probes.ps1` 的 `$informational` 里，不计入失败门，本次未动。
 
 ### 7.2 用户已决定暂缓（**不要自己动手**）
 
@@ -280,4 +311,4 @@ TR（前缘单角）   2.11     7.43    11.58
 |---|---|
 | `git tag` | 停在 `v0.9.83`；实际已装到 **0.9.102**，中间十几个版本无 tag |
 | 探针总数 | **94 个** `V*.java`（新增 `VBoot`） |
-| `CLAUDE.md` 状态数字 | 本轮已同步为 0.9.102 / `c51a9e7` / 94 个探针 |
+| `CLAUDE.md` 状态数字 | 已同步为 0.9.102 / 94 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |

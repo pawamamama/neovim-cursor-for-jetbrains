@@ -127,19 +127,35 @@ public final class VTools {
         // （用户实测：「切换预设不能让辉光回来」「缎带没有扩散了，就是持久化了」）。
         // 而「纯平滑输入」这个预设本身就必须表达「关辉光」—— 6 字段模型写不出来。
         //
-        // 所以这三项归入「应用预设时允许变化」一侧。这不是放宽断言：
-        // 颜色 2 项 + stretchRatioK + typingSmoothness + cursorDisappearDelay +
-        // cursorFadeOutDuration + tailOpacity + enabled + trailMode + hideNativeCaret +
-        // alwaysHighFps 共 12 个字段仍然要求逐位不变（颜色正交性硬判据不变）。
-        java.util.Set<String> animFields = new java.util.HashSet<>(java.util.Arrays.asList(
-                "animationLength", "shortAnimationLength", "trailSize", "glowLayers",
-                "shadowBlurFactor", "glowOpacity",
-                "useShadow", "overlayFadeOut",
-                "animPresetBase"));
+        // 所以这三项归入「应用预设时允许变化」一侧。
+        //
+        // 【2026-10-28 修装置：这份清单原来是手抄的，已经跟不上字段表】
+        // 原来这里硬写 9 个键。之后预设域又扩了两次（0.9.46 stretchRatioK、
+        // 0.9.80 slopeTicks），手抄那份没跟上 —— 实测切到最后一个预设后
+        //   slopeTicks     0    -> 100
+        //   stretchRatioK  8.0  -> 2.0
+        // 两项都变了，而断言把它们算在「预设域之外」→ 报「预设域外变化 = 2」。
+        // 这不是产品回归（applyAnimPreset 本来就该写这两个字段），
+        // 是断言里那份「预设域」的定义过期了。
+        //
+        // 现在直接取生产字段表 SettingsField.PRESET_FIELDS。这不是自证：
+        // 这张表的内容由 VFieldDomain 独立锁定（快照存什么 == 内置预设写什么 ==
+        // 匹配比什么），这里只是不再抄第三份 —— 抄第三份正是本项目反复踩的
+        // 「三份清单分家」（CLAUDE.md 陷阱 7）。
+        //
+        // animPresetBase 必须单独加：它是「当前停在哪个预设」的指针，
+        // applyAnimPreset 会同步前移它（见下方 F7 注释），但它不参与
+        // matchAnimPreset、也不进快照，所以按定义不属于 PRESET_FIELDS。
+        java.util.Set<String> animFields = new java.util.HashSet<>();
+        for (com.github.yyyolo7a79.neovidecursor.settings.SettingsField f
+                : com.github.yyyolo7a79.neovidecursor.settings.SettingsField.PRESET_FIELDS) {
+            animFields.add(f.key);
+        }
+        animFields.add("animPresetBase");
         java.util.Set<String> others = new java.util.HashSet<>(before.keySet());
         others.removeAll(animFields);
-        // 「只改 6 个动画字段」的精确判据是：动画字段之外 0 变化；
-        // 动画字段内部有几项变化取决于前后两个预设是否恰好同值（缎带与高对比的 trailSize 都是 1.00）。
+        // 「只改预设域字段」的精确判据是：预设域之外 0 变化；
+        // 预设域内部有几项变化取决于前后两个预设是否恰好同值（缎带与高对比的 trailSize 都是 1.00）。
         // 所以这里断言的是「其余字段 0 变化」，并额外核对动画字段确有实质变化。
         for (String k : before.keySet()) {
             if (!before.get(k).equals(after.get(k))) {
@@ -150,7 +166,7 @@ public final class VTools {
         // countDiff 的第三参是「忽略集合」：忽略动画字段 → 数出非动画字段的变化数。
         int nonAnimChanged = VFields.countDiff(before, after, animFields);
         int animChanged = VFields.countDiff(before, after, others);
-        check("M-11 Tool 应用预设：只改预设字段域（动画 6 项 + 辉光/淡出 + base），其余逐位不变",
+        check("M-11 Tool 应用预设：只改预设字段域（PRESET_FIELDS + 指针 base），其余逐位不变",
                 nonAnimChanged == 0 && animChanged > 0,
                 "预设域外变化 = " + nonAnimChanged + "，预设域内变化 = " + animChanged);
 

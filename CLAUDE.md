@@ -1,7 +1,7 @@
 # CLAUDE.md —— 接手这份工作前先读
 
 > 写给一个**全新会话的 Claude**：读完这一份就能直接干活，不需要再问任何人。
-> 生成时间：2026-10-25 深夜 · 最后校订：2026-10-28 · 对应提交 `aaa1f1e`
+> 生成时间：2026-10-25 深夜 · 最后校订：2026-10-28 · 提交号见 `git log -1`（**不写死 hash**：写死必然下一次提交就过期）
 
 ---
 
@@ -86,27 +86,32 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 ```
 版本         v0.9.102（IDEA 里已装；读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
              git tag 仍停在 v0.9.83 —— 0.9.84~0.9.102 共 19 个版本没打 tag（版本未发布）
-HEAD         c51a9e7（main，2026-10-28）
-远程         fork/main 已同步至 c51a9e7（2026-10-28，差值 0）
+HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过期一次）
+远程         fork/main 与本机 main 是否同步，**用命令核实，不要写结论**：
+             git rev-list --left-right --count fork/main...HEAD  → 应为 0 0
              ⚠️ 推送必须走 SSH：https 经本机代理 127.0.0.1:7897 会 TLS 中途断开
              （`error:0A000126 SSL unexpected eof`），绕过代理直连 443 也会超时。
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
-工作区       干净
+工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         94 个 V*.java（新增 VInlay / VFieldDomain / VBoot）/ 6 个失败（都是过期断言，非功能故障）
+探针         94 个 V*.java（新增 VInlay / VFieldDomain / VBoot）/ **ALL PASS（0 失败）**
 ```
 
-## 那 6 个失败的探针（**不要试图让它们变绿**）
+## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）
 
 ```
-VTools(1)   VHints(1)   VCustom(1)
-VReset2(2)  VSepBound(7)  VSleep(1)
+VTools     VHints     VCustom
+VReset2    VSepBound  VSleep
 ```
 
-> `VRegr2`（13 通过 / 2 失败）是 **informational**，不计入这 6 个。
+> `VRegr2`（13 通过 / 2 失败）是 **informational**，不计入失败门，**本次没动**。
+> 它的两条红是真的功能缺口（R-5 漏看 `typingSmoothness`、R-6 该字段不派生副本），不是过期断言。
 
-它们断言的是 0.9.7x 时代的行为，后来功能改了但断言没跟上。
-**修它们要做的是「改断言方向 + 写清为什么」，不是改代码迁就断言，更不是删断言。**
+它们曾经断言的是 0.9.7x 时代的行为，功能改了断言没跟上。
+处理原则是「改断言方向 + 写清为什么」，不是改代码迁就断言，更不是删断言 —— 2026-10-28 就是这么做的：
+只有探针文件被改，**生产代码零改动**，并用 5 组变异测试证明改后的断言仍抓得住（改坏生产代码 → 对应断言必红）。
+逐条根因（哪些是**索引契约破裂**、哪些是**过期基线**）与变异测试记录见
+`docs/NEXT-STEPS.md` §7.1.1。
 
 > 【2026-10-27】`VDefects` 与 `VSnap` 已按此原则修绿：它们的 11 条红不是「过期断言」，
 > 而是**索引契约破裂** —— 探针用 `sliders.get(0)` / `textFields.get(8)` 定位控件，
@@ -544,7 +549,8 @@ VUi.KEYS[8] = cursorHeightRatio（不是 animationLength，后者在 [5]）
 
 | 项 | 说明 |
 |---|---|
-| 6 个过期断言 | 逐个查为什么红，改断言方向 |
+| ~~6 个过期断言~~ | ✅ 2026-10-28 已全部修绿（改断言方向，生产代码零改动）——见 `docs/NEXT-STEPS.md` §7.1.1 |
+| `VRegr2` 的 2 条红（R-5 / R-6） | informational，但它们是**真功能缺口**：`typingSmoothness` 既不进 match 也不派生副本。要修就得动生产代码，属于功能决策 |
 | `build/` 下 150+ 一次性脚本 | 可清理，但先列清单给用户确认 |
 
 ---

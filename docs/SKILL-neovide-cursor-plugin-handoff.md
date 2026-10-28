@@ -39,8 +39,9 @@ java -cp "build\parity;build\v2-probe\classes;<idea-libs>" PhysicsParity
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probes.ps1
 ```
 
-**当前基线**：探针 **6 红** —— `VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`，
-全是过期断言（见 `docs/NEXT-STEPS.md`）。`VRegr2` 是 informational，不计入。
+**当前基线**：探针 **ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针
+（`VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`，逐条根因见 `docs/NEXT-STEPS.md` §7.1.1）。
+`VRegr2` 是 informational（13 通过 / 2 失败），不计入失败门，但那两条是真功能缺口。
 
 ---
 

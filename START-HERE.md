@@ -36,8 +36,9 @@ git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/N
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools\\settings-probe\\build-v-probes.ps1
 ```
 
-**当前基线**：探针 **6 红** —— `VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`。
-全是过期断言（不是功能故障），见 §6，不算新问题。
+**当前基线**：**ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针
+（`VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`）。
+只改探针、生产代码零改动，并做过 5 组变异测试；逐条根因见 `docs/NEXT-STEPS.md` §7.1.1。
 （`VDefects` 与 `VSnap` 已于 2026-10-27 按「改方向不删断言」修绿。）
 
 ---
@@ -174,15 +175,19 @@ applyAnimPresetFields 实写    13 个（给内置预设）
 
 ## 6. 已知遗留
 
-### 6 个过期探针断言（不影响功能）
+### 6 个过期探针断言 —— ✅ 2026-10-28 已全部修绿
 
-| 探针 | 失败数 | 原因 |
+| 探针 | 原失败数 | 根因（两类） |
 |---|---|---|
-| `VSepBound` | 7 | 预设名含分隔符被静默丢弃 |
-| `VReset2` | 2 | 勾选换预设丢失 / 派生存活 |
-| `VTools` / `VHints` / `VCustom` / `VSleep` | 各 1 | 字段数 / 文案 / 副本判据 |
+| `VSepBound` | 8 | 过期基线：`format` 改成「跳过非法名条目 + 写 warn」、`isValidName` 补了 XML 码点校验、颜色退出预设域 |
+| `VReset2` | 2 | 索引契约破裂（启发式定位到「多光标不辉光」）+ 装置只写 8 个字段 |
+| `VCustom` | 2 | 夹具用了已退出预设域的 `tailColor` + 装置只写 8 个字段 |
+| `VTools` | 1 | 手抄的「预设域」只有 9 个键（漏 `slopeTicks` / `stretchRatioK`） |
+| `VHints` | 1 | 索引契约破裂：`sliders.get(8)` 是 `cursorHeightRatio`，不是 `animationLength` |
+| `VSleep` | 1 | 过期基线：15.6 ms 时钟台阶在本机 JDK 21 上不成立（实测 6.00 ms） |
 
-> `VRegr2`（13 通过 / 2 失败）是 **informational**，不计入上面这 6 个。
+> 生产代码零改动；5 组变异测试均已证明改后的断言抓得住。逐条证据见 `docs/NEXT-STEPS.md` §7.1.1。
+> `VRegr2`（13 通过 / 2 失败）是 **informational**，本次未动 —— 但那两条是**真功能缺口**，不是过期断言。
 > `VDefects` 与 `VSnap` 已于 2026-10-27 修绿（改断言方向，不删断言）。
 
 ### 技术债

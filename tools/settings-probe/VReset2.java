@@ -30,7 +30,7 @@ public final class VReset2 {
         VUi ui = VUi.build(conf);
         conf.reset();
 
-        int diagIdx = findPaintDiag(conf, ui.checkBoxes);
+        int diagIdx = findPaintDiagCheckbox(conf, ui.checkBoxes);
         check("A-0 定位「性能诊断」复选框", diagIdx >= 0, "下标=" + diagIdx);
 
         // ---------------------------------------------------------------- A-1
@@ -86,15 +86,28 @@ public final class VReset2 {
         conf.reset();
         conf.pendingForProbe().animCustomName = "";
         conf.pendingForProbe().customAnimPresets = "";
-        conf.pendingForProbe().animPresetBase = 0;
+        // 【2026-10-28 修装置】原来只把 animPresetBase 设成 0，其余字段沿用上一个用例
+        // 留下的值 —— 那在「match 只比 6~9 个字段」的时代勉强够用。
+        // 现在 matchAnimPreset 比 13 个预设域字段（CursorPresetApplier:195-222），
+        // 实测 apply() + reset() 之后 animCustomName 已经是「基础 副本」，
+        // 于是 before4 非空，A-4 红在「起点本来就有副本」，而不是「拖动没派生副本」。
+        // 用生产入口把 pending 整体对齐到内置预设 0，起点才是真的「= 该预设」。
+        conf.pickAnimPresetForProbe(0);
         conf.apply();
         conf.reset();
         String before4 = conf.pendingForProbe().animCustomName;
-        ui.sliders.get(VUi.indexOfKey("glowLayers")).setValue(11);   // 模拟拖动
-        String after4 = conf.pendingForProbe().animCustomName;
-        check("A-4 滑块拖动后立刻派生落脚点（对照组，用于证明复选框路径确实缺失）",
-                before4.isEmpty() && !after4.isEmpty(),
-                "拖动前「" + before4 + "」→ 拖动后「" + after4 + "」");
+        javax.swing.JSlider glowSlider = ui.sliderByKey("glowLayers");
+        String after4 = before4;
+        if (glowSlider == null) {
+            check("A-4 滑块拖动后立刻派生落脚点（对照组，用于证明复选框路径确实缺失）",
+                    false, "按 key 定位不到 glowLayers 滑块");
+        } else {
+            glowSlider.setValue(11);                                 // 模拟拖动
+            after4 = conf.pendingForProbe().animCustomName;
+            check("A-4 滑块拖动后立刻派生落脚点（对照组，用于证明复选框路径确实缺失）",
+                    before4.isEmpty() && !after4.isEmpty(),
+                    "拖动前「" + before4 + "」→ 拖动后「" + after4 + "」");
+        }
 
         // ---------------------------------------------------------------- A-5
         System.out.println();
@@ -155,27 +168,36 @@ public final class VReset2 {
         return -1;
     }
 
-    private static int findPaintDiag(NeovideCursorConfigurable conf, List<JCheckBox> boxes) {
-        for (int i = 0; i < boxes.size(); i++) {
-            conf.reset();
-            String before = digest(conf);
-            boxes.get(i).doClick();
-            conf.apply();
-            String after = digest(conf);
-            boxes.get(i).doClick();
-            conf.apply();
-            if (before.equals(after)) {
-                return i;
+    /**
+     * 定位「性能诊断」复选框 —— 按<b>组件身份</b>，不靠启发式。
+     *
+     * <p><b>【2026-10-28 修定位契约】原来的启发式已经失效</b>：它找的是
+     * 「点一下再 apply、pending 里那几个摘要字段都不变的第一个复选框」。
+     * 实测面板有 9 个复选框，其中至少 4 个都不在摘要覆盖范围内，
+     * 于是它返回的是<b>下标 3 =「多光标不辉光」</b>，不是性能诊断（下标 7）。
+     * A-1 因此一直在测错控件：多光标不辉光是<b>绑定控件</b>，
+     * 它的勾选态要 apply 才进 pending，换预设时被 {@code super.reset()}
+     * 按 pending 回灌成旧值属于<b>正确行为</b>（与 A-5 记录的预期一致），
+     * 于是 A-1 红得毫无意义 —— 报的是「绑定的未提交编辑被回灌」，
+     * 而它自称测的是「不绑定控件（性能诊断）的勾选被吃掉」。
+     *
+     * <p>改成从 configurable 的 {@code paintDiagCheck} 私有字段取出真实组件，
+     * 再在列表里按<b>实例相等</b>求下标。与 VReset 的 findPaintDiagCheckbox 同源。
+     * 这样无论面板怎么重排、加多少复选框，指向的都是那个开关本身。
+     */
+    private static int findPaintDiagCheckbox(NeovideCursorConfigurable conf, List<JCheckBox> boxes) {
+        try {
+            java.lang.reflect.Field f =
+                    NeovideCursorConfigurable.class.getDeclaredField("paintDiagCheck");
+            f.setAccessible(true);
+            Object target = f.get(conf);
+            if (target instanceof JCheckBox) {
+                return boxes.indexOf(target);
             }
+            return -1;
+        } catch (ReflectiveOperationException e) {
+            return -1;
         }
-        return -1;
-    }
-
-    private static String digest(NeovideCursorConfigurable conf) {
-        NeovideCursorSettings.State s = conf.pendingForProbe();
-        return s.enabled + "|" + s.trailMode + "|" + s.hideNativeCaret + "|" + s.alwaysHighFps
-                + "|" + s.overlayFadeOut + "|" + s.useShadow + "|" + s.glowLayers + "|" + s.trailSize
-                + "|" + s.customAnimPresets + "|" + s.animCustomName;
     }
 
     private static void check(String n, boolean ok, String d) {

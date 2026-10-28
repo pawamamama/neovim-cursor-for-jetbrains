@@ -108,11 +108,17 @@ public final class VCustom {
         check("C-4 animPresetBase 不进快照（它是选中指针，不是参数）",
                 !snap.contains("animPresetBase"), "首段=" + snap.split(";")[0]);
 
+        // 【2026-10-28 修装置】这条原来拿 tailColor=#ABCDEF 当「第二个合法项」。
+        // 但 2026-10-28 起颜色字段退出预设域（SettingsField.hexColors 的
+        // inPreset=false，决定写在 docs/PARAMETER-MAP.md：动画预设完全不管颜色），
+        // restore 按定义跳过它 → 写入数从 2 掉到 1、tailColor 保持默认粉。
+        // 断言本身（未知键/坏条目被忽略、合法项照常写入）不变，
+        // 只把夹具换成一个仍在预设域内的键（trailSize）。
         NeovideCursorSettings.State tolerant = new NeovideCursorSettings.State();
-        int n = SettingsField.restore(tolerant, "glowLayers=9;不存在的键=1;tailColor=#ABCDEF;坏的");
+        int n = SettingsField.restore(tolerant, "glowLayers=9;不存在的键=1;trailSize=0.4;坏的");
         check("C-5 未知键 / 坏条目被忽略，合法项照常写入", n == 2,
                 "写入=" + n + " glowLayers=" + tolerant.glowLayers
-                        + " tailColor=" + tolerant.tailColor);
+                        + " trailSize=" + tolerant.trailSize);
     }
 
     // ---------------------------------------------------------------- 2. 增删改查
@@ -444,16 +450,18 @@ public final class VCustom {
         conf.reset();
 
         NeovideCursorSettings.State p1 = conf.pendingForProbe();
-        p1.animPresetBase = base;
         p1.animCustomName = "";
         p1.customAnimPresets = "";
-        writeAnim(p1, constants);
-        // 【0.9.10 预设字段域扩到 8 项】装置也必须把 useShadow/overlayFadeOut
-        // 设成该预设声明的值，否则「一切等于预设」这个前提不成立 → 会派生副本。
-        p1.useShadow = com.github.yyyolo7a79.neovidecursor.settings.CursorPresets
-                .ANIM_PRESETS[base].useShadow();
-        p1.overlayFadeOut = com.github.yyyolo7a79.neovidecursor.settings.CursorPresets
-                .ANIM_PRESETS[base].overlayFadeOut();
+        // 【2026-10-28 修装置】原来在这里手工写 6 个动画字段（writeAnim），
+        // 再单独补 useShadow / overlayFadeOut —— 共 8 个。
+        // 但 matchAnimPreset 现在比 13 个预设域字段（CursorPresetApplier:195-222，
+        // 2026-10-28 补齐了 slopeTicks / tailOpacity / cursorDisappearDelay /
+        // cursorFadeOutDuration 四项），手写 8 个永远对不齐。
+        // 于是「一切等于内置预设」这个前提不成立，一 refresh 就派生「基础 副本」，
+        // C-19 必红 —— 红的是装置，不是产品行为。
+        // 改为走生产自己的入口，把 pending 整体对齐到该内置预设：
+        // 以后预设域再加字段，这段装置自动跟上，不会再出现「抄少了几个」。
+        conf.pickAnimPresetForProbe(base);      // 写该预设的【全部】预设域字段 + 指针 + 清名
         conf.refreshPresetDisplayForProbe();
         check("C-19 未改动时不派生任何自定义预设",
                 "".equals(conf.pendingForProbe().animCustomName)
@@ -501,15 +509,6 @@ public final class VCustom {
         return new float[]{
                 p.animationLength(), p.shortAnimationLength(), p.trailSize(),
                 p.glowLayers(), p.shadowBlurFactor(), p.glowOpacity()};
-    }
-
-    private static void writeAnim(NeovideCursorSettings.State s, float[] v) {
-        s.animationLength = v[0];
-        s.shortAnimationLength = v[1];
-        s.trailSize = v[2];
-        s.glowLayers = Math.round(v[3]);
-        s.shadowBlurFactor = v[4];
-        s.glowOpacity = v[5];
     }
 
     private static void check(String name, boolean ok, String detail) {

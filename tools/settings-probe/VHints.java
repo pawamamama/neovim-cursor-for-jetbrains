@@ -69,13 +69,24 @@ public final class VHints {
         // 改 animationLength → 跨行提示必须变
         conf.reset();
         ui = VUi.build(conf);
-        int idxAnim = 8;
-        ui.sliders.get(idxAnim).setValue(28);
-        hints = conf.couplingHintsForProbe();
-        String cross1 = hints[1].getText();
-        System.out.println("    改 animationLength=0.28 后跨行提示： " + cross1);
-        check("H-6 改 animationLength 后跨行提示跟着变（出现 280 ms）",
-                cross1.contains("280 ms") && !cross1.equals(cross0), cross1);
+        // 【2026-10-28 修索引契约】原来写死 `int idxAnim = 8; ui.sliders.get(idxAnim)`。
+        // 而 VUi.KEYS（= 面板真实渲染顺序）里 [8] 是 cursorHeightRatio，
+        // animationLength 在 [5]（0.9.79 加 slopeTicks 之后整体后移了一位）。
+        // 后果：这一步实际改的是「光标高度」（量程 30..100 步长 10，写 28 被夹到 30），
+        // 动画时长纹丝不动 → H-6 必然红，而且红的原因与它自称要测的东西毫无关系。
+        // 修法与 VDefects / VSnap 的 11 条红相同：按 key 定位，与渲染顺序解耦。
+        javax.swing.JSlider animSlider = ui.sliderByKey("animationLength");
+        if (animSlider == null) {
+            check("H-6 改 animationLength 后跨行提示跟着变（出现 280 ms）",
+                    false, "按 key 定位不到 animationLength 滑块");
+        } else {
+            animSlider.setValue(28);              // 量程 [5,35] 步长 1 → 0.28 s
+            hints = conf.couplingHintsForProbe();
+            String cross1 = hints[1].getText();
+            System.out.println("    改 animationLength=0.28 后跨行提示： " + cross1);
+            check("H-6 改 animationLength 后跨行提示跟着变（出现 280 ms）",
+                    cross1.contains("280 ms") && !cross1.equals(cross0), cross1);
+        }
 
         // 改 shortAnimationLength → 单行提示必须变
         conf.reset();

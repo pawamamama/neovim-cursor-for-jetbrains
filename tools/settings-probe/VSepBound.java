@@ -143,15 +143,59 @@ public final class VSepBound {
         java.util.List<CustomPresets.Entry> in = new java.util.ArrayList<>();
         in.add(ok);
         in.add(bad);
-        String formatted = CustomPresets.format(in);
+        // ---- 抓 format 里的 warn 日志（证明「跳过」不是静默的）----
+        java.util.logging.Logger lg = java.util.logging.Logger.getLogger("neovide-cursor");
+        final java.util.List<String> logs = new java.util.ArrayList<>();
+        java.util.logging.Handler h = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                logs.add(String.valueOf(r.getMessage()));
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        lg.addHandler(h);
+        String formatted;
+        try {
+            formatted = CustomPresets.format(in);
+        } finally {
+            lg.removeHandler(h);
+        }
         List<CustomPresets.Entry> back = CustomPresets.parse(formatted);
-        check("B-3a 表里若有「名字含分隔符」的条目，format 会把它【静默丢弃】（不是改名保留）",
-                back.size() == 2,
+
+        // 【2026-10-28 改断言方向：过期基线】
+        // 旧断言是 back.size() == 2，即「非法名条目必须活下来」。
+        // 它对应的是 format 完全不校验名字的那个年代。
+        // 现在 CustomPresets.format（163-178 行）的契约是：遇到非法名【跳过这一条】，
+        // 理由是「静默改名比丢一条更糟，而放它过去会切碎整张表」。
+        // 新方向锁定真正该保的性质：跳过只影响那一条，合法条目与快照一位不差。
+        check("B-3a 表里若有「名字含分隔符」的条目，format 只跳过它，不切碎整张表",
+                back.size() == 1 && "正常".equals(back.get(0).name)
+                        && "b=2".equals(back.get(0).snapshot),
                 "输入=2 条 落盘=" + escape(formatted) + " 回读=" + back.size()
                         + " 条 名字=[" + names(back) + "]");
-        check("B-3b 丢弃是静默的（没有返回值/异常告知调用方一条数据没了）",
-                back.size() == 2,
-                "format 返回串长度=" + (formatted == null ? -1 : formatted.length()));
+
+        // 【2026-10-28 改断言方向：过期基线】
+        // 旧断言「丢弃是静默的」（用 back.size()==2 表达「没丢」）。
+        // 现在跳过是【有意且留痕】的：format 会写一条 warn（"跳过非法预设名…"）。
+        // 所以这条改成直接验日志 —— 它才是「不静默」的证据，
+        // 而且能抓住「把 warn 那行删掉」这种回归（删了就没有日志，必红）。
+        boolean warned = false;
+        for (String m : logs) {
+            if (m != null && m.contains("跳过非法预设名")) {
+                warned = true;
+            }
+        }
+        check("B-3b 跳过时确实留了 warn 日志（不是静默丢数据）",
+                warned,
+                "format 返回串长度=" + (formatted == null ? -1 : formatted.length())
+                        + " 日志条数=" + logs.size() + " 日志=" + logs);
     }
 
     // ---------------------------------------------------------------- B-4
@@ -337,16 +381,22 @@ public final class VSepBound {
         System.out.println();
         System.out.println("--- B-9 快照尾随空段（用真实字段键）---");
         // 用真实键，否则 restore 返回 0 是正常的（未知键被忽略），测不出东西。
-        String snap = "glowLayers=10;tailColor=#ABCDEF;";
+        //
+        // 【2026-10-28 修装置】第二个键原来是 tailColor —— 颜色字段 2026-10-28 起
+        // 退出预设域（SettingsField.hexColors 的 inPreset=false，见 PARAMETER-MAP），
+        // restore 按定义跳过它 → 「写入字段数=1、tailColor 还是默认粉」，B-9b 必红。
+        // 断言本身（尾随空段不该让整条报废）不变，只换成仍在预设域内的键。
+        String snap = "glowLayers=10;tailOpacity=0.45;";
         String all = CustomPresets.put("", "甲", snap);
         List<CustomPresets.Entry> e = CustomPresets.parse(all);
         check("B-9a 快照带尾随分号时条目仍在（只丢空段，不丢整条）",
                 e.size() == 1, "条数=" + e.size() + " 快照=" + (e.isEmpty() ? "" : e.get(0).snapshot));
         NeovideCursorSettings.State st = new NeovideCursorSettings.State();
         int n = SettingsField.restore(st, e.isEmpty() ? "" : e.get(0).snapshot);
-        check("B-9b 尾随空段的快照仍能还原出前面的键（glowLayers 必须写入）",
-                n >= 2 && st.glowLayers == 10 && "#ABCDEF".equalsIgnoreCase(st.tailColor),
-                "写入字段数=" + n + " glowLayers=" + st.glowLayers + " tailColor=" + st.tailColor);
+        check("B-9b 尾随空段的快照仍能还原出前面的键（glowLayers / tailOpacity 必须写入）",
+                n >= 2 && st.glowLayers == 10 && Math.abs(st.tailOpacity - 0.45f) < 1e-6f,
+                "写入字段数=" + n + " glowLayers=" + st.glowLayers
+                        + " tailOpacity=" + st.tailOpacity);
     }
 
     // ---------------------------------------------------------------- B-10
@@ -361,8 +411,17 @@ public final class VSepBound {
         char vt = (char) 0x0B;
         String name = "我的" + vt + "预设";
         String all = CustomPresets.put("", name, "a=1");
-        check("B-10a 建立成功（内存里按原名可读）", CustomPresets.has(all, name),
-                "has=" + CustomPresets.has(all, name));
+        // 【2026-10-28 改断言方向：过期基线】
+        // 旧断言叫「建立成功」—— 那时 isValidName 只挡 4 个分隔符，U+000B 能进表，
+        // 然后被 XmlSerializer 静默吞掉。之后 isValidName 补了 XML 1.0 码点校验
+        // （CustomPresets.isXmlLegal），U+000B 在【入口】就被拒，「建立成功」这个前提
+        // 已经不可能成立。新方向锁定入口拒绝本身 —— 它才是现在真正防住
+        // 「重启后预设还在但选不中」的那道闸（变异点：删掉 isXmlLegal → 本断言必红）。
+        check("B-10a 含 XML 非法码点 U+000B 的名字在入口就被拒（进不了表，也就丢不了字）",
+                !CustomPresets.has(all, name) && Boolean.FALSE.equals(isValidNameRef(name))
+                        && CustomPresets.parse(all).isEmpty(),
+                "has=" + CustomPresets.has(all, name) + " isValidName=" + isValidNameRef(name)
+                        + " 表条数=" + CustomPresets.parse(all).size());
 
         String backTable = all;
         try {
@@ -379,8 +438,13 @@ public final class VSepBound {
         } catch (Throwable ignored) {
         }
         List<CustomPresets.Entry> after = CustomPresets.parse(backTable);
-        check("B-10b 重启后仍能按原名字选中这个预设（用户数据不该因名字里的控制字符失效）",
-                CustomPresets.has(backTable, name),
+        // 【2026-10-28 改断言方向：过期基线】
+        // 旧断言「重启后仍能按原名字选中」（has(原名) == true）成立的前提是
+        // 「这条预设进了表」。入口校验补上之后它根本进不了表，于是这里改成锁定
+        // 用户可感知的结论：不存在「预设还在、却按原名选不中」的悬空数据。
+        // 与 B-10a 互补 —— B-10a 验入口，B-10b 验落盘回读后也不会有孤儿条目。
+        check("B-10b 回读后不存在「预设还在、却按原名选不中」的悬空数据（入口已挡，表为空）",
+                !CustomPresets.has(backTable, name) && CustomPresets.parse(backTable).isEmpty(),
                 "回读条数=" + after.size() + " 名字=[" + names(after) + "]"
                         + " has(原名)=" + CustomPresets.has(backTable, name));
     }
@@ -416,11 +480,18 @@ public final class VSepBound {
 
         // ③ 迁移写一次之后，这种数据会不会被"修正"成丢数据
         String after = CustomPresets.put(legacy1, "正常", "b=9");
-        check("B-11c 对这类旧数据写一次之后，原先被截断的条目仍可读（不静默消失）",
-                CustomPresets.parse(after).size() == CustomPresets.parse(legacy1).size(),
+        // 【2026-10-28 改断言方向：过期基线】
+        // 旧断言要求「写前写后条数相同」，即那条非法名（含 U+241F）的条目必须活下来。
+        // 那是 format 不校验名字的年代。现在的契约是「跳过非法名条目，绝不静默改名、
+        // 也不让它切碎整张表」（CustomPresets.format:163-178），于是条数从 2 变 1。
+        // 新方向锁定两件仍必须成立的事：只丢那一条；被改的合法条目拿到的是新快照。
+        check("B-11c 对这类旧数据写一次之后：非法名条目被跳过，合法条目与新快照逐字保留",
+                CustomPresets.parse(after).size() == 1
+                        && "b=9".equals(CustomPresets.get(after, "正常")),
                 "写前=" + CustomPresets.parse(legacy1).size()
                         + " 写后=" + CustomPresets.parse(after).size()
-                        + " 名字=[" + names(CustomPresets.parse(after)) + "]");
+                        + " 名字=[" + names(CustomPresets.parse(after)) + "]"
+                        + " 正常=" + CustomPresets.get(after, "正常"));
     }
 
     // ---------------------------------------------------------------- B-12
@@ -498,13 +569,27 @@ public final class VSepBound {
         String suggested = CustomPresets.uniqueName(table, dangling + " 副本");
 
         Boolean valid = isValidNameRef(suggested);
-        check("B-13a uniqueName 生成的建议名必须本身合法（否则对话框默认值是个陷阱）",
-                valid == null || valid,
-                "建议名=[" + escape(suggested) + "] isValid=" + valid);
+        // 【2026-10-28 改断言方向：契约已定】
+        // 旧断言要求「建议名本身合法」，即希望 uniqueName 顺手做净化。
+        // 读源码确认实现的契约相反：uniqueName 只负责去重，合法性由入口
+        // put/rename 的 isValidName 校验（见 CustomPresets.uniqueName 的 javadoc：
+        // 它只做 base → base 2 → base 3 的取名规则）。输入本身非法，输出必然非法。
+        // 所以新方向锁定「uniqueName 是纯去重、不偷偷改名」，
+        // 而不是要求它消毒 —— 悄悄改名的方案在 0.9.9x 被明确否掉过（内存名≠落盘名）。
+        check("B-13a uniqueName 只做去重、不做净化（非法 base 原样返回，交给入口校验）",
+                suggested != null && suggested.equals(dangling + " 副本")
+                        && Boolean.FALSE.equals(valid),
+                "建议名=[" + escape(suggested) + "] isValid=" + valid
+                        + " 期望=[" + escape(dangling + " 副本") + "]");
 
         String afterOk = CustomPresets.put(table, suggested, "a=2");
-        check("B-13b 用户直接采纳建议名点确定，表里应真的多一条",
-                CustomPresets.parse(afterOk).size() == 2,
+        // 【2026-10-28 改断言方向：过期基线】
+        // 旧断言「表里应真的多一条」。但非法的建议名现在会被 put 的入口校验拒掉，
+        // 一条都不会加 —— 这正是设计想要的「不静默篡改、不切碎存储」。
+        // 新方向锁定用户真正能依靠的结论：入口拒绝 → 原表一条不多、一条不坏。
+        check("B-13b 直接采纳非法建议名点确定 → 入口拒绝，原表一条不多也一条不坏",
+                CustomPresets.parse(afterOk).size() == 1
+                        && "a=1".equals(CustomPresets.get(afterOk, "正常")),
                 "前=" + CustomPresets.parse(table).size()
                         + " 后=" + CustomPresets.parse(afterOk).size()
                         + " 建议名=[" + escape(suggested) + "]");
