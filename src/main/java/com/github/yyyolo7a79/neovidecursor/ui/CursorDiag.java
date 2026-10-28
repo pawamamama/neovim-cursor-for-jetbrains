@@ -440,4 +440,355 @@ eovide-cursor-diag.log}
         emit("[error] " + where + ": " + t.getClass().getSimpleName()
                 + (t.getMessage() == null ? "" : " — " + t.getMessage()));
     }
+
+    // ==================== 【BUG-007】首用追踪 ====================
+    //
+    // 【为什么需要这一整套】BUG-007 的现象是「启动后第一次碰键盘必定卡一下」。
+    // 排查时发现现有日志结构上答不了这个问题：
+    //
+    //   · [frame]/[trail] 里没有 rawDt —— rawDt 只在 idea.log 的 debug 行里；
+    //   · [frame] 的 #N 是「慢路径刷新序号」，不是渲染帧号；默认 %15 采样，
+    //     所以启动首帧 #1 永远不打印；
+    //   · 没有「isShowing / 面板尺寸 / 绘制耗时 / 投递延迟」这些决定性字段；
+    //   · 没有任何「第一次改文档」的标记 —— 而用户的实测（鼠标移动不卡、
+    //     第一次按键才卡）证明触发点正是「第一次修改文档」，不是「第一次用光标」。
+    //
+    // 【三条纪律】
+    //   ① 只写独立文件，不走 LOG.info：144fps 下把 idea.log 刷爆会毁掉证据。
+    //   ② 限量：每 animator 最多 TRACE_MAX_LINES 行，且只在「值得看」的帧输出，
+    //      否则 144fps × 几分钟 = 几十万行，真正的那几十帧会被埋掉。
+    //   ③ 默认关：全部先判 enabled()（即 diagLogging），关着时生产路径零变化。
+    //
+    // 【不动既有行格式】[frame]/[trail] 被 build/analyze-log.ps1 与 diag/extract.py
+    // 用固定顺序正则解析，所以这里只用新前缀（boot/evt/tick/geom/paint/clear）。
+
+    /** 每 animator 的追踪行数上限 —— 144fps 下必须有的硬闸门。 */
+    private static final int TRACE_MAX_LINES = 5000;
+
+    /** 超过它就一定记：正常帧约 7ms（144fps），20ms 已是肉眼可感的掉帧。 */
+    private static final double TRACE_SLOW_DT_MS = 20.0;
+
+    /** 构造后无条件记录多少帧（覆盖启动期）。 */
+    private static final int TRACE_FRAMES_AFTER_BOOT = 40;
+
+    /** 首次发现文档戳变化后无条件记录多少帧（正片：BUG-007 就在这段里）。 */
+    private static final int TRACE_FRAMES_AFTER_EDIT = 60;
+
+    /** 单次绘制超过它就记一行（正常一帧绘制在数十微秒量级）。 */
+    private static final long TRACE_SLOW_PAINT_NS = 4_000_000L;
+
+    private static final long TRACE_T0_NANOS = System.nanoTime();
+    private static final long TRACE_T0_WALL_MS = System.currentTimeMillis();
+
+    /** 每个 animator 的追踪状态（按 identityHashCode 隔离，多编辑器不串台）。 */
+    private static final class Trace {
+        int lines;
+        long ticks;
+        long stamp = Long.MIN_VALUE;
+        boolean stampSeen;
+        int afterEditLeft;
+        boolean firstEditLogged;
+        boolean notShowingLogged;
+        boolean noTrailLogged;
+        boolean fastPathLogged;
+        boolean imeSkipLogged;
+        boolean emptyPaintLogged;
+        boolean paintErrorLogged;
+        String lastClearReason;
+    }
+
+    private static final java.util.Map<Integer, Trace> TRACES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static Trace traceOf(int id) {
+        return TRACES.computeIfAbsent(id, k -> new Trace());
+    }
+
+    /**
+     * 统一的时间戳：墙钟（便于和你按下按键的时刻对照）+ 相对本类加载的毫秒数。
+     *
+     * <p>既有 [frame]/[trail] 没有时间戳，导致「日志里哪一段是我按那一下」
+     * 只能靠猜 —— 这条新格式把它补上。
+     */
+    private static String traceStamp() {
+        long ns = System.nanoTime();
+        long wallMs = TRACE_T0_WALL_MS + (ns - TRACE_T0_NANOS) / 1_000_000L;
+        String hms = java.time.Instant.ofEpochMilli(wallMs)
+                .atZone(java.time.ZoneId.systemDefault())
+                .toLocalTime().toString();
+        return hms + " +" + String.format("%.0f", (ns - TRACE_T0_NANOS) / 1e6) + "ms";
+    }
+
+    private static void writeTrace(int id, String tag, String body) {
+        if (id < 0 || !enabled()) {
+            return;
+        }
+        Trace tr = traceOf(id);
+        if (tr.lines >= TRACE_MAX_LINES) {
+            if (tr.lines == TRACE_MAX_LINES) {
+                tr.lines++;
+                writeFile("[" + tag + "] id=" + id + " " + traceStamp()
+                        + " 已达追踪上限 " + TRACE_MAX_LINES + " 行，后续不再输出");
+            }
+            return;
+        }
+        tr.lines++;
+        writeFile("[" + tag + "] id=" + id + " " + traceStamp() + " " + body);
+    }
+
+    /** 构造完成时一行：记录这个 animator 诞生时的环境（尺寸 / 可见性 / 关键开关）。 */
+    static void bootTrace(int id, String kind, int contentW, int contentH, boolean showing,
+                          boolean hideNative, boolean alwaysHighFps, int targetFps,
+                          String trailMode) {
+        if (!enabled()) {
+            return;
+        }
+        writeTrace(id, "boot", "kind=" + kind
+                + " content=" + contentW + "x" + contentH
+                + " showing=" + showing
+                + " hideNative=" + hideNative
+                + " alwaysHighFps=" + alwaysHighFps
+                + " targetFps=" + targetFps
+                + " trailMode=" + trailMode);
+    }
+
+    /**
+     * 光标事件（稀疏，不按帧限量）。
+     *
+     * <p>{@code stampChanged=true} 即「这一次操作改了文档」—— 用户实测
+     * 「鼠标移动不卡、第一次按键才卡」，所以这个标记是定位的锚点。
+     * 首次出现时额外打 {@code FIRST-EDIT}，方便直接在日志里搜。
+     */
+    static void caretEventTrace(int id, String kind, int vpLine, int vpColumn,
+                                int offset, long stamp) {
+        if (!enabled()) {
+            return;
+        }
+        Trace tr = traceOf(id);
+        boolean changed = tr.stampSeen && stamp != tr.stamp;
+        boolean firstEdit = false;
+        if (changed) {
+            tr.stamp = stamp;
+            tr.afterEditLeft = TRACE_FRAMES_AFTER_EDIT;
+            if (!tr.firstEditLogged) {
+                tr.firstEditLogged = true;
+                firstEdit = true;
+            }
+        } else if (!tr.stampSeen) {
+            tr.stampSeen = true;
+            tr.stamp = stamp;
+        }
+        writeTrace(id, "evt", "type=" + kind
+                + " vp=" + vpLine + ":" + vpColumn
+                + " offset=" + offset
+                + " stamp=" + stamp
+                + " stampChanged=" + changed
+                + (firstEdit ? " FIRST-EDIT" : ""));
+    }
+
+    /**
+     * 慢路径读到文档戳时同步一次（兼作「第一次改文档」的兜底判据）。
+     *
+     * <p>为什么还需要它：有些修改（撤销、格式化）未必伴随 visible position 变化，
+     * 光靠 caret 事件可能漏。这里的 stamp 读本来就在慢路径上，零额外平台调用。
+     */
+    static void noteStampTrace(int id, long stamp) {
+        if (!enabled()) {
+            return;
+        }
+        Trace tr = traceOf(id);
+        if (!tr.stampSeen) {
+            tr.stampSeen = true;
+            tr.stamp = stamp;
+            return;
+        }
+        if (stamp == tr.stamp) {
+            return;
+        }
+        tr.stamp = stamp;
+        tr.afterEditLeft = TRACE_FRAMES_AFTER_EDIT;
+        if (!tr.firstEditLogged) {
+            tr.firstEditLogged = true;
+            writeTrace(id, "evt", "type=stamp-only FIRST-EDIT stamp=" + stamp);
+        }
+    }
+
+    /** 几何追踪窗口内才需要多调一次 offsetToXY —— 热路径上不能无条件付这个成本。 */
+    static boolean geometryWanted(int id) {
+        if (!enabled()) {
+            return false;
+        }
+        Trace tr = traceOf(id);
+        return tr.ticks <= TRACE_FRAMES_AFTER_BOOT + 1 || tr.afterEditLeft > 0;
+    }
+
+    /** 慢路径算出的几何（正片证据：判定「半字符偏移」是否真实发生）。 */
+    static void geometryTrace(int id, int vpLine, int vpColumn, double px, double py,
+                              float lineHeight, int offsetX, double cx, double cy,
+                              double w, double h) {
+        if (!geometryWanted(id)) {
+            return;
+        }
+        writeTrace(id, "geom", "vp=" + vpLine + ":" + vpColumn
+                + " cp=(" + f(px) + "," + f(py) + ")"
+                + " lineHeight=" + f(lineHeight)
+                + " vpX=" + f(px) + " offsetX=" + offsetX
+                + " dx=" + (offsetX == Integer.MIN_VALUE ? "?" : f(px - offsetX))
+                + " target=(" + f(cx) + "," + f(cy) + ") " + f(w) + "x" + f(h));
+    }
+
+    /**
+     * 每帧一行（限量）。由 {@code tick()} 在<b>每个</b>出口调用。
+     *
+     * @param note 出口原因：{@code ok} / {@code no-trail} / {@code not-showing}
+     */
+    static void tickTrace(int id, long rawDtNs, double dt, boolean recovery,
+                          boolean showing, int trails, int quads,
+                          int panelW, int panelH, int contentW, int contentH,
+                          int delayMs, long dispatchLagNs, long costNs, String note) {
+        if (!enabled()) {
+            return;
+        }
+        Trace tr = traceOf(id);
+        tr.ticks++;
+        double rawDtMs = rawDtNs / 1e6;
+        boolean want = tr.ticks <= TRACE_FRAMES_AFTER_BOOT
+                || tr.afterEditLeft > 0
+                || rawDtMs > TRACE_SLOW_DT_MS
+                || onceForNote(tr, note);
+        if (tr.afterEditLeft > 0) {
+            tr.afterEditLeft--;
+        }
+        if (!want) {
+            return;
+        }
+        writeTrace(id, "tick", "n=" + tr.ticks
+                + " rawDt=" + ms(rawDtMs)
+                + " dt=" + ms(dt * 1000)
+                + " recovery=" + recovery
+                + " showing=" + showing
+                + " trails=" + trails
+                + " quads=" + quads
+                + " panel=" + panelW + "x" + panelH
+                + " content=" + contentW + "x" + contentH
+                + " delayMs=" + delayMs
+                + " dispatchLag=" + (dispatchLagNs < 0 ? "?" : ms(dispatchLagNs / 1e6))
+                + " cost=" + (costNs / 1000) + "us"
+                + " note=" + note);
+    }
+
+    /** 出口原因只在「首次出现」时记一次，避免 no-trail / not-showing 每帧刷屏。 */
+    private static boolean onceForNote(Trace tr, String note) {
+        if ("not-showing".equals(note)) {
+            if (tr.notShowingLogged) {
+                return false;
+            }
+            tr.notShowingLogged = true;
+            return true;
+        }
+        if ("no-trail".equals(note)) {
+            if (tr.noTrailLogged) {
+                return false;
+            }
+            tr.noTrailLogged = true;
+            return true;
+        }
+        return false;
+    }
+
+    /** 快速路径 / IME 判据命中：只在各自首次出现时记一行（它们会连续命中）。 */
+    static void tickPathTrace(int id, String which) {
+        if (!enabled()) {
+            return;
+        }
+        Trace tr = traceOf(id);
+        if ("fast".equals(which)) {
+            if (tr.fastPathLogged) {
+                return;
+            }
+            tr.fastPathLogged = true;
+        } else {
+            if (tr.imeSkipLogged) {
+                return;
+            }
+            tr.imeSkipLogged = true;
+        }
+        writeTrace(id, "tick", "path=" + which + " n=" + tr.ticks);
+    }
+
+    /**
+     * 绘制一行：{@code quadCount==0} 早退（= 这一帧什么都没画）、耗时长、或异常。
+     *
+     * <p>{@code quadCount==0} 是关键判据 —— 面板透明、原生光标又被隐藏时，
+     * 这就是「光标消失」在代码上的唯一形态。
+     */
+    static void paintTrace(int id, int quads, long costNs, boolean earlyReturn,
+                           Throwable error) {
+        if (!enabled()) {
+            return;
+        }
+        Trace tr = traceOf(id);
+        if (error != null) {
+            if (tr.paintErrorLogged) {
+                return;
+            }
+            tr.paintErrorLogged = true;
+        } else if (earlyReturn) {
+            if (tr.emptyPaintLogged || quads > 0) {
+                return;
+            }
+            tr.emptyPaintLogged = true;
+        } else if (costNs < TRACE_SLOW_PAINT_NS) {
+            return;
+        }
+        writeTrace(id, "paint", "quads=" + quads
+                + " cost=" + (costNs / 1000) + "us"
+                + " earlyReturn=" + earlyReturn
+                + (error == null ? "" : " error=" + error.getClass().getSimpleName()
+                + (error.getMessage() == null ? "" : " — " + error.getMessage())));
+    }
+
+    /**
+     * 清空绘制数据（= 覆盖层这一帧/这一段没东西可画）。
+     *
+     * <p><b>同一原因只记一次</b>：首次采集实测清空行刷了 24444 条（5 个隐藏编辑器
+     * 每帧一条），把真正的那几十帧埋在中间，而且每行都 flush 一次，本身就成了
+     * EDT 负担。改为按原因去重 —— 状态变化仍然看得见，噪声没了。
+     */
+    static void clearTrace(int id, String reason) {
+        if (!enabled()) {
+            return;
+        }
+        Trace tr = traceOf(id);
+        if (reason.equals(tr.lastClearReason)) {
+            return;
+        }
+        tr.lastClearReason = reason;
+        writeTrace(id, "clear", "reason=" + reason);
+    }
+
+    /** 毫秒格式（三位小数，6.944ms 这种帧间隔才看得出来）。 */
+    private static String ms(double v) {
+        return String.format("%.3f", v);
+    }
+
+    /**
+     * EDT 被占住的一次采样（由 {@link EdtWatchdog} 调用，见该类的说明）。
+     *
+     * <p>不按 animator 分桶：EDT 只有一条，这个问题与哪个编辑器无关，所以直接写文件、
+     * 由看门狗自己限量（一次运行最多 6 次）。
+     *
+     * @param waitedNs    ping 投递到执行之间的间隔
+     * @param stackCostNs 抓栈本身花的时间；≈waitedNs 说明当时是 JVM 全局暂停（GC），
+     *                    远小于 waitedNs 才说明是 EDT 上某个方法在跑
+     */
+    static void edtBlocked(long waitedNs, long stackCostNs, String frames) {
+        if (!enabled()) {
+            return;
+        }
+        writeFile("[edt] " + traceStamp()
+                + " waited=" + ms(waitedNs / 1e6) + "ms"
+                + " stackCost=" + (stackCostNs < 0 ? "?" : ms(stackCostNs / 1e6) + "ms")
+                + " " + frames);
+    }
 }

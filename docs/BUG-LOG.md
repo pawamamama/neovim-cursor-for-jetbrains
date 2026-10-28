@@ -264,7 +264,7 @@ inlay 出现**之前**的 `cp.y` 绘制 → 屏幕上比真实位置高 1 个行
 
 ---
 
-## BUG-007 刚打开 IDEA 后「第一次使用光标」必定卡一下（**未定位，本轮不修**）
+## BUG-007 刚打开 IDEA 后「第一次使用光标」必定卡一下（**已定位：平台侧一次性初始化；本轮修掉一个伴生缺陷**）
 
 **用户报（2026-10-28）**：
 
@@ -282,22 +282,214 @@ inlay 出现**之前**的 `cp.y` 绘制 → 屏幕上比真实位置高 1 个行
 等了 120 秒，AWT 队列早该空了。所以更像是**某处状态在「第一次」才被建立**，
 或者是「第一次」走了一条与后续不同的代码路径。
 
-**当前状态：未定位、未验证。本轮只记录，不做任何代码排查。**
+**用户补充的关键观察（2026-10-28，决定了整个排查方向）**：
 
-**待查方向（全部为推测，**不得当结论**）**：
+> 开头不碰键盘 → 用鼠标引导光标 17→20 **不会卡**；只要第一次碰键盘就卡一下。
 
-- `CaretAnimator` 构造函数里 `panel.setBounds(0,0, max(content.getWidth(),1), ...)` ——
-  构造时 content 尺寸可能还是 0，首帧 `tick()` 里 `content.isShowing()` 为 false 会
-  `panel.clearCorners()`，于是「第一次使用」才真正建立几何；
-- `startScheduler()` 后第一条投递与 `lastDispatchedDueNanos = Long.MIN_VALUE` 的交互；
-- `tick()` 开头的恢复检测（`rawDt > RECOVERY_GAP_SECONDS`）在**首帧**的 `lastNanos = 0` 下
-  会算出极大的 `rawDt`，走「长停顿 → 一次性归位」分支 —— 这可能正是「卡到没有」；
-- `NeovideCaretManager` 在首帧前后是否有一次 `applyConfig()` 全量重建 trail；
-- 与 BUG-005（终端不播动画）、BUG-006（已修）是否同源，未知。
+即触发条件是「**本次会话第一次修改文档**」，不是「第一次使用光标」。鼠标点击只改光标
+位置、不改文档；键盘第一次改文档。这条把「首帧 EDT 负载高」「首次建立几何」等解释全部排掉。
 
-**验证方法建议**：开 `diagLogging`，做一次「启动 → 立刻动光标 → 停」，
-把 `[frame]` / `[trail]` 的前 20 行抓出来看首帧的 `rawDt`、`dt`、`carets`、frameseq。
-**不要**在没抓到首帧日志前改 `tick()` 的恢复检测逻辑 —— 那是全局都依赖的分支。
+### 取证方式（为此新增的诊断，默认关）
+
+`diagLogging` 打开后写 `<config>/neovide-cursor-diag.log`，新增 6 类行：
+`[boot]`（构造环境）、`[evt]`（光标事件 + `stampChanged`，首次改文档打 `FIRST-EDIT`）、
+`[tick]`（限量帧：`rawDt`/`dt`/`recovery`/`showing`/`quads`/`dispatchLag`/`cost`/`note`）、
+`[geom]`（`vpX` vs `offsetX` 的 `dx`）、`[paint]`（quads/cost/earlyReturn/异常）、
+`[clear]`（清空原因）。**只写独立文件，不走 `idea.log`**（144fps 会刷爆），每 animator 上限 5000 行。
+
+### 证据（2026-10-28 19:38 一次真实采集）
+
+操作序列与现象完全对应 —— 鼠标四次点击零停顿，第一次按键 427ms 停顿，第二次按键零停顿：
+
+```
+[evt] 19:38:45.536 vp=272:49 stamp=0     stampChanged=false
+[evt] 19:38:46.218 vp=271:26 stamp=0     stampChanged=false
+[evt] 19:38:47.476 vp=271:27 stamp=1432  stampChanged=true FIRST-EDIT   ← 第一次按键
+[tick] 19:38:47.489 n=1875 rawDt=427.460 dt=8.000 recovery=true
+       showing=true quads=1 delayMs=6 dispatchLag=420.663 cost=240us note=ok
+[evt] 19:38:48.700 vp=271:28 stamp=1550  stampChanged=true              ← 第二次按键，无停顿
+```
+
+**那 427ms 不是本插件花的**，三条独立证据：
+
+| 证据 | 数值 | 含义 |
+|---|---|---|
+| `[tick]` 的 `dispatchLag` / `cost` | 420.663ms / 240µs | 这一帧在 EDT 上**等了** 420ms 才开始；我们自己的活只有 240 微秒 |
+| `[paint]` | 该窗口内**没有**任何 ≥4ms 的绘制（门限就是 4ms） | 不是我们画得慢 |
+| `idea.log`（平台自己的告警） | `EditorCaretMoveProcessor - Caret animation experienced a significant slowdown … (last frame took 31 ms)` | 平台自己的光标动画同时报降速 |
+| `idea.log`（同一时刻在做什么） | `CpuDetector - [Inline Completion] CPU detector` → `checkCancelled is invoked while write-action is pending` → `Full line native server is started` + 6× `DynamicBundle - Cleanup bundle cache` | 补全子系统在首次编辑时做惰性初始化 |
+
+**根因**：平台/补全插件在「本次会话第一次编辑」时做一次性惰性初始化（Full Line 原生服务器
+启动 + bundle 缓存清理等），把 EDT 占住约 420ms。本插件不参与这 420ms；它之所以看起来
+像"光标坏了"，是因为**原生光标被隐藏、覆盖层是唯一可见光标**，它跟着 EDT 一起冻住 ——
+于是你看到的是「光标把字符的一半吸附过去」或「直接消失到下一个位置」。
+
+**排除掉的旧推测**（都已用日志否掉，不要重捡）：
+`lastNanos=0` 的恢复分支确实会在每个 animator 的 `n=1` 命中（`rawDt=5863359ms`，见日志），
+但那时 `showing=false`、什么都不画，与现象无关；`lastDispatchedDueNanos` 的首次投递正常
+（`dispatchLag` 稳定在个位数毫秒）；`applyConfig()` 在启动期没有被调用。
+
+### 本轮修掉的伴生缺陷（**这是我们自己的问题**）
+
+`tick()` 的「编辑器不可见」早退分支原来**直接 return，不改 `currentDelayNs`**，而
+`alwaysHighFps` 默认开启时那个值就是 6.94ms —— 于是**每个不可见的编辑器也继续按 144fps
+被投递**。实测：5 个从未显示的编辑器各自刷了约 4880 次 `not-showing`，
+等于 **720 次 EDT 任务/秒的纯空转**（每次还要 3 个平台调用 + 一次 clear）。
+
+**修法**（`CaretAnimator`）：
+1. 不可见时把 `currentDelayNs` 置为 `hiddenTierDelayNs(false)`（空闲档 120ms）；
+2. 记 `wasHidden`；切回可见的第一帧 `forceResync = true` + `RenderScheduler.wakeUp(this)`，
+   否则最多会有 120ms 的陈旧光标（那正是本类注释里要避免的"光标莫名悬浮"）；
+3. `hiddenTierDelayNs(boolean)` 抽成**包内静态纯函数**，探针直接调用（不复刻逻辑）。
+   诊断日志的 `[clear]` 同时改成**同原因只记一次**（原来每帧一条，24444 行把正片埋了）。
+
+**这一条修好了吗**：修好了，但它**不会**消除那 420ms —— 那在平台侧。它消除的是
+每秒 720 次无意义 EDT 任务，让任何停顿的恢复期（实测其后还有 32ms / 16ms 的抖动帧）更干净。
+
+### 守门探针与变异测试
+
+`tools/settings-probe/VBoot.java`（已登记进 `build-v-probes.ps1` 的 `$mains`）：
+B-1 不可见必须返回正数；B-2 可见必须返回 -1；B-3 ≥ 活跃档 10 倍；B-4 ≠ 活跃档；
+B-5 ≥ 120ms。断言调用 `CaretAnimatorProbe.hiddenTierDelayNs(...)`（生产同一个函数）。
+
+变异测试（两次都是**全量重编译到空目录**，不用增量字节码）：
+
+| 变异 | 结果 |
+|---|---|
+| `hiddenTierDelayNs` 改成恒返回 `-1`（等价于撤回修复） | **B-1 / B-3 / B-5 三红**，`V-BOOT 结果：PASS 2，FAIL 3`，`EXIT=1` |
+| 恢复原实现 | `V-BOOT 结果：PASS 5，FAIL 0`，`EXIT=0` |
+
+门禁（`build-v-probes.ps1 -Repo …` 全量）：`FAILED（6 个探针未通过）`，
+名单仍是 `VTools / VHints / VCustom / VReset2 / VSepBound / VSleep`，逐字不变
+（`VRegr2` 2 红仍按 informational 不计入）。`VBoot` 5/5 绿。
+D0：`core/NeovideConfig.java` 零 diff。
+
+### 真机复验（0.9.100，2026-10-28 19:56 一次采集）
+
+| 检查项 | 0.9.99 | 0.9.100 | 结论 |
+|---|---|---|---|
+| `[clear]` 总条数 | 24444 | **6** | 去重生效（每 animator 一次状态转移） |
+| 隐藏编辑器帧间隔（4322 样本，`note=not-showing`） | ~6.94ms | **中位 120.078ms** | 降频生效 |
+| 第一次按键那帧 `dispatchLag` | 420.663ms | **238.485ms** | 仍存在（Full Line 未关，符合预期） |
+| 其后抖动帧 | 32.8 / 16.7 / 16.0 / 12.2ms | 6.9 / 2.3 / 5.2 / 33.7ms | 恢复期更干净 |
+
+### 复验中发现的新回归（0.9.101 已修）
+
+降频带来一个副作用：隐藏期间 `clearCorners()` 把 `quadCount` 清零，而**切回可见时平台
+会立刻重绘一次** —— 那一帧什么都没画。日志实测：
+
+```
+19:57:15.026 [paint] id=887907989 quads=0 earlyReturn=true   ← 切到该标签页，画出空面板
+19:57:15.142 [paint] id=887907989 quads=1 cost=4641us        ← 116ms 后才画出光标
+```
+
+原实现是在 `tick()` 里发现 `wasHidden` 才唤醒，本身就滞后最多一个空闲周期（120ms）
+—— 观感是「切标签页后光标迟到」。**修法**：监听 `HierarchyEvent.SHOWING_CHANGED`，
+显示状态一变就 `forceResync = true` + `RenderScheduler.wakeUp(this)`；`dispose()` 里摘掉监听。
+这条**探针覆盖不到**（造不出真实显示/隐藏的组件层级），只能靠真机日志复验。
+
+**0.9.101 复验（2026-10-28 20:05 采集）**：全程**没有再出现任何 `quads=0` 的空绘制**
+（0.9.100 每个 animator 至少一次），`[clear]` 仍是 6 条，隐藏编辑器 `delayMs=120`。
+共观察到 6 次「隐藏 → 可见」切换。缺口：`[paint]` 只在 ≥4ms 或空绘制时才记，
+所以"切换→首帧"的毫秒差没有直接读数 —— 若将来要把这条也变成硬指标，需在切换后
+N 帧内无条件记录绘制耗时。
+
+**用户真机确认（2026-10-28）**：「切标签页本来就是不迟到，现在优化的更好了。」
+即：0.9.100 引入的那个 116ms 迟到在 0.9.101 已消失，且隐藏降频没有带来新的观感问题。
+
+**另一个结论（值得记下来）**：首键停顿三轮实测 420.663ms（0.9.99）→ 238.485ms（0.9.100）
+→ 401.453ms（0.9.101），波动区间 238~420ms，**与本插件的改动无关**（两轮降频改动前后
+都在 400ms 上下）。这也反证了它不是我们造成的。
+
+### 仍未解决 / 下一步
+
+**已排除：本地 Full Line 补全。** 用户关掉它（`fullLine`）后实测首键 `dispatchLag`
+仍是 **385.600ms**（0.9.101 那一轮），与本轮其它数据一致 —— 它不是（唯一）元凶。
+三轮数字：420.663（补全开）→ 238.485（补开）→ 401.453（补开）→ 385.600（补全关）。
+波动 238~420ms，说明这是几件事叠加或平台侧别处，而不是单一插件。
+
+**正在做：EDT 看门狗**（`ui/EdtWatchdog.java`，0.9.102）。后台线程每 50ms 往 EDT 投一个
+空任务；若投递到执行超过 200ms，就**在阻塞期间**立刻抓 `AWT-EventQueue-0` 的调用栈，
+写成一行：
+
+```
+[edt] <时间戳> waited=XXXms stackCost=Yms AWT-EventQueue-0 <- 类.方法 <- 类.方法 <- …
+```
+
+判读方法（设计如此，见类注释）：
+
+| `waited` | `stackCost` | 含义 |
+|---|---|---|
+| ~390ms | ≈0.2ms | EDT 上**某个方法**在跑 —— 栈里第一层非 JDK 的方法就是真凶 |
+| ~390ms | ≈390ms | JVM 全局暂停（GC / 安全点），栈不可信 |
+
+离线自检已确认它真能抓到：人为让 EDT 睡 700ms，抓到
+`AWT-EventQueue-0 <- Thread.sleep <- TmpWatchdogSmoke.lambda$main$0 <- InvocationEvent.dispatch`。
+
+**为什么第一版抓不到**（值得记）：最初是「等 ping 跑完再判断耗时」，结果 waited=851ms
+但栈里是 `EventQueue.getNextEvent` —— 那时 EDT 已经空闲，真凶早走了。必须在超时**那一刻**
+抓，而不是事后抓。
+
+### 根因定案（0.9.102 首次采到栈，2026-10-28 20:48）
+
+```
+[edt] 20:48:03.389 waited=202.711ms stackCost=2.254ms AWT-EventQueue-0
+  <- com.intellij.codeInsight.template.LiveTemplateContextsSnapshot.getLiveTemplateContext
+  <- com.intellij.codeInsight.template.impl.TemplateContext.isEnabledNoSync   (递归 5 层)
+  <- TemplateContext.makeInheritanceExplicit
+  <- TemplateContext.readTemplateContext
+  <- TemplateSettings.readTemplateFromElement
+  <- TemplateSettings.parseTemplateGroup
+  <- TemplateSettings$1.readScheme            ← 解析整份 Live Templates 配置
+  <- …(共 179 层)
+```
+
+紧跟其后就是首次按键那一帧：`rawDt=427.473ms` / `dispatchLag≈420ms`。
+`stackCost` 只有 2.254ms（远小于 `waited`），**排除 GC**：确实是某个方法在 EDT 上跑。
+
+**触发条件 = 本次会话第一次编辑**，与时间无关（所以"等两分钟"没用）。
+代价与模板数量成正比，本机实测：
+
+| 来源 | 条数 |
+|---|---|
+| `Zen CSS.xml` | **641** |
+| `Zen HTML.xml` | **220** |
+| 其余（Groovy 31 / JS 26 / Shell 26 / Kotlin 25 / SQL 13 / …） | ~181 |
+| 合计 | **1062** |
+
+**解除办法（用户侧配置，非本插件代码）**：设置 → 编辑器 → Live Templates，
+删掉或取消勾选 `Zen CSS` / `Zen HTML` 两个组（861 条，占 81%），首次编辑的解析成本
+应当随之大幅下降。**本插件无法从代码侧消除这 420ms。**
+
+### 反证：删掉 81% 的模板**没有**改善（2026-10-28 20:57 复验）
+
+把 `Zen CSS.xml`（641 条）+ `Zen HTML.xml`（220 条）移出 `templates/`（模板总数
+1062 → 201）后重启再测：
+
+| 版本 | 首键 `dispatchLag` |
+|---|---|
+| 0.9.102，Zen 模板在（1062 条，20:48） | ≈420ms（`rawDt=427.473ms`） |
+| 0.9.102，Zen 模板移走（201 条，20:57） | **413.770ms**（同一量级，无改善） |
+
+所以**模板数量不是主因**。同一轮抓到两条 `[edt]`（都 ~205ms，`stackCost` 2~4.5ms，
+仍然排除 GC）：
+
+```
+[edt] <- Properties.load <- IntelliJResourceBundle.<init>          ← 本地化资源包加载
+[edt] <- TemplateContext.isEnabledNoSync (递归) …                  ← 模板上下文解析
+```
+
+**修正后的根因**：首次编辑时平台的一整套惰性初始化 —— **本地化（zh_CN）资源包加载**
++ Live Template 上下文解析 —— 合计约 410ms。它与"模板有多少条"无关，而与"这些代码
+第一次被走到"有关。用户侧可做的只剩"换英文 UI 试试"，但代价是界面变英文，不推荐；
+本插件对此**无能为力**。
+
+> 教训：先别急着让用户删配置。这次"删 81% 模板"的假设被实测直接否掉，
+> 如果当时没复测就写进结论，BUG-LOG 就会多一条假因果 —— 与文首那份"错误结论"是同一种病。
+
+**订正**：本条目早先写的「抓 `[frame]`/`[trail]` 的前 20 行看 `rawDt`」是错的 ——
+`rawDt` 从来不在 diag 文件里（只在 `idea.log` 的 debug 行），且 `[frame] #N` 是慢路径
+计数不是渲染帧号、默认采样永远跳过首帧。正确做法就是本轮新增的 `[tick]`/`[evt]` 行。
 
 ---
 

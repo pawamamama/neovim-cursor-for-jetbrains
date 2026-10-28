@@ -243,6 +243,15 @@ public class CaretAnimator implements Disposable, CaretListener {
     private final JComponent content;
     private final CaretTrailPanel panel;
 
+    /**
+     * 【BUG-007】诊断追踪 id。
+     *
+     * <p>用 {@code identityHashCode} 而不是静态自增：多编辑器时各 animator 的日志
+     * 在同一份文件里交错，必须有个能区分它们的键。与既有 {@code CursorDiag.SAMPLE_STATE}
+     * 用同一个口径（那边也是按 identityHashCode 隔离）。
+     */
+    private final int traceId = System.identityHashCode(this);
+
     /** 多光标不辉光（全局设置，来自 State，不随预设变化） */
     private boolean multiCursorNoGlow;
 
@@ -648,6 +657,32 @@ public class CaretAnimator implements Disposable, CaretListener {
     private boolean forceResync = false;
 
     /**
+     * 【BUG-007】上一次 tick 时编辑器是否不可见 —— 用于"切回可见就立刻补帧"。
+     *
+     * <p>只服务一件事：不可见时我们把调度降到空闲档（120ms），若切回可见时不主动
+     * 唤醒，最坏会有 120ms 的画面停在旧光标位置。
+     */
+    private boolean wasHidden;
+
+    /**
+     * 【BUG-007】编辑器「重新可见」时立刻补帧（在 {@code tick()} 里发现太晚）。
+     *
+     * <p><b>为什么必须有它</b>：隐藏期间 `clearCorners()` 会把 `quadCount` 清零；
+     * 而切回可见时<b>平台会立刻重绘一次</b>，那一帧我们什么都没有。
+     * 0.9.100 的首用日志实测（id=887907989）：
+     *
+     * <pre>
+     *   19:57:15.026 [paint] quads=0 earlyReturn=true      ← 切到该标签页，画出空面板
+     *   19:57:15.142 [paint] quads=1 cost=4641us           ← 116ms 后才画出光标
+     * </pre>
+     *
+     * 原实现在 `tick()` 里发现 {@link #wasHidden} 才唤醒，本身就滞后最多一个空闲周期
+     * （120ms）—— 观感就是「切标签页后光标迟到」。改成监听层级变化后，唤醒发生在
+     * 显示状态改变的那一刻，下一帧 ≈ 立即。
+     */
+    private final java.awt.event.HierarchyListener showListener;
+
+    /**
      * 上一次 refreshTarget 看到的行高；{@code -1} = 尚未测量。
      *
      * <p><b>为什么需要单独记它（Ctrl+滚轮缩放导致光标纵向漂移）</b>：
@@ -748,6 +783,17 @@ public class CaretAnimator implements Disposable, CaretListener {
         panel.setBounds(0, 0, Math.max(content.getWidth(), 1), Math.max(content.getHeight(), 1));
         content.add(panel);
 
+        // 【BUG-007】显示状态一变就立刻唤醒 —— 见 showListener 字段注释里的实测证据。
+        // 挂在 panel 上而不是 content 上：panel 是我们自己 new 的，dispose 时能干净摘掉。
+        this.showListener = e -> {
+            if ((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED) != 0
+                    && content.isShowing()) {
+                forceResync = true;
+                RenderScheduler.wakeUp(this);
+            }
+        };
+        panel.addHierarchyListener(showListener);
+
         editor.getCaretModel().addCaretListener(this);
 
         // 【BUG-006】inlay 也会改变绘制几何，但它既不改文档也不改视觉行号，
@@ -788,6 +834,72 @@ public class CaretAnimator implements Disposable, CaretListener {
         refreshTarget();
 
         startScheduler();
+
+        // 【BUG-007】诊断：记录这个 animator 诞生时的环境。
+        // 关着 diagLogging 时 bootTrace 第一句就返回 —— 生产路径零变化。
+        panel.setTraceId(traceId);
+        CursorDiag.bootTrace(traceId, safeEditorKind(),
+                content.getWidth(), content.getHeight(), content.isShowing(),
+                config.hideNativeCaret, config.alwaysHighFps, targetFps,
+                String.valueOf(config.trailMode));
+
+        // 【BUG-007】诊断开启时再起 EDT 看门狗（幂等，每个 JVM 一条）。
+        // 它回答的是「EDT 被谁占住」—— 这是 [tick] 的 dispatchLag 回答不了的问题。
+        if (CursorDiag.enabled()) {
+            EdtWatchdog.start();
+        }
+    }
+
+    /** 编辑器类型名；取不到时退化为 UNKNOWN（诊断代码绝不允许自己抛异常）。 */
+    private String safeEditorKind() {
+        try {
+            EditorKind kind = editor.getEditorKind();
+            return kind == null ? "null" : kind.name();
+        } catch (Throwable t) {
+            return "UNKNOWN";
+        }
+    }
+
+    /**
+     * 【BUG-007】诊断：记一次光标事件（含「这次改了文档吗」）。
+     *
+     * <p>为什么要把 stamp 一起记：用户实测「用鼠标把光标从 17 引到 20 不卡、
+     * 第一次按键才卡」。两者的差别只在「文档改没改」，所以 {@code stampChanged}
+     * 是整份日志里最重要的一个布尔值 —— 它把「哪一帧才是正片」标出来。
+     */
+    private void traceCaretEvent(String kind) {
+        if (!CursorDiag.enabled()) {
+            return;
+        }
+        int line = -1;
+        int column = -1;
+        int offset = -1;
+        long stamp = -1L;
+        try {
+            VisualPosition vp = editor.getCaretModel().getVisualPosition();
+            line = vp.line;
+            column = vp.column;
+            offset = editor.getCaretModel().getOffset();
+            stamp = editor.getDocument().getModificationStamp();
+        } catch (Throwable ignored) {
+            // 编辑器正在销毁：字段保持 -1，日志里看得出来
+        }
+        CursorDiag.caretEventTrace(traceId, kind, line, column, offset, stamp);
+    }
+
+    /**
+     * 【BUG-007】诊断：每帧一行（限量规则在 CursorDiag 里）。
+     *
+     * @param rawDtNs 本帧真实间隔（首帧是 {@code nanoTime} 本身，极大 —— 正是要看的东西）
+     * @param note    出口原因：ok / no-trail / not-showing
+     */
+    private void traceTick(long rawDtNs, double dt, boolean recovery, boolean showing,
+                           int trails, int quads, long dispatchLagNs, long costNs,
+                           String note) {
+        CursorDiag.tickTrace(traceId, rawDtNs, dt, recovery, showing, trails, quads,
+                panel.getWidth(), panel.getHeight(),
+                content.getWidth(), content.getHeight(),
+                currentDelayMs, dispatchLagNs, costNs, note);
     }
 
     // ==================== 渲染调度 ====================
@@ -960,6 +1072,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         wakeUp();
         CursorDiag.caretCountChanged(editor.getCaretModel().getAllCarets().size() - 1,
                 editor.getCaretModel().getAllCarets().size(), "added");
+        traceCaretEvent("added");
     }
 
     /**
@@ -974,6 +1087,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         wakeUp();
         CursorDiag.caretCountChanged(editor.getCaretModel().getAllCarets().size() + 1,
                 editor.getCaretModel().getAllCarets().size(), "removed/merged");
+        traceCaretEvent("removed");
     }
 
     @Override
@@ -991,6 +1105,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 代价：只在光标事件时多做一次 visualPositionToXY，不在每帧热路径上。
         forceResync = true;
         wakeUp();
+        traceCaretEvent("pos");
     }
 
     /**
@@ -1018,8 +1133,16 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 每帧：重新读取光标位置 → 推进物理 → 局部重绘 */
     private void tick() {
         long now = System.nanoTime();
-        double rawDt = (now - lastNanos) / 1_000_000_000.0;
+        long tickStart = now;
+        // 【BUG-007】诊断：投递延迟 = 本帧真正开始执行 - 调度线程登记的到期时刻。
+        // 它把「我们慢」与「EDT 被别人占住」分开：tick 自身耗时看 cost，等不到 EDT 看 dispatchLag。
+        long dispatchedDue = lastDispatchedDueNanos;
+        long dispatchLagNs = (dispatchedDue == Long.MIN_VALUE) ? -1L : now - dispatchedDue;
+        // 保留原始间隔：诊断要用它（lastNanos 下一行就被覆盖了）
+        long rawDtNs = now - lastNanos;
+        double rawDt = rawDtNs / 1_000_000_000.0;
         double dt = Math.min(rawDt, MAX_DT);
+        boolean recovery = rawDt > RECOVERY_GAP_SECONDS;
         lastNanos = now;
 
         // 【恢复检测：这一帧跨过了很长的时间】
@@ -1058,7 +1181,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         //   · 长停顿（> 上限）：dt 取真实间隔，触发短路一次性归位
         //     → 离开几秒后回来，用户期待「光标已在新位置」，
         //        而不是补放一段几秒钟的拖尾动画
-        if (rawDt > RECOVERY_GAP_SECONDS) {
+        if (recovery) {
             dt = (rawDt <= RECOVERY_STEP_CAP_SECONDS)
                     ? ACTIVE_DELAY_MS / 1000.0     // 短停顿：按一帧推进 → 平滑展开
                     : rawDt;                       // 长停顿：一次性归位
@@ -1092,14 +1215,35 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         // 多光标：只要没有任何活跃拖尾就退出（等价于旧的 !initialized）
         if (activeTrails.isEmpty()) {
+            traceTick(rawDtNs, dt, recovery, content.isShowing(), 0, panel.quadCount(),
+                    dispatchLagNs, System.nanoTime() - tickStart, "no-trail");
             return;
         }
 
         // 编辑器不可见（后台标签页、尚未完成初始化）时不绘制。
         // 否则拖尾会停在一个错误的位置，看起来就是"光标莫名悬浮"。
         if (!content.isShowing()) {
-            panel.clearCorners();
+            panel.clearCorners("not-showing");
+            // 【BUG-007 实测发现的真缺陷】这里原来直接 return，currentDelayNs 停在
+            // 上一次算出的值 —— 而 alwaysHighFps 默认开启时那就是 6.94ms。
+            // 于是【每个不可见的编辑器也继续按 144fps 投递 EDT 任务】。
+            // 2026-10-28 的诊断日志实测：5 个从未显示的编辑器各自刷了约 4880 次
+            // not-showing，等于 720 次/秒的纯空转，全部压在 EDT 上。
+            // 不可见 = 屏幕上看不到它，任何一帧都没有意义，直接降到空闲档。
+            currentDelayNs = hiddenTierDelayNs(false);
+            currentDelayMs = (int) (currentDelayNs / 1_000_000L);
+            wasHidden = true;
+            traceTick(rawDtNs, dt, recovery, false, activeTrails.size(), panel.quadCount(),
+                    dispatchLagNs, System.nanoTime() - tickStart, "not-showing");
             return;
+        }
+
+        // 【从隐藏切回可见】必须立刻补一帧，否则最多要等一个空闲周期（120ms），
+        // 期间画面上的光标停在旧位置 —— 那正是本类一开始要避免的"光标莫名悬浮"。
+        if (wasHidden) {
+            wasHidden = false;
+            forceResync = true;
+            RenderScheduler.wakeUp(this);
         }
 
         // 内容区尺寸变化时同步面板大小（窗口缩放、分屏调整等）。
@@ -1124,6 +1268,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         currentDelayMs = (int) (currentDelayNs / 1_000_000L);
 
         recordFrameStats(now, moved || anyAnimating);
+
+        traceTick(rawDtNs, dt, recovery, true, activeTrails.size(), panel.quadCount(),
+                dispatchLagNs, System.nanoTime() - tickStart, "ok");
     }
 
     /**
@@ -1147,6 +1294,25 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 165Hz 屏想要的 6.06ms 表达不出来。实测连续 sleep(4) 能到 221~223fps，
      * 说明系统粒度足够 —— 限制来自我们自己用整毫秒取值。
      */
+    /**
+     * 【BUG-007】不可见编辑器的调度间隔 —— 纯函数，探针直接调用。
+     *
+     * @return 不可见时返回空闲档间隔（纳秒）；可见时返回 {@code -1}，表示"交给原逻辑"
+     *
+     * <p><b>为什么必须单独立出来</b>：这个决定写死在 {@code tick()} 的早退分支里，
+     * 而那条分支在离线探针里极难触发（要造一个 isShowing=false 的真实编辑器）。
+     * 抽成纯函数后，探针断言的是【生产用的同一个函数】，不是复刻一份逻辑
+     * （CLAUDE.md 陷阱 3：探针复刻算法是假通过的经典来源）。
+     *
+     * <p><b>为什么不可见就必须降频</b>：{@code alwaysHighFps} 的语义是"编辑器可见时
+     * 不要因空闲而降帧"，不是"看不见的编辑器也要 144fps"。实测（V-BOOT 采集的
+     * 2026-10-28 日志）5 个隐藏标签页各刷 4880 次 not-showing ≈ 720 次 EDT 任务/秒，
+     * 全部是空转。
+     */
+    static long hiddenTierDelayNs(boolean showing) {
+        return showing ? -1L : IDLE_DELAY_MS * 1_000_000L;
+    }
+
     private long computeNextDelayNs(boolean active) {
         // 常驻刷新：不区分有无动画，永远走活跃档。
         // 这样停手后第一次操作也不会"冷启动"—— 下一帧最多 8ms 就到。
@@ -1413,6 +1579,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                 // 快速路径契约（A9b/A9c/A9d 要求这一帧零昂贵调用）。
                 // 数量变化一定伴随 caret 事件，事件会先置 forceResync，
                 // 下一帧就走不到这里。
+                CursorDiag.tickPathTrace(traceId, "fast");
                 return false;
             }
 
@@ -1516,6 +1683,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 若完全没出现，问题在别处（EDT 负载 / 重绘面积）。
                     CursorDiag.imeSkipPicked(imeSkipFrames, p.x, caretOffset,
                             editor.offsetToXY(caretOffset).x);
+                    CursorDiag.tickPathTrace(traceId, "ime-skip");
                     return false;
                 }
             }
@@ -1593,6 +1761,8 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 3. 缓存键复用 hasCaretChanged() —— 见该方法的 IME 与时序说明。
 
             long stamp = editor.getDocument().getModificationStamp();
+            // 【BUG-007】诊断：这个 stamp 本来就要读，顺手判定「第一次改文档」
+            CursorDiag.noteStampTrace(traceId, stamp);
             frameSeq++;
 
             CaretModel caretModel = editor.getCaretModel();
@@ -1859,6 +2029,18 @@ public class CaretAnimator implements Disposable, CaretListener {
                     double cy = cp.y + lineHeight / 2.0;
                     double w = width;
                     double h = height;
+                    // 【BUG-007】诊断：只在追踪窗口内多付一次 offsetToXY，
+                    // 用来判定「两个坐标 API 分岔了半个字符」这件事是否真的发生。
+                    if (CursorDiag.geometryWanted(traceId)) {
+                        int offsetX = Integer.MIN_VALUE;
+                        try {
+                            offsetX = editor.offsetToXY(caretOff).x;
+                        } catch (Throwable ignored) {
+                            // 取不到就记 ?（不影响判定，只是少一个对照值）
+                        }
+                        CursorDiag.geometryTrace(traceId, cvp.line, cvp.column, cp.x, cp.y,
+                                (float) lineHeight, offsetX, cx, cy, w, h);
+                    }
                     if (trail.setTarget(cx, cy, w, h)) {
                         changed = true;
                     }
@@ -2511,7 +2693,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             trail.snapToTarget();
         }
 
-        panel.clearCorners();
+        panel.clearCorners("mode-change");
         panel.refreshStyles();
 
         // 让下一帧强制重算位置，避免快速路径把旧状态固化
@@ -2579,7 +2761,7 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 清除已绘制的拖尾并刷新一次（切到诊断模式时调用） */
     public void clearTrail() {
-        panel.clearCorners();
+        panel.clearCorners("clear-trail");
         try {
             content.repaint();
         } catch (Throwable ignored) {
@@ -2597,6 +2779,13 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 必须在 disposed 置位之后 —— 已经投递、还没执行的 EDT 任务会先看到 disposed
         // 直接返回（基线的 dispose 保护语义不变）。
         RenderScheduler.unregister(this);
+
+        // 【BUG-007】摘掉显示状态监听，避免编辑器已销毁后还被回调
+        try {
+            panel.removeHierarchyListener(showListener);
+        } catch (Throwable ignored) {
+            // 面板可能已不可用；摘不掉也不影响正确性（panel 会随编辑器一起回收）
+        }
 
         try {
             editor.getCaretModel().removeCaretListener(this);

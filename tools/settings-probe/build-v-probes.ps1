@@ -117,7 +117,10 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         'VInlay',
         # 【2026-10-28】预设三份字段清单同源：快照存什么 == 内置预设写什么 == 匹配比什么。
         # 之前三者分家，实测症状：切自定义预设会改颜色；改斜度不派生副本。
-        'VFieldDomain')
+        'VFieldDomain',
+        # 【BUG-007】首用诊断实测：不可见编辑器在 alwaysHighFps 下仍按 144fps 空转
+        # （5 个隐藏标签页 = 720 次 EDT 任务/秒）。VBoot 守「不可见必须降到空闲档」。
+        'VBoot')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

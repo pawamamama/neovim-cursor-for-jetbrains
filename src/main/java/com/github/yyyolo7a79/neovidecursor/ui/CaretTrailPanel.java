@@ -86,6 +86,14 @@ public class CaretTrailPanel extends JComponent {
     private int quadCount = 0;
 
     /**
+     * 【BUG-007】诊断追踪 id（由 {@link CaretAnimator} 构造时写入）。
+     *
+     * <p>{@code -1} = 未接入（例如设置页预览用的那个面板实例），
+     * 此时绘制追踪全部安静跳过 —— 预览不该往诊断文件里写东西。
+     */
+    private int traceId = -1;
+
+    /**
      * 绘制单个四边形时用的坐标中转（复用，避免每帧分配）。
      *
      * <p>辉光绘制与 {@link #computeOffsetDirections} 都按「4 个点的数组」工作，
@@ -698,6 +706,11 @@ public class CaretTrailPanel extends JComponent {
         };
     }
 
+    /** 接入诊断追踪（{@code CaretAnimator} 构造时调用；预览面板不接）。 */
+    public void setTraceId(int traceId) {
+        this.traceId = traceId;
+    }
+
     /** 清除全部绘制数据（光标不可见 / 模式切换时调用） */
     public void clearCorners() {
         hasGhosts = false;
@@ -705,6 +718,18 @@ public class CaretTrailPanel extends JComponent {
         // 只清 quadCount 的话下一帧仍会把旧四边形画出来（清不干净）。
         quadCount = 0;
         ghosts.clear();
+    }
+
+    /**
+     * 【BUG-007】带原因的清空。
+     *
+     * <p>「谁把画面清掉了」是排查「光标消失」的第一现场：清空之后如果那一帧没有
+     * 重新 {@code addQuad}，面板就是空的，而原生光标又是隐藏的 → 屏幕上什么都不剩。
+     * 所以每次清空都留一行原因。
+     */
+    public void clearCorners(String reason) {
+        clearCorners();
+        CursorDiag.clearTrace(traceId, reason);
     }
 
     // ==================== 绘制 ====================
@@ -720,7 +745,11 @@ public class CaretTrailPanel extends JComponent {
 
     @Override
     protected void paintComponent(Graphics g) {
+        // 【BUG-007】诊断：本帧画了多少、花了多久。
+        // 两次 nanoTime 约 50ns，144fps 下可忽略；关闭 diag 时只多这两个调用。
+        long paintStart = System.nanoTime();
         if (quadCount <= 0 && !hasGhosts) {
+            CursorDiag.paintTrace(traceId, quadCount, System.nanoTime() - paintStart, true, null);
             return;
         }
 
@@ -736,9 +765,16 @@ public class CaretTrailPanel extends JComponent {
             for (int i = 0; i < quadCount; i++) {
                 paintQuad(g2, i);
             }
+        } catch (RuntimeException | Error e) {
+            // 【BUG-007】绘制异常以前是【完全静默】的（Swing 只把它打到 stderr），
+            // 而它的后果恰恰就是「光标消失」—— 先留一行证据，再按原样抛出，
+            // 不改变既有行为（不吞异常）。
+            CursorDiag.paintTrace(traceId, quadCount, System.nanoTime() - paintStart, false, e);
+            throw e;
         } finally {
             g2.dispose();
         }
+        CursorDiag.paintTrace(traceId, quadCount, System.nanoTime() - paintStart, false, null);
     }
 
     // ==================== 弹簧模式绘制 ====================
