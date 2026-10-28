@@ -14,10 +14,10 @@
 
 | 文档 | 行数 | 内容 |
 |---|---|---|
-| [START-HERE.md](../START-HERE.md) | 219 | **唯一的状态入口**。现状 / 门禁 / 地形 / 能做什么不能做什么 |
+| [START-HERE.md](../START-HERE.md) | 220 | **唯一的状态入口**。现状 / 门禁 / 地形 / 能做什么不能做什么 |
 | [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | 747 | **动手前必读**。13 条编号纪律 + 13 个专题（四-B~四-M） |
-| [PARAMETER-MAP.md](PARAMETER-MAP.md) | 172 | 每个参数是否跟随预设，含字段归属表 |
-| [NEXT-STEPS.md](NEXT-STEPS.md) | 176 | 当前状态 / 已完成 / 已放弃 / 待办 |
+| [PARAMETER-MAP.md](PARAMETER-MAP.md) | 204 | 每个参数是否跟随预设，含字段归属表 |
+| [NEXT-STEPS.md](NEXT-STEPS.md) | 240 | 当前状态 / 已完成 / 已放弃 / 待办 |
 
 ---
 
@@ -31,14 +31,14 @@
 |---|---|---:|---|
 | 改物理 / rank / 斜度 | [design/RANK-COLLAPSE-FIX.md](design/RANK-COLLAPSE-FIX.md) | 197 | 0.9.77，未核对 |
 | 对齐上游手感 | [design/UPSTREAM-VSCODE-RESEARCH.md](design/UPSTREAM-VSCODE-RESEARCH.md) | 166 | 0.9.83，未核对 |
-| **上游 vs 我们各自做了什么** | [design/UPSTREAM-PITFALLS.md](design/UPSTREAM-PITFALLS.md) | 672 | 0.9.93（2026-10-28 补分工一节） |
+| **上游 vs 我们各自做了什么** | [design/UPSTREAM-PITFALLS.md](design/UPSTREAM-PITFALLS.md) | 703 | 0.9.93（2026-10-28 补分工一节） |
 | 改颜色 / 渐变 / 彩虹 | [COLOR-STATE-DECISIONS.md](COLOR-STATE-DECISIONS.md) | 115 | 未核对 |
 | 优化性能（含已证伪方向） | [PERFORMANCE-FPS.md](PERFORMANCE-FPS.md) | 112 | 0.9.76，未核对 |
 | 理解 IDEA 平台限制 | [IDEA-PLATFORM-OPTIMIZATION.md](IDEA-PLATFORM-OPTIMIZATION.md) | 261 | 0.9.77，未核对 |
 | 发版 | [RELEASE-SAFETY.md](RELEASE-SAFETY.md) | 162 | 0.9.70，未核对 |
-| 接手这个项目 | [SKILL-neovide-cursor-plugin-handoff.md](SKILL-neovide-cursor-plugin-handoff.md) | 154 | 0.9.93 |
+| 接手这个项目 | [SKILL-neovide-cursor-plugin-handoff.md](SKILL-neovide-cursor-plugin-handoff.md) | 165 | 0.9.98 |
 | 离线编译打包插件（通用技巧） | [SKILL-jetbrains-plugin-offline-build.md](SKILL-jetbrains-plugin-offline-build.md) | 148 | 未核对 |
-| 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 359 | 0.9.93（2026-10-28 补 BUG-006 根因/修法/证据） |
+| 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 433 | 0.9.98（2026-10-28 补 BUG-006 根因、N-2/N-3 观察） |
 | **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 266 | 0.9.92，未核对 |
 | 代码审计记录 | [CODE-AUDIT-0.9.87.md](CODE-AUDIT-0.9.87.md) | 722 | 0.9.87（描述当时） |
 | **设置系统重构分步方案** | [../plans/settings-refactor.md](../plans/settings-refactor.md) | 830 | 0.9.80 实测结论 |

@@ -148,7 +148,7 @@ javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\c
 
 # 打包 + 安装（先跟用户确认）
 # 2026-10-28 起：会先备份个人配置、装完全量还原（一个字段都不丢）
-pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.93 -NoStart
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.98 -NoStart
 ```
 
 ---
