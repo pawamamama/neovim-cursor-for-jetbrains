@@ -84,16 +84,16 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 # 二、当前状态（用这组数字判断一切）
 
 ```
-版本         v0.9.98（IDEA 里已装；读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
-             git tag 仍停在 v0.9.83 —— 0.9.84~0.9.98 共 15 个版本没打 tag（版本未发布）
-HEAD         dde775f（main，2026-10-28）
-远程         fork/main 已同步至 dde775f（2026-10-28，差值 0）
+版本         v0.9.102（IDEA 里已装；读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
+             git tag 仍停在 v0.9.83 —— 0.9.84~0.9.102 共 19 个版本没打 tag（版本未发布）
+HEAD         c51a9e7（main，2026-10-28）
+远程         fork/main 已同步至 c51a9e7（2026-10-28，差值 0）
              ⚠️ 推送必须走 SSH：https 经本机代理 127.0.0.1:7897 会 TLS 中途断开
              （`error:0A000126 SSL unexpected eof`），绕过代理直连 443 也会超时。
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         93 个 V*.java（新增 VInlay / VFieldDomain）/ 6 个失败（都是过期断言，非功能故障）
+探针         94 个 V*.java（新增 VInlay / VFieldDomain / VBoot）/ 6 个失败（都是过期断言，非功能故障）
 ```
 
 ## 那 6 个失败的探针（**不要试图让它们变绿**）
