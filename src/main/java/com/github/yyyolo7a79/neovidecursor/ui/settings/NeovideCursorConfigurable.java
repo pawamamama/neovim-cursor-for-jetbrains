@@ -287,15 +287,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     // 做法：预设区顶部一段总说明 + 两个可复用的标签常量。
     // **只给「不随预设」的项加标签**，随预设的默认不标（用户要求：随预设不用写）。
     //
-    // 说明文本走 DslLabel（JEditorPane，按 HTML 渲染），所以能用 <b> 与 <font color>；
+    // 说明文本走 DslLabel（JEditorPane，按 HTML 渲染），所以能用 <b>；
     // 换行必须写 <br/>（字面 \n 会被折叠成空格）。
-    // 颜色选蓝灰/土黄而不是红绿：红绿在深色主题下容易与警告色混淆，这两个中性色深浅都能看。
+    //
+    // 【为什么不用 <font color>】第一版给标签上了蓝灰/土黄两色，用户实测认为不对：
+    // ① 面板说明文字本来全是主题灰，突兀出现彩色反而像链接或警告；
+    //   ② IDE 的链接色是 #589DF6，蓝灰标签容易被当成可点；
+    //   ③ 深色/浅色主题下固定色号的对比度无法两全。
+    // 现在只用加粗方括号 —— 与正文靠「[ ] + 加粗」区分，主题无关。
     /** 全局设置标签（设备开关 + 输入平滑）。 */
-    private static final String TAG_GLOBAL =
-            "<font color=\"#6C8EBF\"><b>[全局]</b></font> ";
+    private static final String TAG_GLOBAL = "<b>[全局]</b> ";
     /** 颜色预设域标签（拖尾色 / 辉光色 / 光标渐变）。 */
-    private static final String TAG_COLOR =
-            "<font color=\"#C08A3E\"><b>[颜色预设]</b></font> ";
+    private static final String TAG_COLOR = "<b>[颜色预设]</b> ";
 
     /** 预设区顶部的总说明。 */
     private static final String PRESET_SCOPE_HINT =
@@ -1080,8 +1083,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             g.row("多光标时关闭辉光（只保留拉伸）", row -> {
                 bindCheck(row, () -> pending.multiCursorNoGlow,
                         v -> pending.multiCursorNoGlow = v)
-                        .comment("<b>全局设置，不随预设变化</b>。"
-                                + "光标 ≥ 2 个时把辉光层数强制归零，"
+                        .comment(TAG_GLOBAL + "光标 ≥ 2 个时把辉光层数强制归零，"
                                 + "只保留拖尾拉伸形状 —— 减少多光标时的绘制开销。"
                                 + "单光标不受影响。", COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
@@ -1292,9 +1294,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
                 // 那个档位看不出区别。改成纯 1-5px。
                 addSlider(row, specOf("cursorWidthPx"), null);
-                row.rowComment("<b>持久配置，全局生效</b>。1~5 像素；"
-                        + "5 = IDEA 粗光标宽度（上限）。"
-                        + "<b>静止时也保持这个宽度。</b>", COMMENT, NO_LINK);
+                row.rowComment(TAG_GLOBAL + "1~5 像素，5 = IDEA 粗光标宽度（上限）。"
+                        + "静止时也保持这个宽度。", COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1312,9 +1313,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
             cur.row("光标高度（% 行高）", row -> {
                 addSlider(row, specOf("cursorHeightRatio"), null);
-                row.rowComment("<b>持久配置，全局生效</b>。"
-                        + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
-                        + "<b>上限就是顶格，不能超过。</b>", COMMENT, NO_LINK);
+                row.rowComment(TAG_GLOBAL + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
+                        + "上限就是顶格，不能超过。", COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
             return kotlin.Unit.INSTANCE;
