@@ -208,6 +208,17 @@ public final class CursorPresetApplier {
                     // 上一轮把 stretchRatioK 加进了预设，却漏了这个判据 ——
                     // 会导致「k 不同但其他相同」的两个预设被判为同一个。
                     && Math.abs(s.stretchRatioK - p.stretchRatioK())
+                            < CursorPresets.EPS
+                    // 【2026-10-28 补齐：这 4 项 applyAnimPresetFields 会写，match 原来不比】
+                    //
+                    // 不一致的实测后果（用户在面板上能感知）：
+                    //   改「拉伸强度」→ 派生副本；改「斜度 / 拖尾不透明度 / 淡出两项」→ 不派生。
+                    // 同一类操作两种结果，而且后四种改动会「无处可存」——
+                    // 下拉里没有对应项、matchAnimPreset 返回 null，看起来像没改。
+                    && s.slopeTicks == p.slopeTicksValue()
+                    && Math.abs(s.tailOpacity - p.tailOpacity()) < CursorPresets.EPS
+                    && s.cursorDisappearDelay == p.cursorDisappearDelay()
+                    && Math.abs(s.cursorFadeOutDuration - p.cursorFadeOutDuration())
                             < CursorPresets.EPS) {
                 return p;
             }

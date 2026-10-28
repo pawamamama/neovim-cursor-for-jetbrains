@@ -9,12 +9,15 @@ import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Caret;
 import com.intellij.openapi.editor.CaretModel;
 import com.intellij.openapi.editor.Editor;
+import com.intellij.openapi.editor.Inlay;
+import com.intellij.openapi.editor.InlayModel;
 import com.intellij.openapi.editor.SelectionModel;
 import com.intellij.openapi.editor.colors.EditorFontType;
 import com.intellij.openapi.editor.EditorKind;
 import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
+import com.intellij.openapi.util.Disposer;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
@@ -664,6 +667,48 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private int lastLineHeight = -1;
 
+    /**
+     * {@code InlayModel} 监听器的生命期句柄。
+     *
+     * <p><b>为什么需要它（BUG-006）</b>：IDEA 会在方法签名上方显示一行灰色的
+     * {@code @Contract(pure = true)}，这类东西是 <b>block inlay</b> ——
+     * 它只参与渲染、不是文件内容，所以
+     * <ul>
+     *   <li><b>不改文档</b> → {@code getModificationStamp()} 不变；</li>
+     *   <li><b>不占视觉行号</b> → {@code VisualPosition.line} 不变
+     *       （平台 {@code EditorCoordinateMapper.logToVisWithInlays()} 只加
+     *       after-line-end 元素的个数）；</li>
+     *   <li><b>但会把下方所有文本的 y 往下推</b>（{@code visualLineToYRange()} 里加了
+     *       {@code getHeightOfBlockElementsBeforeVisualLine()}）。</li>
+     * </ul>
+     * 也就是说这是「行号没变、像素变了」的情形 —— {@code SpringTrail.isAt(line, column, stamp)}
+     * 三个分量全不变，快速路径判定「光标没动」直接早退，覆盖层就冻在了旧的 y 上，
+     * 用户看到的就是「光标跳到上一行 / 该在 21 行却画在 20 行」。
+     *
+     * <p>平台没有提供 {@code removeListener}，只能靠 {@code addListener(listener, parentDisposable)}
+     * 的第二参数回收。本类的 {@link #dispose()} 是自定义方法（不经过 {@code Disposer} 管理
+     * 本对象），所以这里单独拿一个句柄，在 dispose 时 {@code Disposer.dispose(handle)} ——
+     * 否则监听器会一直挂在编辑器的 InlayModel 上。
+     */
+    private final Disposable inlayListenerHandle = () -> { };
+
+    /**
+     * 「inlay 刚变过，像素几何可能已失效」的单次标志，由 {@link #onInlayGeometryChanged()}
+     * 置位、由下一帧 {@code refreshTarget()} 消费。
+     *
+     * <p><b>为什么不能复用 {@code forceResync}</b>（这是第一版修法失败的地方，值得写下来）：
+     * {@code forceResync} 在 {@code refreshTarget()} 中段有一句
+     * {@code forceResync = false;}（「已进入慢路径，标志使命完成」），它在逐光标
+     * {@code needsUpdate} 判定<b>之前</b>执行 —— 所以 {@code forceResync} 实际只能
+     * 绕过<b>顶层</b>早退，管不到逐光标那一道门。
+     *
+     * <p>而 inlay 撑高行时，逐光标那一道门 {@code trail.isAt(cvp.line, cvp.column, stamp)}
+     * 的三个分量同样全都不变，于是照样判定「这个光标没动」→ 不重算。
+     * 第一版只置 {@code forceResync} 时，探针 I-1 实测位移 0.0px（应为 1 个行高），
+     * 就是这么被漏掉的。<b>所以必须有一个能活到 needsUpdate 处的标志。</b>
+     */
+    private boolean inlayGeometryDirty = false;
+
     public CaretAnimator(@NotNull Editor editor, @NotNull NeovideConfig config) {
         this.editor = editor;
         this.config = config;
@@ -704,6 +749,40 @@ public class CaretAnimator implements Disposable, CaretListener {
         content.add(panel);
 
         editor.getCaretModel().addCaretListener(this);
+
+        // 【BUG-006】inlay 也会改变绘制几何，但它既不改文档也不改视觉行号，
+        // 快速路径完全看不见 —— 必须靠平台事件补一个「几何可能变了」的信号。
+        // 详见 inlayListenerHandle 的字段注释。
+        //
+        // 不按 placement 过滤：ABOVE_LINE / BELOW_LINE 撑高行（y 变），
+        // INLINE 推后文本（x 变），AFTER_LINE_END 两者都占 —— 四者对绘制几何都有影响。
+        // 过滤器只会让我们在某一类上重新踩同一个坑。
+        try {
+            editor.getInlayModel().addListener(new InlayModel.Listener() {
+                @Override
+                public void onAdded(@NotNull Inlay<?> inlay) {
+                    onInlayGeometryChanged();
+                }
+
+                @Override
+                public void onRemoved(@NotNull Inlay<?> inlay) {
+                    onInlayGeometryChanged();
+                }
+
+                @Override
+                public void onUpdated(@NotNull Inlay<?> inlay) {
+                    onInlayGeometryChanged();
+                }
+
+                @Override
+                public void onUpdated(@NotNull Inlay<?> inlay, int changeFlags) {
+                    onInlayGeometryChanged();
+                }
+            }, inlayListenerHandle);
+        } catch (Throwable ignored) {
+            // 有些编辑器实现（例如只读的命令行视图）可能没有 InlayModel：
+            // 取不到就退化为旧行为（inlay 变化后等下一次光标事件自愈），不要因此让动画整个挂掉。
+        }
 
         // 首次定位
         refreshTarget();
@@ -911,6 +990,26 @@ public class CaretAnimator implements Disposable, CaretListener {
         //
         // 代价：只在光标事件时多做一次 visualPositionToXY，不在每帧热路径上。
         forceResync = true;
+        wakeUp();
+    }
+
+    /**
+     * 编辑器的 inlay（嵌入提示）发生了增 / 删 / 改 —— 绘制几何可能已经变了，强制重算。
+     *
+     * <p><b>为什么不能靠快速路径（BUG-006 的根因）</b>：快速路径的判据是
+     * 「视觉行号 + 视觉列号 + 文档修改戳都没变」。而 block inlay
+     * （例如 IDEA 自动给方法加的 {@code @Contract(pure = true)} 那一行）
+     * <b>三个分量一个都不动</b>：它不是文件内容（文档戳不变）、
+     * 也不占视觉行号（平台只把 after-line-end 元素算进行号），
+     * 却实实在在把下方文本的 y 往下撑了一个 inlay 高度。
+     *
+     * <p>结果就是覆盖层停在旧 y 上，用户看到「光标跳到上一行」。
+     * 本方法与 {@link #caretPositionChanged} 是同一类兜底：事件发生时置位，
+     * 由下一帧的 {@code refreshTarget()} 消费掉 —— 不在事件里做重算，
+     * 因为事件回调的时刻布局未必已经更新完。
+     */
+    private void onInlayGeometryChanged() {
+        inlayGeometryDirty = true;
         wakeUp();
     }
 
@@ -1295,8 +1394,14 @@ public class CaretAnimator implements Disposable, CaretListener {
             }
             lastLineHeight = currentLineHeight;
 
+            // 【BUG-006】inlay 变过 → 视觉行号 / 列号 / 文档戳都不会变，
+            // 但像素几何已经失效（block inlay 把下方文本撑低了）。
+            // 本帧读一次就消费掉；若后面被 IME 判据提前 return，标志保留到下一帧
+            // —— 与 forceResync 同一个位置清零（见下方 forceResync = false 处）。
+            boolean inlayChanged = inlayGeometryDirty;
+
             VisualPosition vp = editor.getCaretModel().getVisualPosition();
-            if (!forceResync && !fontScaleChanged
+            if (!forceResync && !fontScaleChanged && !inlayChanged
                     && cameraTrail != null && cameraTrail.isInitialized()
                     && cameraTrail.isAt(vp.line, vp.column,
                             editor.getDocument().getModificationStamp())) {
@@ -1417,6 +1522,9 @@ public class CaretAnimator implements Disposable, CaretListener {
             imeSkipFrames = 0;
 
             forceResync = false;
+            // inlay 标志在「已进入慢路径」这一点上与 forceResync 同生共死：
+            // 只有走到这里才清，IME 判据提前 return 时保留给下一帧。
+            inlayGeometryDirty = false;
 
             // 多光标：视觉位置缓存下沉到每个 SpringTrail（isAt / markAt）
 
@@ -1694,8 +1802,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                 //
                 // 【字号变化也必须算进来】Ctrl+滚轮缩放时 line/column/stamp 全不变，
                 // 但行高变了 —— cp.y 与 height 都得重算。详见 fontScaleChanged 的说明。
+                // 【inlayChanged 必须在这里出现】逐光标的这道门与顶层早退是两道独立判据：
+                // 只绕开顶层、不带上这一条时，isAt(line, column, stamp) 仍会判定
+                // 「这个光标没动」，像素坐标根本不会重算（VInlay 的 I-1 就是这么红的）。
                 boolean needsUpdate = forceResync
                         || fontScaleChanged
+                        || inlayChanged
                         || !trail.isInitialized()
                         || !trail.isAt(cvp.line, cvp.column, stamp);
 
@@ -2490,6 +2602,12 @@ public class CaretAnimator implements Disposable, CaretListener {
             editor.getCaretModel().removeCaretListener(this);
         } catch (Throwable ignored) {
             // 编辑器可能已关闭
+        }
+        // 平台没有 removeListener，只能 dispose 注册时给的生命期句柄（见字段注释）
+        try {
+            Disposer.dispose(inlayListenerHandle);
+        } catch (Throwable ignored) {
+            // 编辑器可能已关闭 / 句柄已释放
         }
         try {
             content.remove(panel);

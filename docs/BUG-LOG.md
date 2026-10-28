@@ -124,7 +124,7 @@ carets=8 → 每帧 8.53ms → 117fps
 2. 后果是**下一次敲的字符进错行**，不是观感瑕疵；
 3. 属于「光标服务不可信」，而光标服务是本插件唯一的产品价值。
 
-**当前状态：未定位、未验证。**
+**当前状态（2026-10-28 更新）：已定位、已修复、离线探针验证通过；真机复验待用户执行。**
 
 **待查方向（从用户描述可拆成两个正交问题，别混在一起修）**：
 - **坐标换算**：文件行号 → 绘制坐标时，走的是哪条换算路径？是否用了**不感知虚拟行**的那条。
@@ -134,6 +134,170 @@ carets=8 → 每帧 8.53ms → 117fps
 **最小可复现**：写一个方法触发 @Contract 自动插入，先量出错位是 1 行还是 2 行，再动手。
 `CaretAnimator.refreshTarget()`（611 行巨石方法，也是审计 P-4 未修缺陷所在）大概率相关，
 但**不要一上来就改那里**。
+
+---
+
+### 根因（2026-10-28 定位）
+
+**先回答「1 行还是 2 行、行号还是像素」这两个问题**，因为它们的答案决定了修法：
+
+```
+错位量      1 个行高（= inlay 的高度），不是 2 行
+错位维度    「行号没变、像素变了」
+           视觉行号 (VisualPosition.line) 不动
+           文档修改戳 不动（inlay 不是文件内容）
+           只有 visualPositionToXY() 的 y 下移了一个 inlay 高度
+```
+
+这不是从现象猜的，是从**平台字节码**读出来的（`intellij.platform.ide.impl.jar`，
+`EditorCoordinateMapper`，javap 反编译）：
+
+```java
+// ① 行号：只把 after-line-end 元素算进视觉行
+logToVisWithInlays(logicalLine, visualLine, softWrap):
+    if (visualLine > 1 || (visualLine == 1 && softWrap))
+        visualLine += inlayModel.getAfterLineEndElementsForLogicalLine(logicalLine).size();
+    // ↑ block inlay（ABOVE_LINE / BELOW_LINE）不参与 → 行号不变
+
+// ② 像素：把「显示在上方」的 block inlay 高度加进 y
+visualLineToYRange(line):
+    y = insets.top + line * lineHeight + foldingAdjustment
+        + inlayModel.getHeightOfBlockElementsBeforeVisualLine(line, offset, collapsed)
+    // 而该方法的 lambda 只累加 myShowAbove 的 getHeightInPixels()
+    // ↑ block inlay 撑高了 y
+```
+
+`@Contract(pure = true)` 那一行正是 **ABOVE_LINE block inlay**：不改文档、不占行号、只撑高像素。
+
+**然后是我们自己的两处判断，全都只看这三个分量：**
+
+```
+第一道门（顶层早退，CaretAnimator.refreshTarget）
+    cameraTrail.isAt(vp.line, vp.column, document.getModificationStamp())
+
+第二道门（逐光标，同一方法的多光标循环里）
+    trail.isAt(cvp.line, cvp.column, stamp)   → needsUpdate
+```
+
+inlay 出现时 `(line, column, stamp)` **三个分量一个都不变** → 两道门都判定
+「这个光标没动」→ `cp = visualPositionToXY(cvp)` 根本不执行 → 覆盖层继续用
+inlay 出现**之前**的 `cp.y` 绘制 → 屏幕上比真实位置高 1 个行高。
+
+用户描述的「光标跳到 19 行」（19 是 inlay 那一行）与「该在 21 行却画在 20 行」
+都是这 1 格偏移的不同表现。
+
+**与 BUG 里两个「待查方向」的对照**：
+
+| 待查方向 | 结论 |
+|---|---|
+| 坐标换算哪一层不感知虚拟行 | **`visualPositionToXY` 本身是感知的，没错**；错的是我们**没去调用它** |
+| 位移判定是否也用同一份坐标 | **是**，而且这里才是真正的坑（见下） |
+
+### 修法
+
+1. **订阅 `InlayModel` 的事件**，inlay 增 / 删 / 改时置一个「几何已脏」标志
+   （`CaretAnimator.onInlayGeometryChanged()` → `inlayGeometryDirty = true` + `wakeUp()`）。
+   **不按 placement 过滤**：ABOVE_LINE / BELOW_LINE 撑高行（y 变），
+   INLINE 推后文本（x 变），AFTER_LINE_END 两者都占 —— 四类都影响绘制几何。
+   *（在这里加过滤器，等于给另外三类各留一个同样的坑。）*
+2. **两道门都要放行**：顶层早退条件加 `&& !inlayChanged`，
+   逐光标的 `needsUpdate` 加 `|| inlayChanged`。
+3. 标志的清零点与 `forceResync = false` 放在同一处 —— 只有确认进入慢路径才清，
+   被 IME 判据提前 `return false` 时保留给下一帧。
+4. dispose 时 `Disposer.dispose(inlayListenerHandle)`：平台**没有** `removeListener`，
+   只能靠 `addListener(listener, parentDisposable)` 的第二参数回收，
+   而本类的 `dispose()` 是自己调的、不经过 `Disposer` 管理 —— 不显式释放就会一直挂在编辑器的 InlayModel 上。
+
+**第一版修法错在哪（值得记下来，因为下次还会想这么干）**：
+第一版只置 `forceResync = true`，以为它能让所有光标重算。
+实测探针 I-1 位移 **0.0px**（期望 19px）—— 因为 `refreshTarget()` 中段有一句
+`forceResync = false;`（「已进入慢路径，标志使命完成」），它在**逐光标 `needsUpdate` 判定之前**执行。
+所以 `forceResync` 实际只能绕过**顶层**早退，管不到第二道门。
+这才有了独立的 `inlayGeometryDirty` 字段。
+
+### 证据
+
+**离线探针** `tools/settings-probe/VInlay.java`（已加入 `build-v-probes.ps1` 的 `$mains`）：
+
+```
+=== V-INLAY：block inlay 撑高一行后拖尾必须重新落位 ===
+  PASS  I-0  生产代码必须订阅 InlayModel 的变化
+  PASS  I-3  没有 inlay 事件时快速路径仍然生效（修复不得退化成每帧重算）
+  PASS  I-1  inlay 撑高 1 行后，垂直中心必须下移 1 个行高  [centerY 129.5 → 148.5，位移 19.0px]
+  PASS  I-1b 该帧必须报告「位置变了」
+  PASS  I-2  inlay 移除后必须回到原位置（双向）
+```
+
+它构造的正是「行号 / 列号 / 文档戳恒定、只有 `visualPositionToXY().y` 变化」的场景，
+断言读的是 `SpringTrail.centerY`（绘制真正用的目标几何，不是内部标志）。
+
+**变异测试（两次，均全量重编译）**：
+
+| 变异 | 结果 |
+|---|---|
+| 去掉 `addListener` 注册（`if (false)`） | **I-0 + I-1 + I-1b 三红**，位移 0.0px |
+| 把 `needsUpdate` 里的 `inlayChanged` 换成 `false` | **I-1 + I-1b 双红**，位移 0.0px |
+
+第二条尤其重要：它证明「只绕过顶层早退」是不够的，与上面第一版修法的失败记录对得上。
+
+**门禁**：`build-v-probes.ps1` 全量跑完，失败名单仍是改动前那 6 个
+（`VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`），
+逐字一致，没有新增红，也没有顺手去修它们。
+
+**D0**：`core/NeovideConfig.java` 零 diff。
+
+### 仍未验证的部分（不要当成已修）
+
+用户描述的**现象二**（「补上 `{}` 后在括号中间回车，光标该到 21，结果跳到 20」）
+无法在离线探针里构造（它需要真实编辑器重排）。本修复在机制上覆盖了它 ——
+按 Enter 会改文档、进而触发 inlay 的重新生成/更新事件，被同一个
+`inlayGeometryDirty` 兜住 —— **但这只是推理，没有真机数据。**
+
+真机复验步骤（用户执行）：
+
+1. 装本版本；
+2. 打开任意 Java 文件，写一个方法，等到 IDEA 在方法上方显示出灰色的
+   `@Contract(pure = true)` —— 此时光标**不应**跳走；
+3. 在方法体内按 Enter 换行 —— 光标应落在新行，而不是上一行；
+4. 若现象二仍复现，说明另有根因（优先怀疑「动画过渡中被打断」与「布局滞后一帧」），
+   届时不要沿用本条的结论。
+
+---
+
+## BUG-007 刚打开 IDEA 后「第一次使用光标」必定卡一下（**未定位，本轮不修**）
+
+**用户报（2026-10-28）**：
+
+> 光标刚打开 IDEA 时候，第一次使用光标一定会卡一下，**卡到没有**，然后正常用才好。
+> 我测试过两分钟没动他，我开头以为是 EDT 抢占资源，结果不是，就是 bug。
+
+**现象拆解（按用户原话）**：
+
+1. 触发时机：**每次启动 IDEA 后的第一次光标使用**（移动 / 输入都算）；
+2. 表现：那一下「卡到没有」—— 光标**消失**了一瞬，不是变慢、不是拖尾变长；
+3. 之后：恢复正常，同一次会话内不再复现；
+4. **排除了「冷启动 / CPU 忙」这一解释**：用户特意启动后干等两分钟再动，照样复现。
+
+**为什么这个排除很重要**：它把「首帧 EDT 负载高」这类解释基本否掉了 ——
+等了 120 秒，AWT 队列早该空了。所以更像是**某处状态在「第一次」才被建立**，
+或者是「第一次」走了一条与后续不同的代码路径。
+
+**当前状态：未定位、未验证。本轮只记录，不做任何代码排查。**
+
+**待查方向（全部为推测，**不得当结论**）**：
+
+- `CaretAnimator` 构造函数里 `panel.setBounds(0,0, max(content.getWidth(),1), ...)` ——
+  构造时 content 尺寸可能还是 0，首帧 `tick()` 里 `content.isShowing()` 为 false 会
+  `panel.clearCorners()`，于是「第一次使用」才真正建立几何；
+- `startScheduler()` 后第一条投递与 `lastDispatchedDueNanos = Long.MIN_VALUE` 的交互；
+- `tick()` 开头的恢复检测（`rawDt > RECOVERY_GAP_SECONDS`）在**首帧**的 `lastNanos = 0` 下
+  会算出极大的 `rawDt`，走「长停顿 → 一次性归位」分支 —— 这可能正是「卡到没有」；
+- `NeovideCaretManager` 在首帧前后是否有一次 `applyConfig()` 全量重建 trail；
+- 与 BUG-005（终端不播动画）、BUG-006（已修）是否同源，未知。
+
+**验证方法建议**：开 `diagLogging`，做一次「启动 → 立刻动光标 → 停」，
+把 `[frame]` / `[trail]` 的前 20 行抓出来看首帧的 `rawDt`、`dt`、`carets`、frameseq。
+**不要**在没抓到首帧日志前改 `tick()` 的恢复检测逻辑 —— 那是全局都依赖的分支。
 
 ---
 

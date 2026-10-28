@@ -105,71 +105,50 @@ public final class VSwitchKeysGap {
                         : "漏标=" + wrongly);
     }
 
-    /** C：行为断言 —— 真的调 restoreSkipping，看它跳没跳。 */
+    /**
+     * C：行为断言 —— 真的调 restoreSkipping，看它跳没跳。
+     *
+     * <p><b>2026-10-28 改为手工拼「旧格式毒快照」，不再用 {@code snapshot()} 现造。</b>
+     * 原因：新写的快照里压根不再包含运行开关（用户要求「只存会生效的」），
+     * 用 {@code snapshot()} 造出来的是新格式 —— 那样只能测到「新快照没问题」，
+     * <b>测不到真正要紧的兼容路径</b>：用户磁盘上已经存在的旧预设串里仍然带着这 9 个 key。
+     */
     private static void checkC() {
-        // 源状态：把 9 个运行环境开关全部改成与默认相反的「毒值」
-        NeovideCursorSettings.State src = new NeovideCursorSettings.State();
-        src.enabled = false;                                        // 默认 true
-        src.hideNativeCaret = false;                                // 默认 true
-        src.alwaysHighFps = false;                                  // 默认 true
-        src.trailMode = (src.trailMode == NeovideConfig.TrailMode.SPRING)
-                ? NeovideConfig.TrailMode.AFTERIMAGE
-                : NeovideConfig.TrailMode.SPRING;
-        src.targetFps = (src.targetFps == 144) ? 125 : 144;         // 默认 125
-        src.cursorWidthPx = (src.cursorWidthPx == 3) ? 2 : 3;       // 默认 2
-        src.cursorHeightRatio = (src.cursorHeightRatio == 1.0f) ? 0.9f : 1.0f;
-        src.diagLogging = !src.diagLogging;                         // 默认 false
-        src.multiCursorNoGlow = !src.multiCursorNoGlow;             // 默认 false
-        // 观感字段也改一改，用来验证「非开关确实被写入」
-        src.slopeTicks = 77;                                        // 默认 0
-        src.trailSize = 0.9f;                                       // 默认 1f
-        src.glowLayers = 3;                                         // 默认 8
+        // 旧格式毒快照：9 个运行开关（值都取「与默认相反」）+ 3 个观感字段
+        String snap = "enabled=0;hideNativeCaret=0;alwaysHighFps=0;trailMode=AFTERIMAGE;"
+                + "multiCursorNoGlow=1;targetFps=144;cursorWidthPx=5;cursorHeightRatio=0.5;"
+                + "diagLogging=1;"
+                + "slopeTicks=77;trailSize=0.9;glowLayers=3";
 
-        String snap = SettingsField.snapshot(src);
-
-        // 目标状态：全新默认值；先记下快照前的取值
         NeovideCursorSettings.State dst = new NeovideCursorSettings.State();
-        String before = SettingsField.snapshot(dst);
-
+        NeovideCursorSettings.State def = new NeovideCursorSettings.State();
         int applied = SettingsField.restoreSkipping(dst, snap);
-        String after = SettingsField.snapshot(dst);
 
-        // C-1：9 个运行环境开关必须保持 dst 原值（没被写入）
+        // C-1：9 个运行环境开关必须保持默认（毒值一个都没进来）
         StringBuilder leaked = new StringBuilder();
         for (String key : EXPECTED_RUNTIME) {
-            String was = valueOf(before, key);
-            String now = valueOf(after, key);
-            if (!equalsSafe(was, now)) {
-                leaked.append(key).append("(").append(was)
-                        .append("->").append(now).append(") ");
+            SettingsField f = SettingsField.byKey(key);
+            if (f != null && !f.encode(def).equals(f.encode(dst))) {
+                leaked.append(key).append('(').append(f.encode(def))
+                        .append("->").append(f.encode(dst)).append(") ");
             }
         }
         check(leaked.length() == 0,
-                "C-1 恢复预设时 9 个运行环境开关一个都没被写入",
-                leaked.length() == 0 ? "全部保持原值" : "被写入=" + leaked.toString().trim());
+                "C-1 旧快照里的 9 个运行环境开关一个都没被写入",
+                leaked.length() == 0 ? "全部保持默认" : "被写入=" + leaked.toString().trim());
 
         // C-2：观感字段必须确实被写入（防止「整份 restore 都没生效」也过）
-        int changed = 0;
-        StringBuilder changeDetail = new StringBuilder();
-        for (String key : new String[] {"slopeTicks", "trailSize", "glowLayers"}) {
-            String was = valueOf(before, key);
-            String now = valueOf(after, key);
-            if (!equalsSafe(was, now)) {
-                changed++;
-            }
-            changeDetail.append(key).append('=').append(was).append("->").append(now).append(' ');
-        }
-        check(changed == 3,
+        check(dst.slopeTicks == 77
+                        && Math.abs(dst.trailSize - 0.9f) < 1e-4
+                        && dst.glowLayers == 3,
                 "C-2 观感字段确实被写入（证明 restore 整体生效）",
-                changeDetail.toString().trim());
+                "slopeTicks=" + dst.slopeTicks + " trailSize=" + dst.trailSize
+                        + " glowLayers=" + dst.glowLayers);
 
-        // C-3：写入数应当等于「快照条目数 - 运行环境开关数」
-        int totalEntries = snap.split(";").length;
-        int expectedApplied = totalEntries - EXPECTED_RUNTIME.length;
-        check(applied == expectedApplied,
-                "C-3 写入数与「快照条目 - 运行开关数」一致",
-                "applied=" + applied + "  期望=" + expectedApplied
-                        + "  (条目=" + totalEntries + ")");
+        // C-3：只有观感字段被计数（快照 12 条里 9 条是运行开关）
+        check(applied == 3,
+                "C-3 写入数只计观感字段，运行开关条目不计数",
+                "applied=" + applied + "  期望=3（快照共 12 条，其中 9 条是运行开关）");
     }
 
     /** 从快照串里取某个 key 的值；没有返回 null。 */

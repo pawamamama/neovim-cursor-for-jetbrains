@@ -50,7 +50,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probe
 
 ```
 AnimPreset                    14 个观感参数
-SettingsField.PRESET_FIELDS   26 个（给自定义预设快照）
+SettingsField.PRESET_FIELDS   13 个（自定义预设快照；2026-10-28 由 26 收缩，只留会生效的）
 applyAnimPresetFields 实写    13 个（给内置预设）
 ```
 
@@ -94,11 +94,22 @@ applyAnimPresetFields 实写    13 个（给内置预设）
 改 `AnimPreset` 的默认值 → `VSlopePreset` / `VDefaultFreeze` / `VPreset` 会红。
 **按纪律：改断言方向，不许删断言。** 在断言旁边写清「为什么方向变了」。
 
-### 陷阱 6：`install.ps1` 会清空用户配置
+### 陷阱 6：`install.ps1` 会清空用户配置（2026-10-28 起改为「备份 + 还原」）
 
-`build\install.ps1` 的设计是**每次干净安装都删配置 XML**（用户 0.9.70 明确要求）。
-所以「改了设置但重启就没了」很可能不是 bug，是安装脚本清空。
-验证方法：跑 `VFpsPersist` 之类的持久化探针，确认链路本身是通的。
+`build\install.ps1` 仍然是**每次干净安装都删配置 XML**（用户 0.9.70 明确要求），
+但**删之前会把个人配置抄一份，装完全量写回 —— 一个字段都不丢**
+（含 `animPresetBase`、颜色三件套、`customAnimPresets` 里的自定义预设与「xx 副本」、光标宽高与全部观感参数）。
+
+所以判断标准变了：
+
+| 现象 | 以前怎么判 | 现在怎么判 |
+|---|---|---|
+| 任何一项配置回到出厂 | 「安装脚本清的」 | **真 bug，去查**（它们本应被还原） |
+
+- 先看备份/丢弃清单而不动手：`-DryRun`
+- 备份在 `D:\deepseekwork\_config-backup\`（JSON + 原始 XML 副本）
+- **给 State 加了新字段之后要回来复核这个脚本**（见其文件头「维护须知」）
+- 验证持久化链路本身：跑 `VFpsPersist` 之类的探针
 
 ---
 
@@ -135,7 +146,8 @@ $cp=(Get-ChildItem -LiteralPath $libs -Filter '*.jar' | ForEach-Object { $_.Full
 Get-ChildItem -Recurse -File -Filter *.java 'src\main\java' | ForEach-Object { $_.FullName } | Set-Content build\v2-probe\srcs.txt
 javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\classes "@build\v2-probe\srcs.txt"
 
-# 打包 + 安装（会清空配置，先跟用户确认）
+# 打包 + 安装（先跟用户确认）
+# 2026-10-28 起：会先备份个人配置、装完全量还原（一个字段都不丢）
 pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.93 -NoStart
 ```
 

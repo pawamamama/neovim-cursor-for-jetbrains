@@ -164,7 +164,7 @@ TL+BL（后缘）   0.00     4.06     6.16   ← 后缘直 + 前缘斜 = 右半�
 
 ```
 AnimPreset                    14 个观感参数
-SettingsField.PRESET_FIELDS   26 个（给自定义预设快照）
+SettingsField.PRESET_FIELDS   13 个（自定义预设快照；2026-10-28 由 26 收缩，只留会生效的）
 applyAnimPresetFields 实写    13 个（给内置预设）
 ```
 
@@ -214,6 +214,8 @@ $cp=(Get-ChildItem -LiteralPath $libs -Filter '*.jar' | ForEach-Object { $_.Full
 Get-ChildItem -Recurse -File -Filter *.java 'src\main\java' | ForEach-Object { $_.FullName } | Set-Content build\v2-probe\srcs.txt
 javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d build\v2-probe\classes "@build\v2-probe\srcs.txt"
 
-# 打包 + 安装（会清空配置，先跟用户确认）
+# 打包 + 安装（先跟用户确认）
+# 2026-10-28 起：清空之前备份个人配置、装完全量还原（一个字段都不丢）
+# 只看清单不动手：加 -DryRun
 pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <本次版本> -NoStart
 ```

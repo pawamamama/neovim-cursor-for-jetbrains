@@ -96,7 +96,8 @@ if (from.stateVersion < 2) {
 
 ### 防线 3：干净安装（开发期验证用）
 
-`build/install.ps1` 每次安装都清掉设置 XML + 诊断日志：
+`build/install.ps1` 每次安装都会清掉设置 XML + 诊断日志（**2026-10-28 起会先备份个人配置、
+装完**全量**写回，一个字段都不丢**；加 `-DryRun` 可只查看备份清单）：
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File D:\deepseekwork\neovim-cursor-pr\build\install.ps1 -Version 0.9.70

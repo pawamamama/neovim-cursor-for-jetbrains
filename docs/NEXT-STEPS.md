@@ -150,6 +150,28 @@ TR（前缘单角）   2.11     7.43    11.58
 
 ---
 
+## 四-C、用户手上的待办：三版基础预设的手感（2026-10-28 记）
+
+用户正在**自己调**三个内置动画预设（`CursorPresets.ANIM_PRESETS` 三档）的手感。
+调好之后要做两件事，**必须一起做**：
+
+1. 把最终数值写入 `settings/CursorPresets.java` 的 `ANIM_PRESETS` 三档；
+2. 同步写入**初始 / 默认值** —— `settings/NeovideCursorSettings.java` 里 `State` 的字段默认值，
+   以及 `tools/settings-probe/VDefaultFreeze.java` 的 `GOLDEN` 金表。
+
+**为什么两处必须一起改**：默认值只影响「全新用户 / 刚清空配置」那一瞬间，
+预设表只影响「用户点了预设」。两者不一致，就会重现 VDefaultFreeze 守的那类问题 ——
+新用户拿到的观感，和他点一下同名预设得到的观感不是同一个。
+
+**改完还要做的事**：
+- `VDefaultFreeze` 的金表逐字段登记（不加就红，那是契约变更，不是缺陷）；
+- 若三档预设的**字段集合**没变（只是数值变），`VPreset` 的字段数断言（30）不用动；
+- 跑全量门禁，确认 6 红名单没变（`VTools` / `VHints` / `VCustom` / `VReset2` / `VSepBound` / `VSleep`）。
+
+**当前状态：用户调参中，数值尚未提供。不要凭猜测写入任何数字。**
+
+---
+
 ## 五、可以考虑做的新功能
 
 | # | 功能 | 依据 | 工作量 |

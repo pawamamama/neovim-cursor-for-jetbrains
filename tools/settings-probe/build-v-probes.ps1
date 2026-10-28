@@ -109,7 +109,15 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         'VPreviewParity',
         # 0.9.90：Ctrl+滚轮改字号后光标必须重新贴合行位置
         # （快速路径只看行/列/文档戳，缩放时三者全不变 → 早退 → 纵向漂移）
-        'VFontScale')
+        #
+        # 【BUG-006】block inlay（IDEA 自动显示的 @Contract 那一行）
+        # 撑高行时，行号/列号/文档戳同样全不变，但 y 变了。
+        # 与 VFontScale 是同一类缺口（几何指纹），只是触发源不同。
+        'VFontScale',
+        'VInlay',
+        # 【2026-10-28】预设三份字段清单同源：快照存什么 == 内置预设写什么 == 匹配比什么。
+        # 之前三者分家，实测症状：切自定义预设会改颜色；改斜度不派生副本。
+        'VFieldDomain')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

@@ -162,6 +162,18 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <本次
 **⚠️ 这个脚本每次都会清空用户配置**（用户 0.9.70 明确要求的行为）。
 所以「改了设置重启就没了」不是 bug，是安装脚本清空。
 
+**【2026-10-28 变更】清空之前会先备份个人配置，装完再写回去 —— 全量，一个字段都不丢。**
+（用户口径：「更新时候所有的系统级别预设都是用户之前定义的，所以还原」。）
+包括内置预设指针 `animPresetBase`、颜色三件套、自定义预设 `customAnimPresets`（含「xx 副本」）、
+光标宽高与全部观感参数。脚本里保留了一个空的丢弃名单 `$dropFields`，
+**只在某个字段语义变更、旧值写回会变脏数据时**才往里加。
+
+- 先看清单不动手：`-DryRun`
+- 备份落在 `D:\deepseekwork\_config-backup\`（`personal-state-<时间戳>.json` + 原始 XML 副本）
+- **加了新的 State 字段 / 改了字段语义后，必须回来复核这个脚本**（见其文件头「维护须知」）；
+  脚本会用「结构指纹」（`SettingsField.java` 的 `out.add(` 条数）在每次安装时对比上次，
+  对不上就打 ⚠ 警告。
+
 ---
 
 # 四、核心机制（改代码前必须懂）
@@ -310,15 +322,26 @@ SettingsField.java:633              自定义预设快照（遍历 PRESET_FIELDS
 **规则**：任何「预览 / 真机」双路径，参数必须走同一个函数、推同一组字段。
 守门探针：`VPreviewParity`。
 
-## 陷阱 7：参数有三套清单，别把差异当 bug
+## 陷阱 7：参数的三份清单必须同源（2026-10-28 已统一）
+
+**曾经的坑**：三处关于「哪些字段属于预设」的说法互不一致 ——
 
 ```
-AnimPreset                    14 个观感参数（内置预设）
-SettingsField.PRESET_FIELDS   26 个（自定义预设快照）
-applyAnimPresetFields 实写    13 个（内置预设只写观感）
+AnimPreset                    14 个观感参数（内置预设的常量）
+SettingsField.PRESET_FIELDS   26 个（自定义预设快照）      ← 含 13 个根本不会生效的
+applyAnimPresetFields 实写    13 个
+matchAnimPreset 比较          9 个                          ← 比写入还少 4 个
 ```
 
-**26 ≠ 14 是两套机制，不是 bug。** 完整归属表见 `docs/PARAMETER-MAP.md`。
+实测症状（用户报的）：
+- 点「个人自定义」→ 光标颜色从绿色变回预设里存的粉色（颜色被动画预设写了）；
+- 改「斜度 / 拖尾不透明度 / 淡出」不派生副本，改「拉伸强度」会（匹配判据漏字段）。
+
+**现状**：三者已统一为同一份 13 个字段：
+`PRESET_FIELDS == applyAnimPresetFields 写入集合 == matchAnimPreset 比较集合`。
+
+**加字段时必须同时想清楚这三件事**（进不进快照 / 内置预设写不写 / 匹配比不比），
+守门探针 `VFieldDomain` 会当场抓出不齐的那一条。完整归属表见 `docs/PARAMETER-MAP.md`。
 
 ## 陷阱 8：设备/环境开关清单太短
 
@@ -349,9 +372,12 @@ targetFps  cursorWidthPx  cursorHeightRatio  diagLogging  multiCursorNoGlow
 两个 agent 同时改同一个文件 → 提交会混在一起。
 **做法**：各自 stage 自己的文件，`git status --porcelain` 逐个确认。
 
-## 陷阱 11：`install.ps1` 会清空配置
+## 陷阱 11：`install.ps1` 会清空配置（但会先备份个人配置）
 
-见「三、三十秒上手」。这不是 bug。
+见「三、三十秒上手」。清空本身不是 bug。
+
+2026-10-28 起它多了一步：**清空之前备份、装完全量还原**个人配置（一个字段都不丢）。所以：
+「用户的自定义预设 / 光标宽高 / 颜色配置」不见了，**都不再**能用「安装脚本清空」解释 —— 那是真 bug，去查。
 
 ## 陷阱 12：文档会撒谎
 

@@ -180,10 +180,17 @@ public final class VReset {
                 ? NeovideConfig.TrailMode.SPRING : NeovideConfig.TrailMode.AFTERIMAGE;
         conf.apply();
         String comboSnap = CustomPresets.get(conf.pendingForProbe().customAnimPresets, comboPreset);
-        check("R-13 【同类漏洞】切了 trailMode 并应用后，自定义预设快照必须记下新的 trailMode",
-                comboSnap != null && comboSnap.contains("trailMode=" + picked.name()),
-                "预设=「" + comboPreset + "」 应用后快照=" + pick(comboSnap, "trailMode")
-                        + " pending.trailMode=" + conf.pendingForProbe().trailMode);
+        // 【2026-10-28 改方向（不删断言）】
+        // 旧断言是「切 trailMode 后快照必须记下它」——那建立在「设备开关也进快照」的旧契约上。
+        // 用户明确要求「凡是设备/功能开关都不该进预设」，所以方向反过来：
+        // 快照里**不该**出现 trailMode，而用户刚选的模式必须仍然是当前生效值。
+        check("R-13 trailMode 是设备开关，不再写进自定义预设快照",
+                comboSnap != null && !comboSnap.contains("trailMode="),
+                "预设=「" + comboPreset + "」 快照里 trailMode=" + pick(comboSnap, "trailMode")
+                        + "（期望 无）");
+        check("R-13b 用户选的 trailMode 仍然是当前生效值（不被预设写回）",
+                conf.pendingForProbe().trailMode == picked,
+                "pending.trailMode=" + conf.pendingForProbe().trailMode + "  期望=" + picked);
 
         // ================================================================ 5. apply 幂等
         System.out.println();

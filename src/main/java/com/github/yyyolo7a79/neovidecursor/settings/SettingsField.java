@@ -370,7 +370,43 @@ public final class SettingsField {
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (Boolean) v),
                 (a, b) -> ((Boolean) a).booleanValue() == ((Boolean) b).booleanValue(),
-                gc != null, true, runtimeSwitch);
+                gc != null, !runtimeSwitch, runtimeSwitch);
+    }
+
+    /**
+     * 全局项：<b>不进任何预设</b>，也不是「设备开关」（{@code runtimeSwitch=false}）。
+     *
+     * <p>用于 {@code rgbGradient} 这类「属于颜色域、由颜色预设路径管」的开关 ——
+     * 它既不该出现在动画预设快照里，也不该被 {@code restoreSkipping} 当成设备开关解释。
+     *
+     * <p><b>为什么不能只标 {@code runtimeSwitch}</b>：那个标志的语义是「插件怎么跑 / 在什么设备上跑」，
+     * 颜色开关不是这一类；混用会让下一个读代码的人以为「渐变是设备设置」。
+     */
+    private static SettingsField boolsGlobal(String key,
+                                             Function<NeovideCursorSettings.State, Boolean> gs,
+                                             BiConsumer<NeovideCursorSettings.State, Boolean> ss) {
+        return new SettingsField(key, Kind.BOOL,
+                s -> gs.apply(s), (s, v) -> ss.accept(s, (Boolean) v),
+                null, null,
+                (a, b) -> ((Boolean) a).booleanValue() == ((Boolean) b).booleanValue(),
+                false, false, false);
+    }
+
+    /**
+     * 全局项：<b>不进任何预设</b>，也不是设备开关。
+     *
+     * <p>用于 {@code typingSmoothness} —— 0.9.73 就定了「平滑不参与预设」，
+     * 但它一直留在快照里，导致「切自定义预设会改平滑」（与文档记载相反）。
+     * 现在从字段定义这一行就说清楚，不再依赖运行时跳过清单。
+     */
+    private static SettingsField floatsGlobal(String key,
+                                              Function<NeovideCursorSettings.State, Float> gs,
+                                              BiConsumer<NeovideCursorSettings.State, Float> ss) {
+        return new SettingsField(key, Kind.FLOAT,
+                s -> gs.apply(s), (s, v) -> ss.accept(s, (Float) v),
+                null, null,
+                (a, b) -> Float.compare((Float) a, (Float) b) == 0,
+                false, false, false);
     }
 
     private static SettingsField ints(String key,
@@ -392,7 +428,7 @@ public final class SettingsField {
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (Integer) v),
                 (a, b) -> ((Integer) a).intValue() == ((Integer) b).intValue(),
-                gc != null, true, runtimeSwitch);
+                gc != null, !runtimeSwitch, runtimeSwitch);
     }
 
     private static SettingsField floats(String key,
@@ -414,7 +450,7 @@ public final class SettingsField {
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (Float) v),
                 (a, b) -> Float.compare((Float) a, (Float) b) == 0,
-                gc != null, true, runtimeSwitch);
+                gc != null, !runtimeSwitch, runtimeSwitch);
     }
 
     private static SettingsField hexColors(String key,
@@ -436,7 +472,8 @@ public final class SettingsField {
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (String) v),
                 (a, b) -> a == null ? b == null : ((String) a).equalsIgnoreCase((String) b),
-                gc != null, true, runtimeSwitch);
+                // 颜色域：颜色由「颜色预设 + 用户手选」管，动画预设不碰（用户 2026-10-28 决定）
+                gc != null, false, runtimeSwitch);
     }
 
     private static SettingsField enums(String key,
@@ -458,7 +495,7 @@ public final class SettingsField {
                 gc == null ? null : c -> gc.apply(c),
                 sc == null ? null : (c, v) -> sc.accept(c, (NeovideConfig.TrailMode) v),
                 (a, b) -> a == b,
-                gc != null, true, runtimeSwitch);
+                gc != null, !runtimeSwitch, runtimeSwitch);
     }
 
     /** 预设基准下标：参与 apply / 判脏，但<b>不进快照</b>（它是「选中了谁」的指针）。 */
@@ -525,8 +562,10 @@ public final class SettingsField {
                 (s, v) -> s.cursorWidthPx = v, null, null, true));
         out.add(floats("cursorHeightRatio", s -> s.cursorHeightRatio,
                 (s, v) -> s.cursorHeightRatio = v, null, null, true));
-        out.add(bools("rgbGradient", s -> s.rgbGradient,
-                (s, v) -> s.rgbGradient = v, null, null));
+        // 【颜色域，不进动画预设】用户 2026-10-28 决定：动画预设完全不管颜色。
+        // 之前它漏标了（走的是普通 bools），导致切自定义预设会顺带改你的渐变开关。
+        out.add(boolsGlobal("rgbGradient", s -> s.rgbGradient,
+                (s, v) -> s.rgbGradient = v));
         out.add(ints("cursorDisappearDelay", s -> s.cursorDisappearDelay, (s, v) -> s.cursorDisappearDelay = v,
                 c -> c.cursorDisappearDelay, (c, v) -> c.cursorDisappearDelay = v));
         out.add(floats("cursorFadeOutDuration", s -> s.cursorFadeOutDuration, (s, v) -> s.cursorFadeOutDuration = v,
@@ -549,7 +588,10 @@ public final class SettingsField {
                 c -> c.trailSize, (c, v) -> c.trailSize = v));
         // stretchRatioK / typingSmoothness 派生 trailFactors，CONFIG 无对应标量
         out.add(floats("stretchRatioK", s -> s.stretchRatioK, (s, v) -> s.stretchRatioK = v, null, null));
-        out.add(floats("typingSmoothness", s -> s.typingSmoothness, (s, v) -> s.typingSmoothness = v, null, null));
+        // 【全局项，不进任何预设】0.9.73 就定了「平滑不参与预设」，但它一直留在快照里 ——
+        // 实测后果：切自定义预设会把平滑一起改掉（与文档记载相反）。
+        out.add(floatsGlobal("typingSmoothness", s -> s.typingSmoothness,
+                (s, v) -> s.typingSmoothness = v));
         out.add(floats("animationLength", s -> s.animationLength, (s, v) -> s.animationLength = v,
                 c -> c.animationLength, (c, v) -> c.animationLength = v));
         out.add(floats("shortAnimationLength", s -> s.shortAnimationLength, (s, v) -> s.shortAnimationLength = v,
