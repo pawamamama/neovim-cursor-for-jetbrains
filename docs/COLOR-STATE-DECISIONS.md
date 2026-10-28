@@ -100,7 +100,8 @@ rgbGradient = true   -> 按 washStyle 决定是双拼还是旋转
 | 10 | 删除 `CursorPresetApplier` 里的 rgbWash 相关 | 同上 |
 | 11 | 探针：`VUi` 下拉数基线、`VRgbWash` 重写、`VDefaultFreeze` 加字段 | 探针 |
 
-**风险提示**：1-4 是 State 字段的四层拷贝，漏一处就「重启即失效」
+**风险提示**：1-4 是 State 字段的四层持久化拷贝，漏一处就「重启即失效」；
+完整链路是**六层**（再加 ⑤消费者 / ⑥UI 控件），见 `CLAUDE.md` 陷阱 2 与 §7.0
 （`targetFps` 出过同样的问题，见 `VDeadField`）。
 
 ---

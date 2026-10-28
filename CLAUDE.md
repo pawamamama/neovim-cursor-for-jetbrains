@@ -237,6 +237,41 @@ glowColor = NeovideColors.parse(config.shadowColor, 1.0f);   // CaretTrailPanel.
 
 守门探针：`VDeadField`（检查字段是否被真正消费）、`VLoadState`（检查拷贝完整性）。
 
+### 「四层」和「六层」是两个范围，不是笔误（2026-10-28 统一口径）
+
+别的文档会写「四层拷贝」（`START-HERE.md`、`docs/NEXT-STEPS.md`、
+`docs/WORK-DISCIPLINE.md` 四-B）。**它和这里的六层不矛盾，是覆盖范围不同**：
+
+| 口径 | 覆盖 | 出自 | 漏了会怎样 |
+|---|---|---|---|
+| 三层 | ①②③（历史版本，0.9.24 时代 `loadState` 还没独立） | `WORK-DISCIPLINE.md` 四-B 原文 | 存了读不到 |
+| **四层** | ①②③④ = 持久化链路 | 代码注释 `NeovideCursorSettings.java:196` 自己这么列 | 存了读不到 / 重启就没了 |
+| **六层** | ①②③④ **+ ⑤ 消费者 + ⑥ UI 控件** | 本文件（0.9.88 补的） | **存下来了、也读回来了，但界面没反应** |
+
+**做功能时按六层走。** 只按四层做，最典型的后果就是本节开头那次：
+值全链路都对，用户拖滑块却没反应，因为 ⑤ 读的是常量。
+四-B 的三层是**历史血泪记录，不要改它** —— 它记录的是当时真实踩过的坑。
+
+### 这六层里，哪些今天已经不用手写了（2026-10-28 实测）
+
+字段表落地后，机械链路已被自动化。以下是**生产代码里遍历 `SettingsField.FIELDS` 的全部位置**：
+
+```
+NeovideCursorSettings.java:399      syncStateToConfig（State → CONFIG）
+NeovideCursorSettings.java:430      syncConfigToState（CONFIG → State）
+NeovideCursorConfigurable.java:2596 apply() 的逐字段脏合并
+SettingsField.java:564              PRESET_FIELDS 从 FIELDS 派生
+SettingsField.java:574 / :601       判脏 / 比较
+SettingsField.java:633              自定义预设快照（遍历 PRESET_FIELDS）
+```
+
+所以同步、脏合并、`reset()`、控件回灌 **都不用再逐字段手写**。
+仍然必须手写的是 ①②③④、⑤⑥，以及预设那一支（`CursorPresets.AnimPreset` 构造、
+三个内置预设的取值、`applyAnimPresetFields`、`CursorPresetApplier.matchAnimPreset`
+的 9 个比较条件）。
+
+**加字段前先照 §7.0 的落点清单做**，别凭记忆数。
+
 ## 陷阱 3：探针复刻逻辑而不是调用生产代码（纪律四-G）
 
 `AnimationPreview.assignRanks()` 曾有一份**独立的 rank 实现**，
@@ -386,6 +421,68 @@ TR（前缘单角）   2.11     7.43    11.58
 
 # 七、待办（按优先级）
 
+## 7.0 加一个设置项的完整落点清单（做任何设置类功能前先照这张表）
+
+> 2026-10-28 实测。行号会漂，**先 `grep` 确认再照抄**。
+> 落点数取决于字段类型：**预设域且走 CONFIG 消费 ≈ 12 个语义位置**；
+> **设备级 State-only ≈ 7 个**（省掉预设那一支）。
+
+### A. 生产代码：必须手写
+
+| # | 位置 | 改什么 | 漏了的症状 |
+|---|---|---|---|
+| 1 | `SettingsField.java` `build()`（现 27 项 → 28） | `out.add(...)` | `apply()` 不拷贝 → 一应用就回滚 |
+| 2 | `NeovideCursorSettings.java` State 字段区 | 字段 + 默认值 | 编译不过（最好发现） |
+| 3 | 同文件 `copyFrom()`（1031 起） | 一行赋值 | 面板回显不出 |
+| 4 | 同文件 `loadState()`（108 起） | 一行 + 必要 clamp/迁移 | 重启即失效 |
+| 5 | 消费者（`TrailCorner` / `CaretAnimator` / `CaretTrailPanel`） | 真正读它 | **能存能读，界面毫无反应**（`targetFps` 事故） |
+| 6 | `NeovideCursorConfigurable.java` `SPECS` 数组 | `SliderSpec` 条目 | 控件量程缺失 |
+| 7 | 同文件某个 `build*Group()` | `g.row(...)` + `addSlider` | 控件根本不出现 |
+| 8 | `CursorPresets.java` `AnimPreset` | 字段+ctor+赋值+访问器 | 仅预设域需要 |
+| 9 | 同文件 `ANIM_PRESETS` 三档 | 各补 1 个值 | 内置预设与自定义快照语义分裂 |
+| 10 | `applyAnimPresetFields()` | 一行赋值 | 切预设不生效 |
+| 11 | `CursorPresetApplier.matchAnimPreset()`（现 9 个条件） | 加 1 个比较 | 下拉/菜单显示「已选中」但观感不是它 |
+
+### B. 探针：不加就会红，而**红的部分不是 bug**
+
+这是最容易误判的地方。加控件/字段后门禁会新增红，原因是这些断言**写死了总数**：
+
+| 探针:行 | 断言 | 加什么会红 |
+|---|---|---|
+| `VAddSetting.java:115` | `sliders == 14 && checks == 9 && combos == 4` | 加滑块/复选框/下拉 |
+| `VerifyPanel.java:97` | `sliders == 14` | 加滑块 |
+| `VerifyPanel.java:104` | `checks == 9` | **加复选框** |
+| `VerifyPanel.java:108` | `combos == 4` | 加下拉 |
+| `VPreset.java:385-386` | `State` public 实例字段数 `== 30` | **加任何 State 字段** |
+| `VDefaultFreeze.java:40-45` | `GOLDEN` 金表逐字段默认值 | 加字段必须登记，否则红 |
+
+**正确做法是改这些常数（14→15、9→10、30→31）并在旁边写清「契约变更，非缺陷」。**
+**不要反过来动生产代码去迁就断言** —— 那是纪律四铁律「不要为了让测试通过而改测试」的镜像错误。
+
+### C. 控件定位表的插入位置（比 B 更隐蔽）
+
+`tools/settings-probe/VUi.java` 有两张表：`KEYS`（字段名）和 `SPEC`（量程）。
+**它们的顺序是「面板真实渲染顺序」，不是 `SPECS` 数组的声明顺序。**
+`VUi.java:2-16` 的注释记了 0.9.79 那次全线错位事故。
+
+新控件的 key **必须插到它在面板上实际渲染的那个位置**，追加到末尾就会整体错位。
+错位的后果不是报错，是**下游探针静默测错字段**：
+
+```
+VUi.KEYS[8] = cursorHeightRatio（不是 animationLength，后者在 [5]）
+```
+
+这就是现在仍红着的 `VHints` 的真因：`VHints.java:72` 写 `int idxAnim = 8;`，
+它在改**光标高度**，却自称在测动画时长。**这类探针会「通过」，也会「失败」，但测的都不是它说的东西。**
+
+### D. 顺序
+
+```
+改 A → 跑全量门禁 → 看新增红是否都落在 B 的表里
+  → 是：改探针常数（不是改生产代码）
+  → 否：那是真回归，回头查
+```
+
 ## 7.1 用户已决定但未实现
 
 **半边拖尾开关**
@@ -397,9 +494,16 @@ TR（前缘单角）   2.11     7.43    11.58
 实现要点（已验证可行）：
 1. `TrailCorner` 加 `setLeadingSnap()` → `springX/springY.setAnimationLength(0.0)`
 2. `SpringTrail.assignRanks()` 末尾按 `config.leadingSnap` 给 `order[2]/order[3]` 调它
-3. State 加字段 —— **注意六层拷贝**（见陷阱 2）
-4. 面板加复选框 —— **加 UI 控件前先问用户**
-5. 探针断言「开启时前缘斜度 == 0.00 且后缘 > 0」
+3. State 加字段 —— **注意六层拷贝**（见陷阱 2），并按 **§7.0** 的 A 表逐项做完
+4. 面板加复选框 —— **加 UI 控件前先问用户**；加完按 **§7.0 的 B 表**改探针常数
+   （`VAddSetting:115` 的 `checks == 9`、`VPreset:385` 的字段数 30 会红，那是契约变更不是 bug）
+5. 控件 key 必须插进 `VUi.KEYS` / `SPEC` 的**正确渲染位置**（见 §7.0 的 C）
+6. 探针断言「开启时前缘斜度 == 0.00 且后缘 > 0」
+
+**还有一个未定的产品决策**：`leadingSnap` 跟不跟随动画预设。机制上 `inPreset`
+在 `SettingsField` 的 5 个工厂里恒为 `true`（`SettingsField.java:373/395/417/439/461`），
+所以它**必然**进自定义预设快照；但要不要给 3 个内置 `ANIM_PRESETS` 各补值、
+要不要进 `matchAnimPreset` 的 9 个条件 —— 没有决定。按纪律四-L 应先问用户。
 
 ## 7.2 需要用户拍板
 
@@ -497,6 +601,10 @@ RGB 换成色相循环  -> 140 行死代码 + 功能与名字对不上
 
 | 任务 | 文档 |
 |---|---|
+| **加/改一个设置项** | **本文件 §7.0 落点清单（A 生产 / B 探针 / C 控件定位）** |
+| 想知道「加参数到底要改几处」的原始论证 | `docs/design/NEXT-REFACTOR.md` §3（**0.9.5 时代原文，其中 ③④⑥⑦ 已被字段表自动化，勿当现状**） |
+| 设置系统重构的实测结论（8→6 而非 8→2） | `plans/settings-refactor.md`（830 行，含 `VUi.SPEC` 不许派生自生产等结论） |
+| 清理清单与回收量 | `plans/cleanup-inventory.md` |
 | 改物理 / rank / 斜度 | `docs/design/RANK-COLLAPSE-FIX.md` |
 | 对齐上游手感 | `docs/design/UPSTREAM-VSCODE-RESEARCH.md` |
 | 改颜色 / 渐变 / 彩虹 | `docs/COLOR-STATE-DECISIONS.md` |

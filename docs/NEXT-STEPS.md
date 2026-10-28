@@ -143,7 +143,8 @@ TR（前缘单角）   2.11     7.43    11.58
    `setAnimationLength(0.0)`（该方法已是 public）
 2. `SpringTrail.assignRanks()` 末尾，按 `config.leadingSnap` 给
    `order[2]` 和 `order[3]`（rank 2/3 = 前缘两角）调 `setLeadingSnap()`
-3. State 加 `leadingSnap` 字段 —— 注意**四层拷贝**（纪律四-B）
+3. State 加 `leadingSnap` 字段 —— 注意**六层拷贝**（纪律四-B 写的「四层」只覆盖持久化回路，
+   缺 ⑤消费者 / ⑥UI 控件；完整清单见 CLAUDE.md 陷阱 2 与 §7.0 落点表）
 4. 面板加复选框 —— **加 UI 控件前先问用户**（纪律）
 5. 守门探针：断言「开启时前缘斜度 == 0.00 且后缘斜度 > 0」
 

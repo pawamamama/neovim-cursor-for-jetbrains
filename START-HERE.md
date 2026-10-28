@@ -128,7 +128,7 @@ src/main/java/com/github/yyyolo7a79/neovidecursor/
 | `CaretTrailPanel` | Java2D 绘制（辉光 + 主体填充） |
 | `CaretAnimator` | 每帧驱动 + 从 State 同步设置 |
 | `RenderScheduler` | 固定频率渲染线程（自愈：3 次异常置空线程） |
-| `NeovideCursorSettings` | State（30 个字段）+ 四层拷贝 |
+| `NeovideCursorSettings` | State（30 个字段）+ 四层持久化拷贝（完整链路是**六层**，见 CLAUDE.md 陷阱 2） |
 
 ---
 
@@ -156,7 +156,7 @@ TL+BL（后缘）   0.00     4.06     6.16   ← 后缘直 + 前缘斜 = 右半�
 实现要点（不需要新机制）：
 1. `TrailCorner` 加 `setLeadingSnap()` → `springX/springY.setAnimationLength(0.0)`（已是 public）
 2. `SpringTrail.assignRanks()` 末尾按开关给 `order[2]/order[3]` 调它
-3. State 加字段 —— **四层拷贝**（纪律四-B）
+3. State 加字段 —— **六层拷贝**（纪律四-B 的「四层」只覆盖持久化回路，缺 ⑤消费者/⑥UI 控件；见 CLAUDE.md 陷阱 2 与 §7.0）
 4. 面板加复选框 —— **先问用户**
 5. 探针断言「开时前缘斜度==0.00 且后缘>0」
 

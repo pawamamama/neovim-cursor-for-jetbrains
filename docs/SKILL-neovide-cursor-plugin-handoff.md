@@ -60,7 +60,7 @@ applyAnimPresetFields 实写    13 个（给内置预设）
 漏了 5 个设备级字段（`targetFps` / `cursorWidthPx` / `cursorHeightRatio` /
 `diagLogging` / `multiCursorNoGlow`）。0.9.87 补到 9 项。
 
-### 陷阱 2：改了一个字段，四处都要动
+### 陷阱 2：改了一个字段，六处都要动
 
 ```
 ① State 字段声明
