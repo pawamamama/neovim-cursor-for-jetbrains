@@ -279,17 +279,42 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 「恢复为默认值」按钮的文案模板。 */
     private static final String RESTORE_TPL = "恢复为「%s」默认值";
 
-    /**
-     * 动画预设下拉的末尾占位项：当前值不属于任何预设时显示。
-     *
-     * <p>它不是可选项 —— {@code onAnimPresetPicked()} 的越界分支会直接 return，
-     * 不写任何字段。
-     *
-     * <p><b>为什么必须有</b>：ComboBox 不接受 {@code -1}（会保留上一次选中项），
-     * 于是「用户在基础预设上关掉辉光」时下拉仍写着「基础」，而基础声明的辉光=开 ——
-     * 显示层在撒谎（第二轮审查 O-8 实测）。
-     */
-    private static final String CUSTOM_ANIM_PLACEHOLDER = "自定义（未保存）";
+    // ==================== 2026-10-28：「是否随预设」的统一提示 ====================
+    //
+    // 用户原话：「检查设置讲解措辞是否明晰，一定要在开头写，是什么设置，不随预设改变这样的，
+    //          但是我觉得提醒不够明显」。
+    //
+    // 做法：预设区顶部一段总说明 + 两个可复用的标签常量。
+    // **只给「不随预设」的项加标签**，随预设的默认不标（用户要求：随预设不用写）。
+    //
+    // 说明文本走 DslLabel（JEditorPane，按 HTML 渲染），所以能用 <b> 与 <font color>；
+    // 换行必须写 <br/>（字面 \n 会被折叠成空格）。
+    // 颜色选蓝灰/土黄而不是红绿：红绿在深色主题下容易与警告色混淆，这两个中性色深浅都能看。
+    /** 全局设置标签（设备开关 + 输入平滑）。 */
+    private static final String TAG_GLOBAL =
+            "<font color=\"#6C8EBF\"><b>[全局]</b></font> ";
+    /** 颜色预设域标签（拖尾色 / 辉光色 / 光标渐变）。 */
+    private static final String TAG_COLOR =
+            "<font color=\"#C08A3E\"><b>[颜色预设]</b></font> ";
+
+    /** 预设区顶部的总说明。 */
+    private static final String PRESET_SCOPE_HINT =
+            "<b>哪些设置随预设变？</b><br/>"
+            + "· <b>没标注的</b>都随动画预设：改任一项会自动生成一个「XX 副本」，切预设回到该预设的值。<br/>"
+            + "· " + TAG_GLOBAL + "切任何预设都不变：总开关、隐藏原生光标、常驻刷新、目标帧率、"
+            + "多光标辉光、光标宽/高、输入平滑、渲染模式、诊断日志。<br/>"
+            + "· " + TAG_COLOR + "由上面「颜色预设」下拉控制，动画预设不碰："
+            + "拖尾颜色、辉光颜色、光标渐变。";
+
+    // 【2026-10-28 删除「自定义（未保存）」占位项】
+    //
+    // 它 0.9.9 引入时的顾虑是「ComboBox 不接受 -1」，但 0.9.38 已实测证明
+    // setSelectedIndex(-1) 会渲染成空白（比一个点不动的假项诚实）。
+    // 当时只改了选中逻辑，**没删掉加项的代码** —— 于是下拉里常年挂着一个
+    // 永远选不中、点它也不写任何字段的项。
+    //
+    // 删除后：当前值不匹配任何预设时下拉显示空白；键入中间值时的临时显示也改成空白
+    // （见 refreshPresetDisplayForInput），不再借用这个假项的下标。
 
     // ==================== 10 个滑块的刻度表（契约 §6.2，逐值冻结）====================
 
@@ -996,6 +1021,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             animDeleteBtn.setEnabled(false);
             return kotlin.Unit.INSTANCE;
         });
+
+        // 0d. 总说明（2026-10-28）：回答「哪些设置随预设变」。
+        // 用户抱怨原来的提示不够明显、也没说清每一项属于哪一类。
+        panel.row("", row -> {
+            row.bottomGap(BottomGap.MEDIUM);
+            row.rowComment(PRESET_SCOPE_HINT, COMMENT, NO_LINK);
+            return kotlin.Unit.INSTANCE;
+        });
     }
 
     /**
@@ -1039,7 +1072,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                                 pending.targetFps = FPS_ITEMS.get(1).equals(v) ? 144 : 125;
                             }
                         });
-                row.rowComment(W_TARGET_FPS, COMMENT, NO_LINK);
+                row.rowComment(TAG_GLOBAL + W_TARGET_FPS, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1084,7 +1117,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             });
             g.row("输入平滑（拖尾形状 · 全局）", row -> {
                 addSlider(row, specOf("typingSmoothness"), null);
-                row.rowComment(W_TYPING_SMOOTH, COMMENT, NO_LINK);
+                row.rowComment(TAG_GLOBAL + W_TYPING_SMOOTH, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
             // 【0.9.38：从「多行缎带」移到此处】
@@ -1273,7 +1306,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             cur.row("光标渐变（上下深浅）", row -> {
                 bindCheck(row, () -> pending.rgbGradient,
                         v -> pending.rgbGradient = v)
-                        .comment(W_CURSOR_GRADIENT, COMMENT, NO_LINK);
+                        .comment(TAG_COLOR + W_CURSOR_GRADIENT, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1851,8 +1884,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(view);
         syncingControls = true;
         try {
+            // 无匹配 → -1（空白）。2026-10-28 之前这里借用「自定义（未保存）」占位项的下标，
+            // 占位项删掉后必须改成 -1，否则会选中最后一个自定义预设（越界且语义错误）。
             animPresetCombo.setSelectedIndex(
-                    a == null ? animPresetItems.size() - 1 : indexOfAnim(a));
+                    a == null ? -1 : indexOfAnim(a));
         } finally {
             syncingControls = false;
         }
@@ -1894,10 +1929,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 selectedCustom = i;
             }
         }
-        // 末尾占位项：当前值不属于任何预设时显示它。
-        // 【为什么需要】ComboBox 不接受 -1；不加占位项就会出现「关掉辉光后下拉仍写着基础」
-        // 这种显示层撒谎（第二轮审查 O-8 实测）。点它不写任何字段（见 onAnimPresetPicked 的越界分支）。
-        names.add(CUSTOM_ANIM_PLACEHOLDER);
+        // 2026-10-28：不再追加「自定义（未保存）」占位项 —— 无匹配时用 -1（空白）表达，
+        // 理由见 CUSTOM_ANIM_PLACEHOLDER 删除处的注释。
 
         syncingControls = true;
         try {
@@ -2048,13 +2081,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 刷新两个「恢复为「X」默认值」按钮的文案（基准预设可能刚变过）。 */
     private void refreshRestoreButtonText() {
         if (animRestoreBtn != null) {
-            // 0.9.9：文案必须跟着【当前选中项】走 —— 在自定义预设上时显示它的名字，
-            // 否则用户点「恢复为「原版粉色」默认值」会以为是回到内置常量，
-            // 实际却是回到那个自定义预设已存的值（M5-4 抓到过这个不一致）。
-            String current = pending.animCustomName.isEmpty()
-                    ? CursorPresets.ANIM_PRESETS[
-                            CursorPresets.clampAnimPresetIndex(animBaseIdx)].name()
-                    : pending.animCustomName;
+            // 【2026-10-28 改】始终显示「目标父预设」的名字，不再显示副本名。
+            //
+            // 原来在自定义副本上显示副本名（如「基础 副本」），但按钮实际做的是
+            // 「回到 pending.animPresetBase 指向的内置预设」—— 文案与行为不一致，
+            // 用户实测报「显示副本名，点了却跳到父预设」。
+            //
+            // 用 pending.animPresetBase 而不是 animBaseIdx：restoreAnimPreset 读的是前者，
+            // 两者在跨预设切换后可能不同（见该方法的说明）。
+            String current = CursorPresets.ANIM_PRESETS[
+                    CursorPresets.clampAnimPresetIndex(pending.animPresetBase)].name();
             animRestoreBtn.setText(String.format(RESTORE_TPL, current));
         }
         if (colorRestoreBtn != null) {
@@ -2111,10 +2147,26 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //                    「副本派生自哪个内置预设」（见 afterPendingEdited / 派生逻辑）。
             // 所以在自定义副本上，animPresetBase 才是权威的「我拷贝自谁」。
             int base = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+            String customName = pending.animCustomName;
+
             // 写【全部】预设字段（含 0.9.67 补入的 tailOpacity / 淡出两项 / smooth）
             applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[base]);
             pending.animPresetBase = base;
             animBaseIdx = base;
+
+            // 【2026-10-28 用户要求】副本条目**保留**，但内容一起对齐到父预设：
+            // 「恢复完 是父预设独立，个人自定义的也在，不过里面参数和父预设对齐，直接拷贝过去，
+            //   适合那种改坏了想重置」。
+            //
+            // 两个顺序都不能换：
+            //   ① 名字必须在 animCustomName 清空**之前**取到；
+            //   ② snapshot 必须在 applyAnimPresetFields **之后**取 ——
+            //      那时 pending 的 13 个观感字段才已经是父预设的值。
+            if (!customName.isEmpty() && CustomPresets.has(pending.customAnimPresets, customName)) {
+                pending.customAnimPresets = CustomPresets.put(
+                        pending.customAnimPresets, customName, SettingsField.snapshot(pending));
+            }
+
             // 值已回到内置预设 —— 副本名必须清掉，否则下拉显示「基础 副本」
             // 而实际值是「基础」的，显示层就撒谎了。
             pending.animCustomName = "";

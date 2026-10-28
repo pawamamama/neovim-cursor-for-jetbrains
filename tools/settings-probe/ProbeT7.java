@@ -222,9 +222,10 @@ public final class ProbeT7 {
         conf.pickAnimPresetForProbe(0);
         int layersIdx = conf.sliderKeysForProbe().indexOf("glowLayers");
         conf.textFieldsForProbe().get(layersIdx).setText("3");
-        int customIdxAnimNow = conf.animPresetComboForProbe().getItemCount() - 1;   // 末项 = 占位项
-        check("T-02f 在输入框键入 3（onTextEdited 路径）同样让下拉变「自定义」",
-                conf.animPresetComboForProbe().getSelectedIndex() == customIdxAnimNow,
+        // 【2026-10-28 改方向】「自定义（未保存）」占位项已删除，
+        // 「不属于任何预设」改由 -1（空白）表达 —— 断言方向随之调整，断言本身保留。
+        check("T-02f 在输入框键入 3（onTextEdited 路径）让下拉变成「无匹配」（-1 空白）",
+                conf.animPresetComboForProbe().getSelectedIndex() == -1,
                 "下拉下标=" + conf.animPresetComboForProbe().getSelectedIndex());
 
         // ColorPanel 路径（R-02 第 4 处入口）
