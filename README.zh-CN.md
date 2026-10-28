@@ -12,7 +12,10 @@
 > 原版只能改代码调参数，本版可以在 IDE 里直接调、存、切换。
 
 
-**语言 / Language** — [English](README.md) | [**简体中文**](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja-JP.md) | [한국어](README.ko-KR.md)
+**语言 / Language** — [English](README.md) | [**简体中文**](README.zh-CN.md)
+
+> 繁體中文 / 日本語 / 한국어 三份翻译已停止同步（停在多光标支持之前），
+> 已移入 `docs/archive/`。以本文件与 `README.md` 为准。
 
 ---
 

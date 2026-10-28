@@ -12,7 +12,10 @@
 > The original only lets you tweak parameters by editing code — this one lets you adjust, save and switch directly inside the IDE.
 
 
-**Language** — [**English**](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja-JP.md) | [한국어](README.ko-KR.md)
+**Language** — [**English**](README.md) | [简体中文](README.zh-CN.md)
+
+> 繁體中文 / 日本語 / 한국어 三份翻译已停止同步（停在多光标支持之前），
+> 已移入 `docs/archive/`。以本文件与 `README.zh-CN.md` 为准。
 
 ---
 

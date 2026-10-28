@@ -87,7 +87,7 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 版本         v0.9.93（IDEA 里已装；读 jar 内 META-INF/plugin.xml 确认）
              dist 最新 jar = 0.9.92（2026-10-27 06:46）
              git tag 停在 v0.9.83 —— 0.9.84~0.9.93 共 10 个版本没打 tag
-HEAD         4bbbcfc（main）
+HEAD         77995d1 起（main，2026-10-28 文档收缩后继续前进）
 远程         fork/main 落后本地若干提交（2026-10-27 未推送）
 工作区       干净
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
@@ -626,7 +626,7 @@ docs/archive/  （整目录）
 这些停在 0.9.5 ~ 0.9.33 期间。
 
 **例外：`LESSONS.md`（612 行）留在根目录。** 它自称「权威汇总·遇到问题先查这里」，
-被 `START-HERE.md` / `docs/PROJECT-GUIDE.md` 等 14 个文件当参考链接引用 ——
+被 `START-HERE.md` 等文件当参考链接引用 ——
 是活文档，只是内容停在 0.9.5。**不要把它归进 archive。**
 
 > 【2026-10-27】上面 8 个根目录文档与 `docs/TONIGHT-*.md` 已 `git mv` 到 `docs/archive/`。
