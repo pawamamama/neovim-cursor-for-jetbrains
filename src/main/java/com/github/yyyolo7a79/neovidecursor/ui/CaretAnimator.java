@@ -2500,6 +2500,10 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         panel.beginQuads();
         boolean diagFrame = CursorDiag.shouldSample(frameSeq);
+        // [trail] 的行数上限按 animator 分桶（见 CursorDiag.TRAIL_MAX_LINES）。
+        // 键与下面 frameSummary 用的完全相同：identityHashCode(this)，
+        // 这样多编辑器各算各的额度，不会互相吃掉。
+        int diagAnimatorId = System.identityHashCode(this);
         int diagIdx = 0;
         int diagTotal = activeTrails.size();
         // 块选区各行目标 x 的最大差值（I4 用）
@@ -2521,7 +2525,7 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             if (diagFrame) {
                 // I2 / I3：单光标的偏移合理性
-                CursorDiag.trailSnapshot(diagIdx, diagTotal,
+                CursorDiag.trailSnapshot(diagAnimatorId, diagIdx, diagTotal,
                         staticCaret ? "static" : (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE
                                 ? "afterimage" : "spring"),
                         trail.currentLine,

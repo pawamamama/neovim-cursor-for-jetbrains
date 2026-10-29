@@ -153,7 +153,12 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # VReadAction 用「只允许 read action 内访问」的 Editor 桩复现该判据，
         # 断言构造函数 / 慢路径 / 快速路径 / caret 事件入口全程零违规，
         # 且 P0-5 调用次数契约（慢路径帧 getOffset 恰好 1 次）不变。
-        'VReadAction')
+        'VReadAction',
+        # 【2026-10-29】[trail] 诊断日志行数上限（每 animator 5000 行 + 一条汇总，
+        # 与 trace 的 TRACE_MAX_LINES 同一策略）。守门：前 N 行逐字节不变 /
+        # 超限只补一条 / 多编辑器分桶独立 / 超限后不再增长。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VTrailCap')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

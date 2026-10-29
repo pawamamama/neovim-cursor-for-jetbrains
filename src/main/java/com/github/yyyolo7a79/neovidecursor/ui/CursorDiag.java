@@ -128,18 +128,76 @@ eovide-cursor-diag.log}
     }
 
     /**
+     * [trail] 日志的每 animator 行数上限。
+     *
+     * <p><b>为什么必须限量</b>：这条日志每 {@link #SAMPLE_EVERY_FRAMES} 帧打一行，
+     * 而且原实现<b>没有任何截断</b> —— 8 光标场景实测 2 分钟产出 328KB
+     * （见 {@code docs/NEXT-STEPS.md} §7.1-2）。长时间挂着 IDE，
+     * 独立诊断文件会被撑到几十 MB，真正要看的那几行反而被埋掉。
+     *
+     * <p><b>为什么是 5000</b>：与 {@link #TRACE_MAX_LINES} 取同一个数。
+     * 同一份诊断文件里两种行不该有两种口径 —— 否则「日志怎么被截断的」
+     * 要分两处解释，排查的人得记两个数字。
+     *
+     * <p><b>达到上限后</b>：停止输出，只补一行汇总（与 {@link #writeTrace} 同一策略）。
+     * 选「停止 + 一条汇总」而不是「丢弃最旧的」：诊断日志的作用是
+     * <b>证明某件事发生过</b>，证明过之后重复记录的边际价值递减；
+     * 而丢弃最旧会把「一开始发生了什么」弄丢。
+     *
+     * <p><b>按 animator 分桶</b>：{@link #TRACES} 按 identityHashCode 隔离多编辑器，
+     * 这里沿用同一约定 —— 否则开两个编辑器时它们会互相吃掉对方的额度，
+     * 表现成「这个窗口的 [trail] 日志莫名没了」。
+     */
+    private static final int TRAIL_MAX_LINES = 5000;
+
+    /**
+     * 单个 animator 的 [trail] 行计数。
+     *
+     * <p>刻意<b>不</b>并进 {@link Trace}：Trace 表示的是「首用追踪（boot/evt/tick…）」
+     * 的状态，[trail] 是另一套前缀、另一套截断规则。放一起就是
+     * 「一个结构承担两个职责」（纪律四-J 判据 1）。
+     */
+    private static final class TrailBudget {
+        int lines;
+        boolean capLogged;
+    }
+
+    private static final java.util.Map<Integer, TrailBudget> TRAIL_BUDGETS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static TrailBudget trailBudgetOf(int animatorId) {
+        return TRAIL_BUDGETS.computeIfAbsent(animatorId, k -> new TrailBudget());
+    }
+
+    /**
      * 单个光标的完整状态快照。
      *
      * <p>把「输入 / 中间量 / 输出 / 不变量结果」放在同一条里，
      * 排查时不用跨多条日志对照。检查 I2（静止收敛）与 I3（偏移合理）。
+     *
+     * <p><b>行数上限</b>：每 animator 最多 {@link #TRAIL_MAX_LINES} 行，
+     * 之后只输出一次汇总。前 N 行的内容与加限之前<b>逐字节一致</b> ——
+     * 闸门只决定「要不要打」，不参与拼接。
+     *
+     * @param animatorId 调用方 animator 的 identityHashCode；用于按窗口分桶计数
      */
-    static void trailSnapshot(int idx, int total, String mode, int line,
+    static void trailSnapshot(int animatorId, int idx, int total, String mode, int line,
                               double cx, double cy, double corner0X, double corner0Y,
                               double maxOffset, double targetW, double targetH,
                               boolean initialized, double dtMs) {
         if (!enabled()) {
             return;
         }
+        TrailBudget budget = trailBudgetOf(animatorId);
+        if (budget.lines >= TRAIL_MAX_LINES) {
+            if (!budget.capLogged) {
+                budget.capLogged = true;
+                emit("[trail] animator=" + animatorId + " 已达上限 " + TRAIL_MAX_LINES
+                        + " 行，后续不再输出");
+            }
+            return;
+        }
+        budget.lines++;
         boolean offsetSane = maxOffset >= 0 && maxOffset <= MAX_REASONABLE_OFFSET;
         boolean settled = maxOffset <= SETTLED_EPSILON;
 
