@@ -158,7 +158,8 @@ TR（前缘单角）   2.11     7.43    11.58
 **不需要新机制**：`DampedSpring.setAnimationLength()` 是 public，
 物理层本来就支持。缺的只是「锁哪两个角」的判断。
 
-**用户已决定（2026-10-25）：做成开关（B 方案），但先不做。**
+**用户已决定（2026-10-25）：做成开关（B 方案）。**
+**2026-10-29 更新：已排期，见 `docs/THREE-DAY-PLAN.md` Day 2 —— 不再是「先不做」。**
 
 ```
 形态：加一个复选框「前缘贴合（半边拖尾）」，默认关
@@ -280,7 +281,7 @@ TR（前缘单角）   2.11     7.43    11.58
 |---|---|---|---|
 | 1 | ✅ **已完成 2026-10-28**：6 个过期断言探针全部修绿 —— `VTools / VHints / VCustom / VReset2 / VSepBound / VSleep` | `tools/settings-probe/` | 只改探针、**生产代码零改动**；门禁 `V-PROBES RESULT: ALL PASS`（另有一次独立复跑核对，非本人自证）。逐条根因与修法见 §7.1.1。提交号见 `git log -1` |
 | 2 | 旧 `[trail]` 日志仍是「每 15 次慢路径一条、无上限」 | `CaretAnimator.tickSpring` | 本轮新增的 trace 已有 5000 行上限 + `[clear]` 去重，**旧行未动** |
-| 3 | 「半边拖尾」开关（`leadingSnap`，默认关） | 5 个落点见 §四-B | 用户已决定形态，但**先不做** |
+| 3 | 「半边拖尾」开关（`leadingSnap`，默认关） | 5 个落点见 §四-B | **2026-10-29 已排期**，见 `docs/THREE-DAY-PLAN.md` Day 2 |
 | 4 | 三版基础预设的最终手感数值落库 | `CursorPresets.ANIM_PRESETS` + `State` 默认值 | 等用户给数值（§四-C） |
 | 5 | 块选区 `charsMoved` 语义拆参数 | `TrailCorner.jump` / `CaretAnimator` | §五-2 |
 | 6 | 预览窗「节奏：慢 / 正常 / 快」三档 | `AnimationPreview` | 加下拉会让 `VAddSetting:115` 的 `combos == 4`、`VerifyPanel:108` 变红——契约变更，按 §7.0 B 表改常数 |

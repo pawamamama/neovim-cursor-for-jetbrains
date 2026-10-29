@@ -152,7 +152,7 @@ TL+BL（后缘）   0.00     4.06     6.16   ← 后缘直 + 前缘斜 = 右半�
 **不需要新机制** —— `DampedSpring.setAnimationLength()` 是 public，物理层本来就支持。
 缺的只是「锁哪两个角」的判断（按 alignment 选 rank 2/3）。
 
-**用户已定形态（2026-10-25）：做成开关，默认关。但先不做**（笔记本没电押后）。
+**用户已定形态（2026-10-25）：做成开关，默认关。2026-10-29 已排期**（见 `docs/THREE-DAY-PLAN.md` Day 2）。
 
 实现要点（不需要新机制）：
 1. `TrailCorner` 加 `setLeadingSnap()` → `springX/springY.setAnimationLength(0.0)`（已是 public）
