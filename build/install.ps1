@@ -313,6 +313,22 @@ $ver = (Select-String -Path $xmlFile -Pattern '<version>([^<]+)</version>').Matc
 if ($ver -ne $Version) { throw "版本不符：jar 内是 $ver，期望 $Version" }
 Write-Host "  jar 内版本 = $ver  OK"
 
+# 兼容区间自检（2026-10-28 新增）：since-build 与 until-build 必须都真的在 jar 里。
+# 为什么必须报错而不是"打印一下"：
+#   缺 since-build → 2024.2 以前的 IDE 也会装（然后撞 --release 21 的字节码锁）；
+#   缺 until-build → 未来所有 IDE 全放行（平台 API 一移除就是 NoSuchMethodError）。
+#   两者都是「装上了但坏」，比拒绝加载更难排查 —— 所以这里见到缺失就终止安装。
+$xmlText = [System.IO.File]::ReadAllText($xmlFile)
+$bounds = [ordered]@{}
+foreach ($tag in @('since-build', 'until-build')) {
+    $m = [regex]::Match($xmlText, $tag + '="([^"]+)"')
+    if (-not $m.Success) {
+        throw "自检失败：jar 内 plugin.xml 缺少 $tag 属性（兼容区间必须两端都有，见 offline-build.ps1 的同名守卫）"
+    }
+    $bounds[$tag] = $m.Groups[1].Value
+}
+Write-Host ("  兼容区间 = since-build {0} ~ until-build {1}  OK" -f $bounds['since-build'], $bounds['until-build'])
+
 # 还原：必须在 IDEA 启动之前写。IDEA 退出时会拿内存状态覆盖这份文件，
 # 所以「先启动再写」等于白写。
 if ($personal.Count -gt 0) {

@@ -389,6 +389,31 @@ public final class VerifyApplyConfig {
                             return null;
                         case "isDispatchThread":
                             return true;
+                        // 【平台 252】生产代码用 ReadAction.compute 包住编辑器读取，
+                        // 平台的 compute → Application.runReadAction(ThrowableComputable)。
+                        // 假 Application 必须真的执行它：原来落到 defaultValue 会返回 null
+                        // 且 lambda 根本不跑 → readEditor 拿到 null → boolean 拆箱 NPE。
+                        case "runReadAction":
+                        case "maybeRunReadAction":
+                            if (args != null && args.length == 1) {
+                                Object body = args[0];
+                                if (body instanceof com.intellij.openapi.util.ThrowableComputable) {
+                                    try {
+                                        return ((com.intellij.openapi.util.ThrowableComputable<?, ?>) body)
+                                                .compute();
+                                    } catch (RuntimeException | Error e) {
+                                        throw e;
+                                    } catch (Throwable e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                }
+                                if (body instanceof Runnable) {
+                                    ((Runnable) body).run();
+                                }
+                            }
+                            return null;
+                        case "isReadAccessAllowed":
+                            return true;
                         case "saveSettings":
                             app.saves++;
                             if (app.throwOnSave) {

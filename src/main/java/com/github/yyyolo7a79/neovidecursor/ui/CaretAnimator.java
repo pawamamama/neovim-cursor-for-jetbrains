@@ -4,6 +4,7 @@ import com.github.yyyolo7a79.neovidecursor.core.AfterimageTrail;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.editor.Caret;
@@ -18,6 +19,7 @@ import com.intellij.openapi.editor.VisualPosition;
 import com.intellij.openapi.editor.event.CaretEvent;
 import com.intellij.openapi.editor.event.CaretListener;
 import com.intellij.openapi.util.Disposer;
+import com.intellij.openapi.util.ThrowableComputable;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JComponent;
@@ -747,12 +749,18 @@ public class CaretAnimator implements Disposable, CaretListener {
     public CaretAnimator(@NotNull Editor editor, @NotNull NeovideConfig config) {
         this.editor = editor;
         this.config = config;
-        this.content = editor.getContentComponent();
+        // 【平台 252】构造函数里也在读编辑器，必须进 read action（详见 readEditor 的注释）。
+        //
+        // 为什么构造函数也要：首次定位就是构造函数末尾那次 refreshTarget() 做的，
+        // 而在此之前 getContentComponent() / getEditorKind() 已经是编辑器读取。
+        // 252 的断言（EditorThreading.assertInteractionAllowed）只看「是否在 read action 内」，
+        // 不看调用者是构造函数还是循环体 —— 少包一处就是一个冻结的光标。
+        this.content = readEditor(() -> editor.getContentComponent());
         this.panel = new CaretTrailPanel(config);
 
         // 控制台类编辑器（Build / Run / Services / Problems 的输出区）只补画静止光标，
         // 不做拖尾 —— 它们的光标被全局隐藏了，必须有人补上，原因见 staticCaret 字段说明。
-        this.staticCaret = editor.getEditorKind() == EditorKind.CONSOLE;
+        this.staticCaret = readEditor(() -> editor.getEditorKind() == EditorKind.CONSOLE);
 
         // 【新编辑器必须立刻同步一次全局设置】
         //
@@ -794,7 +802,11 @@ public class CaretAnimator implements Disposable, CaretListener {
         };
         panel.addHierarchyListener(showListener);
 
-        editor.getCaretModel().addCaretListener(this);
+        // 【平台 252】getCaretModel() 本身是编辑器读取，注册动作也放进同一个 read action。
+        readEditor(() -> {
+            editor.getCaretModel().addCaretListener(this);
+            return null;
+        });
 
         // 【BUG-006】inlay 也会改变绘制几何，但它既不改文档也不改视觉行号，
         // 快速路径完全看不见 —— 必须靠平台事件补一个「几何可能变了」的信号。
@@ -804,27 +816,31 @@ public class CaretAnimator implements Disposable, CaretListener {
         // INLINE 推后文本（x 变），AFTER_LINE_END 两者都占 —— 四者对绘制几何都有影响。
         // 过滤器只会让我们在某一类上重新踩同一个坑。
         try {
-            editor.getInlayModel().addListener(new InlayModel.Listener() {
-                @Override
-                public void onAdded(@NotNull Inlay<?> inlay) {
-                    onInlayGeometryChanged();
-                }
+            // 【平台 252】getInlayModel() + addListener 都是编辑器访问，统一进 read action。
+            readEditor(() -> {
+                editor.getInlayModel().addListener(new InlayModel.Listener() {
+                    @Override
+                    public void onAdded(@NotNull Inlay<?> inlay) {
+                        onInlayGeometryChanged();
+                    }
 
-                @Override
-                public void onRemoved(@NotNull Inlay<?> inlay) {
-                    onInlayGeometryChanged();
-                }
+                    @Override
+                    public void onRemoved(@NotNull Inlay<?> inlay) {
+                        onInlayGeometryChanged();
+                    }
 
-                @Override
-                public void onUpdated(@NotNull Inlay<?> inlay) {
-                    onInlayGeometryChanged();
-                }
+                    @Override
+                    public void onUpdated(@NotNull Inlay<?> inlay) {
+                        onInlayGeometryChanged();
+                    }
 
-                @Override
-                public void onUpdated(@NotNull Inlay<?> inlay, int changeFlags) {
-                    onInlayGeometryChanged();
-                }
-            }, inlayListenerHandle);
+                    @Override
+                    public void onUpdated(@NotNull Inlay<?> inlay, int changeFlags) {
+                        onInlayGeometryChanged();
+                    }
+                }, inlayListenerHandle);
+                return null;
+            });
         } catch (Throwable ignored) {
             // 有些编辑器实现（例如只读的命令行视图）可能没有 InlayModel：
             // 取不到就退化为旧行为（inlay 变化后等下一次光标事件自愈），不要因此让动画整个挂掉。
@@ -853,7 +869,8 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 编辑器类型名；取不到时退化为 UNKNOWN（诊断代码绝不允许自己抛异常）。 */
     private String safeEditorKind() {
         try {
-            EditorKind kind = editor.getEditorKind();
+            // 【平台 252】getEditorKind() 是编辑器读取，必须在 read action 内。
+            EditorKind kind = readEditor(() -> editor.getEditorKind());
             return kind == null ? "null" : kind.name();
         } catch (Throwable t) {
             return "UNKNOWN";
@@ -871,20 +888,26 @@ public class CaretAnimator implements Disposable, CaretListener {
         if (!CursorDiag.enabled()) {
             return;
         }
-        int line = -1;
-        int column = -1;
-        int offset = -1;
-        long stamp = -1L;
+        // 【平台 252】caret 事件回调不保证持有读锁，这四次读必须包进 read action。
+        //
+        // 为什么用 long[] 而不是「在外层声明 int 变量再在 lambda 里赋值」：
+        // Java 的 lambda 只能捕获 effectively final 的局部变量，直接赋值编译不过。
+        // 数组是一次「读 → 返回」，语义与原来的 try 块一一对应，且失败时仍保持 -1。
+        long[] v = {-1L, -1L, -1L, -1L};
         try {
-            VisualPosition vp = editor.getCaretModel().getVisualPosition();
-            line = vp.line;
-            column = vp.column;
-            offset = editor.getCaretModel().getOffset();
-            stamp = editor.getDocument().getModificationStamp();
+            v = readEditor(() -> {
+                VisualPosition vp = editor.getCaretModel().getVisualPosition();
+                return new long[]{
+                        vp.line,
+                        vp.column,
+                        editor.getCaretModel().getOffset(),
+                        editor.getDocument().getModificationStamp()
+                };
+            });
         } catch (Throwable ignored) {
             // 编辑器正在销毁：字段保持 -1，日志里看得出来
         }
-        CursorDiag.caretEventTrace(traceId, kind, line, column, offset, stamp);
+        CursorDiag.caretEventTrace(traceId, kind, (int) v[0], (int) v[1], (int) v[2], v[3]);
     }
 
     /**
@@ -1070,8 +1093,16 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void caretAdded(@NotNull CaretEvent event) {
         forceResync = true;
         wakeUp();
-        CursorDiag.caretCountChanged(editor.getCaretModel().getAllCarets().size() - 1,
-                editor.getCaretModel().getAllCarets().size(), "added");
+        // 【平台 252】getAllCarets() 是编辑器读取，包进 read action。
+        //
+        // 仍然调用两次（与改造前一致）：CursorDiag 的日志参数语义是
+        // 「变化前数量 = 现在数量 - 1」与「变化后数量」，改成一次取值会悄悄改掉
+        // 这条诊断契约；调用次数在这里不敏感（只在 caret 事件里发生，不在每帧热路径）。
+        int[] counts = readEditor(() -> new int[]{
+                editor.getCaretModel().getAllCarets().size(),
+                editor.getCaretModel().getAllCarets().size()
+        });
+        CursorDiag.caretCountChanged(counts[0] - 1, counts[1], "added");
         traceCaretEvent("added");
     }
 
@@ -1085,8 +1116,12 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void caretRemoved(@NotNull CaretEvent event) {
         forceResync = true;
         wakeUp();
-        CursorDiag.caretCountChanged(editor.getCaretModel().getAllCarets().size() + 1,
-                editor.getCaretModel().getAllCarets().size(), "removed/merged");
+        // 【平台 252】同 caretAdded：读取进 read action，仍保持两次 getAllCarets() 调用。
+        int[] counts = readEditor(() -> new int[]{
+                editor.getCaretModel().getAllCarets().size(),
+                editor.getCaretModel().getAllCarets().size()
+        });
+        CursorDiag.caretCountChanged(counts[0] + 1, counts[1], "removed/merged");
         traceCaretEvent("removed");
     }
 
@@ -1398,7 +1433,8 @@ public class CaretAnimator implements Disposable, CaretListener {
             if (LOG.isDebugEnabled()) {
                 String editorTag;
                 try {
-                    editorTag = editor.getEditorKind().name();
+                    // 【平台 252】读编辑器必须进 read action（仅 Debug 窗口到期时执行，非每帧）。
+                    editorTag = readEditor(() -> editor.getEditorKind().name());
                 } catch (Throwable t) {
                     // 编辑器正在销毁时取不到 kind，退化为 UNKNOWN（不得影响统计口径）
                     editorTag = "UNKNOWN";
@@ -1491,11 +1527,70 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final long REFRESH_TARGET_SLOW_NANOS = 2_000_000L;
 
     /**
+     * 在平台 <b>read action</b> 内执行一段「只读编辑器 / 光标 / 文档」的代码。
+     *
+     * <h3>为什么需要这一层（根因）</h3>
+     *
+     * <p><b>实测缺陷（2026-10-28，PyCharm 2025.2 / PY-252.23892.515）</b>：
+     * 覆盖层光标冻结在第一行第一字符，移动与打字都不动。栈是
+     * <pre>
+     *   CaretAnimator.refreshTarget
+     *     → CaretImpl.getOffset
+     *       → EditorThreading.assertInteractionAllowed
+     *         "Read access is allowed from inside read-action only"
+     * </pre>
+     * 同一份 jar 在 IDEA 2026.1（build 261）不触发 ——
+     * <b>这是平台版本差异，不是产品差异</b>：261 放宽了 EDT 上的读访问判定，
+     * 252 仍然要求「读 Editor/Caret/Document 必须在 read action 内」。
+     * 我们的 tick 全部由 {@code invokeLater} 投递到 EDT，所以每次读都在 EDT 上发生，
+     * 但「在 EDT 上」不等于「持有读锁」。
+     *
+     * <h3>为什么用 {@code ReadAction.compute} 而不是 {@code runReadAction(Runnable)}</h3>
+     *
+     * <p>{@link #refreshTarget()} 必须把 {@code changed} 返回给调度器；Runnable 版拿不到返回值，
+     * 只能靠字段绕 —— 那会把「一次读取」变成「一次读取 + 一次字段写读」，
+     * 破坏 P0-5 的调用次数契约（非快速路径帧 {@code getOffset} 恰好 1 次）。
+     * 查阅平台字节码确认：{@code ReadAction.compute} 就是
+     * {@code computeBlocking → Application.runReadAction(ThrowableComputable)}，
+     * 与 Runnable 版是同一实现，只是带返回值。
+     *
+     * <h3>其它约定</h3>
+     *
+     * <ul>
+     *   <li><b>无条件包装</b>，不判断线程：断言恰恰发生在 EDT 上，判断线程会把它放过去。</li>
+     *   <li><b>开销</b>：平台侧只是 ThreadLocal 深度 +1/-1（纳秒级），
+     *       相对每帧 8ms 预算可忽略；嵌套调用由平台自己去重。</li>
+     *   <li><b>不要在 read action 里做写操作</b>（改文档、改 PSI、改编辑器状态）——
+     *       本方法只用于读取，注册监听器属于平台允许在 read action 内完成的操作。</li>
+     * </ul>
+     */
+    private static <T> T readEditor(@NotNull ThrowableComputable<T, RuntimeException> body) {
+        return ReadAction.compute(body);
+    }
+
+    /**
      * 重新读取光标位置并更新动画目标点。
+     *
+     * <p><b>这一层只做 read action 包装</b>，真正的实现见
+     * {@link #refreshTargetInReadAction()}。
+     *
+     * <p>为什么要拆成两个方法而不是把 try 块整体缩进进 lambda：
+     * 方法体近 500 行，缩进一层会让整份代码的 diff 变成「全文重排」，
+     * 未来 review 时看不出改了什么。拆出来只有一个 6 行的包装层，
+     * 实现体一行未动 —— 这样「行为不变」是可验证的，而不是靠声明。
      *
      * @return true 表示位置确实发生了变化
      */
     private boolean refreshTarget() {
+        return readEditor(() -> refreshTargetInReadAction());
+    }
+
+    /**
+     * {@link #refreshTarget()} 的实现体 —— <b>必须在 read action 内执行</b>，不要直接调用。
+     *
+     * @return true 表示位置确实发生了变化
+     */
+    private boolean refreshTargetInReadAction() {
         try {
             // 【跟随点：有选区时用选区活动端（lead），否则用 caret 本身】
             //

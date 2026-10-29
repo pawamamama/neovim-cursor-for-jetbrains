@@ -126,7 +126,19 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         'VBoot',
         # 【2026-10-28】把「文档里的状态数字」也纳入门禁：三处状态块版本一致、
         # 探针数一致且等于磁盘实测、状态文档里不写死 commit hash。
-        'VDocCheck')
+        'VDocCheck',
+        # 【2026-10-28】把「打包时注入的兼容区间」纳入门禁。
+        # until-build 留空 = 任何未来 IDE 都放行 → 平台 API 一移除，用户升级即崩
+        # （NoSuchMethodError，现象像"IDE 坏了"）。B-2 守「模板里真有 until-build」，
+        # B-3 守「两端值都解析得出来且非空」，B-4 守「上界 >= 下界」（抄反就永远装不上），
+        # B-5 守「只锁大版本」（写精确 build 号会误伤 2026.1.4 这种后续小版本）。
+        'VBuildDecl',
+        # 【2026-10-28】平台 252（PyCharm 2025.2）上「在 EDT 直接读编辑器」会触发
+        # EditorThreading.assertInteractionAllowed → 覆盖层光标永久冻结。
+        # VReadAction 用「只允许 read action 内访问」的 Editor 桩复现该判据，
+        # 断言构造函数 / 慢路径 / 快速路径 / caret 事件入口全程零违规，
+        # 且 P0-5 调用次数契约（慢路径帧 getOffset 恰好 1 次）不变。
+        'VReadAction')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

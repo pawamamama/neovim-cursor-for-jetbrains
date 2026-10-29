@@ -16,6 +16,7 @@ import com.intellij.openapi.editor.event.EditorEventMulticaster;
 import com.intellij.openapi.editor.event.EditorFactoryListener;
 import com.intellij.openapi.fileTypes.FileType;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.util.ThrowableComputable;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.util.messages.MessageBus;
 import com.intellij.util.messages.MessageBusConnection;
@@ -64,6 +65,17 @@ public final class V0Env {
                             return service(a);
                         case "isDispatchThread":
                             return true;
+                        // 【平台 252】生产代码用 ReadAction.compute 包住编辑器读取。
+                        // 平台字节码核实：ReadAction.compute → computeBlocking →
+                        // Application.runReadAction(ThrowableComputable)。
+                        // 所以这里必须**真的执行**它 —— 若沿用 defaultValue（返回 null），
+                        // 修复后的生产代码在探针里一次编辑器读取都不会发生，
+                        // 探针测到的就是个空壳（典型的「假通过」）。
+                        case "runReadAction":
+                        case "maybeRunReadAction":
+                            return runReadAction(a[0]);
+                        case "isReadAccessAllowed":
+                            return inReadAction();
                         case "saveSettings":
                             return null;
                         case "invokeLater":
@@ -82,6 +94,70 @@ public final class V0Env {
                     }
                 });
         ApplicationManager.setApplication(proxy, () -> { });
+    }
+
+    // ---------------------------------------------------------------- read action 支持
+
+    /**
+     * 当前线程被多少个 read action 包着。
+     *
+     * <p>探针用它模拟平台 252 的断言：桩 Editor 在读取时检查 {@link #inReadAction()}，
+     * 不在其中就抛与平台原文一致的 {@code AssertionError}。
+     */
+    private static final ThreadLocal<Integer> READ_DEPTH = ThreadLocal.withInitial(() -> 0);
+
+    /** 累计进入 read action 的次数（VReadAction 断言「生产代码确实包装过」）。 */
+    public static int readActionCalls;
+
+    /** 当前是否处于 read action 内 —— 桩 Editor 的判据，也是平台 252 的判据。 */
+    public static boolean inReadAction() {
+        return READ_DEPTH.get() > 0;
+    }
+
+    /**
+     * 真正执行 {@code runReadAction} 的语义：加深度 → 跑 → 减深度。
+     *
+     * <p><b>为什么不能用 {@code defaultValue}（返回 null 而不执行）</b>：那样
+     * {@code ReadAction.compute} 在探针里会直接返回 null，生产代码的读取<b>全部不发生</b>，
+     * 探针测到的就是一个空壳 —— 这正是 CLAUDE.md 陷阱 4 里的「假通过」。
+     *
+     * @param body 平台传入的 Runnable 或 ThrowableComputable
+     */
+    private static Object runReadAction(Object body) {
+        readActionCalls++;
+        READ_DEPTH.set(READ_DEPTH.get() + 1);
+        try {
+            if (body instanceof ThrowableComputable) {
+                try {
+                    return ((ThrowableComputable<?, ?>) body).compute();
+                } catch (Throwable t) {
+                    throw rethrow(t);
+                }
+            }
+            if (body instanceof Runnable) {
+                ((Runnable) body).run();
+            }
+            return null;
+        } finally {
+            READ_DEPTH.set(READ_DEPTH.get() - 1);
+        }
+    }
+
+    /**
+     * 原样抛出 {@code Error}。
+     *
+     * <p>桩 Editor 抛的是 {@code AssertionError}（与平台 252 同类型）——
+     * 若在这里包成 RuntimeException，被测代码的 {@code catch (Throwable)} 照样吞掉，
+     * 但探针栈里就看不出「这是断言失败」，排查时会被误导。
+     */
+    private static RuntimeException rethrow(Throwable t) {
+        if (t instanceof Error) {
+            throw (Error) t;
+        }
+        if (t instanceof RuntimeException) {
+            return (RuntimeException) t;
+        }
+        return new RuntimeException(t);
     }
 
     private static Object service(Object[] a) {
