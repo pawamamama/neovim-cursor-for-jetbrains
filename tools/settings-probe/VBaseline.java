@@ -278,6 +278,22 @@ public final class VBaseline {
                     TEXTS.add(tf);
                     LABELS.add(lb == null ? new JLabel("") : lb);
                 }
+                // 【2026-10-29 分标签适配】递归下钻。
+                //
+                // 原来面板是扁平的：每一行的标题 / 滑块 / 输入框 / 数值标签就是
+                // DialogPanel 的直接子级，所以只扫一层就够。分成 6 个标签页之后，
+                // 这些行被包进「JTabbedPane → 标签页 DialogPanel」两层，
+                // 只扫一层会收到 0 个滑块（B-1 显示 "0/0 跟随" 就是这么来的）。
+                //
+                // 【必须排除 JSlider / JCheckBox】Swing 里 JComponent 本身就是
+                // Container —— 不加这个排除，同一个滑块会被数两次：
+                // ① 上面那段遍历把它当 kid 加一次；② 这里递归调用 collect(滑块) 时
+                // 方法开头的 `if (c instanceof JSlider)` 又加一次。
+                // 实测就是这个症状：slider=28（应为 14）/ checkbox=18（应为 9），
+                // 随后 SLIDERS.get(i) 越界。排除之后不多不少。
+                if (k instanceof Container && !(k instanceof JSlider) && !(k instanceof JCheckBox)) {
+                    collect(k);
+                }
             }
         }
     }

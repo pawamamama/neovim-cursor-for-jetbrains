@@ -503,14 +503,15 @@ TR（前缘单角）   2.11     7.43    11.58
 `VUi.java:2-16` 的注释记了 0.9.79 那次全线错位事故。
 
 新控件的 key **必须插到它在面板上实际渲染的那个位置**，追加到末尾就会整体错位。
-错位的后果不是报错，是**下游探针静默测错字段**：
+错位的后果不是报错，是**下游探针静默测错字段**。
 
-```
-VUi.KEYS[8] = cursorHeightRatio（不是 animationLength，后者在 [5]）
-```
-
-这就是现在仍红着的 `VHints` 的真因：`VHints.java:72` 写 `int idxAnim = 8;`，
-它在改**光标高度**，却自称在测动画时长。**这类探针会「通过」，也会「失败」，但测的都不是它说的东西。**
+**历史案例（已修，留着当教材）**：`VHints` 曾写死 `int idxAnim = 8; ui.sliders.get(8)`，
+而当时 `VUi.KEYS[8]` 是 `cursorHeightRatio`（量程 30..100），`animationLength` 在 `[5]`。
+于是它一边改「光标高度」一边自称在测动画时长 —— H-6 必然红，但红的原因与它自称要测的
+东西毫无关系。**这类探针会「通过」，也会「失败」，但测的都不是它说的东西。**
+0.9.105 分标签后这个具体下标又变了（`cursorHeightRatio` → `[6]`，`animationLength` → `[8]`），
+所以**不要照抄任何写死的数字**：一律用 `sliderByKey(...)` / `textFieldOf(...)` / `labelOf(...)`
+按 key 定位，把「顺序契约」留给 `VUi.KEYS` 自己去表达。
 
 ### D. 顺序
 
@@ -688,15 +689,35 @@ docs/archive/  （整目录）
 | 设置面板 | `ui/settings/NeovideCursorConfigurable.java` | `createPanel()` + 各 `build*Group()` |
 | 预览 | `ui/settings/AnimationPreview.java` | `assignRanks()` / `onConfigChanged()` |
 
-## 面板的组顺序（渲染顺序）
+## 面板结构（0.9.105 起：6 个标签页）
 
 ```
-总开关 -> 单行输入输出 -> 多行缎带 -> 颜色 -> 光标 -> 辉光 -> 淡出 -> 实验性 -> 高级（诊断）
+标签1 总开关    版本行 → 预设行 → 组「总开关」
+标签2 颜色      组「颜色」= 拖尾颜色 / 拖尾不透明度 / 辉光颜色 / 光标渐变
+标签3 光标行手感  组「单行输入输出（打字 / 退格）」+ 组「光标（尺寸 / 颜色效果）」
+标签4 列手感    组「多行缎带（换行 / 跳转）」
+标签5 特殊      组「辉光」+ 组「淡出」+ 折叠组「实验性」
+标签6 调试      折叠组「高级（诊断）」
 ```
 
-对应的构建方法：`buildMasterGroup` / `buildInlineGroup` / `buildCrossGroup` /
-`buildColorGroup` / `buildCursorGroup` / `buildGlowGroup` / `buildFadeGroup` /
-`buildExperimentalGroup` / `buildDiagGroup`
+**实现方式**：每个标签页是一个**独立 `DialogPanel`**，塞进 `JBTabbedPane`，
+再用 `outer.registerIntegratedPanel(...)` 逐个登记。平台自己的 `apply()` /
+`reset()` / `isModified()` 第一段就是遍历 `integratedPanels` 并委托（javap 实证），
+所以**只有登记过的标签页**才会被应用 / 重置 / 计入改动检测。
+
+> ⚠️ **已知守门缺口（2026-10-29 变异测试实测）**：漏掉一句
+> `registerIntegratedPanel(tabDiag)`，门禁**全绿**（0 条红）——
+> 因为没有任何探针通过面板去改「诊断日志」。漏 `tabMaster` 会红
+> （VDefects 1 + VerifyPanel 3），漏标签页顺序会红
+> （VSnap 12 + VPreset 8 + VHints 2 + VLabel 1）。
+> 加第 7 个标签页时，别指望门禁替你发现忘了登记。
+
+对应构建方法：`buildVersionRow` / `buildPresetRows` / `buildMasterGroup` /
+`buildColorGroup` / `buildInlineGroup` / `buildCursorSizeGroup` / `buildCrossGroup` /
+`buildGlowGroup` / `buildFadeGroup` / `buildExperimentalGroup` / `buildDiagGroup`
+
+**控件遍历顺序 = 标签加入顺序 + 页内从上到下**：`VUi.collect()` 是深度优先递归，
+所以调整 `tabs.addTab(...)` 的先后，等于调整 `VUi.KEYS` / `SPEC` 的下标契约。
 
 ---
 

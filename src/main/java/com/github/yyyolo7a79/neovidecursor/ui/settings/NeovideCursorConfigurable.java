@@ -876,58 +876,103 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             colorPresetItems.addAll(colorPresetNames());
             colorPresetItems.add(CursorPresets.CUSTOM_COLOR_LABEL);   // 颜色不参与预设语义，末项只是兜底
 
-            return BuilderKt.panel(panel -> {
-
-                // ---------- 0. 顶行：左边版本+提示，右边插件信息 ----------
-                buildVersionRow(panel);
-
-                // ---------- 0. 预设区（下拉 / 一键恢复 / 自定义预设动作）----------
-                buildPresetRows(panel);
-
-                // ---------- A. 总开关 ----------
-                buildMasterGroup(panel);
-
-                // ---------- D. 单行输入输出（只影响行内打字/退格）----------
-                buildInlineGroup(panel);
-
-                // ---------- E. 多行缎带（只影响跨行/跳转）----------
-                buildCrossGroup(panel);
-
-                // ---------- C. 颜色 ----------
-                buildColorGroup(panel);
-
-                // ---------- C3. 光标（尺寸 / 颜色效果）----------
-                //
-                // 【调用顺序不是随意的：必须在辉光之前】
-                //
-                // 这两组的顺序在原版里是由「谁先完成 group() 注册」决定的：
-                // 原版把光标组的 panel.group(...) 写在了辉光组的 lambda 体内部，
-                // 而 DialogPanel 的 group() 是【等回调跑完才把组挂到父容器】的，
-                // 于是内层那组先挂、外层辉光后挂 —— 实际渲染顺序是
-                //     颜色 → 光标 → 辉光
-                // 而不是源码里看起来的「辉光在前」。
-                //
-                // S3 抽成两个独立方法后，顺序改成按调用顺序走，一度变成
-                //     颜色 → 辉光 → 光标
-                // 组位置换了，所有控件的遍历索引跟着挪 —— 按索引定位的地方立刻串台
-                // （VRegr2 的 R-8 / R-11 一好一坏）。所以这里显式把光标组放在
-                // 辉光组【之前】，与 0.9.61 的渲染顺序逐位一致。
-                buildCursorGroup(panel);
-
-                // ---------- C2. 辉光 ----------
-                buildGlowGroup(panel);
-
-                // ---------- B. 淡出 ----------
-                buildFadeGroup(panel);
-
-                // ---------- G. 实验性（默认折叠）----------
-                buildExperimentalGroup(panel);
-
-                // ---------- F. 高级（诊断）（默认折叠）----------
-                buildDiagGroup(panel);
-
+            // ---------- 6 个标签页 = 6 个内层 DialogPanel ----------
+            //
+            // 【为什么是「每个标签页一个独立 DialogPanel」而不是「一个 DialogPanel 里
+            //   塞 JTabbedPane + panel{...}」】
+            //
+            // DSL 的 panel.panel{...} 会把内层当成父面板的**一行**挂进父容器的 Grid，
+            // 之后再想把那个组件搬进 JTabbedPane，就和一个已经登记过的布局约束失联了。
+            // 而「建几个独立 DialogPanel，再用 DialogPanel.registerIntegratedPanel()
+            // 登记到外层」是平台自带的组合机制 —— javap 实证：
+            // DialogPanel.apply() / reset() / isModified() 的**第一段**就是逐个遍历
+            // integratedPanels 并委托给它们（#81 字段 integratedPanels）。所以
+            // 「应用 / 重置 / 有没有未保存改动」依旧覆盖标签页里的每一个控件，
+            // 不需要自己重新发明一套时序。
+            //
+            // 【已知副作用，刻意接受】平台只在 createComponent() 里给**外层**面板调
+            // registerValidators，内层面板的 IntRange 输入校验器因此不会被登记 ——
+            // 唯一后果是「输入框里敲越界数字不再实时画红框」；数值仍由
+            // intTextField 的 IntRange 过滤 + 失焦时 normalizeTextField() 的 clamp 兜底。
+            // 这里**故意不**给内层补 registerValidators：离线探针 ProbeSettingsV2
+            // 直接调 createComponent() 且不 disableValidators，多登记一批校验器
+            // 会让它在没有 JBPopupFactory 的环境里炸掉。
+            //
+            // 【标签顺序 = 控件遍历顺序】VUi.collect() 是深度优先递归，
+            // 所以「标签页加入顺序 + 页内从上到下」就是探针看到的
+            // 滑块 / 复选框 / 下拉下标顺序。改下面这几行的先后，
+            // 等于改动 VUi.KEYS / SPEC 的下标契约。
+            DialogPanel tabMaster = BuilderKt.panel(p -> {
+                // 顶行：左边版本+提示，右边插件信息
+                buildVersionRow(p);
+                // 预设区（下拉 / 一键恢复 / 自定义预设动作）
+                buildPresetRows(p);
+                // 全局开关
+                buildMasterGroup(p);
                 return kotlin.Unit.INSTANCE;
             });
+
+            DialogPanel tabColor = BuilderKt.panel(p -> {
+                buildColorGroup(p);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 【0.9.105 拆分】原来的「单行输入输出」组 + 光标组拆成两半：
+            // 「光标渐变」归标签 2（颜色），「光标宽度 / 高度」留在这里（手感）。
+            DialogPanel tabCursorLine = BuilderKt.panel(p -> {
+                buildInlineGroup(p);
+                buildCursorSizeGroup(p);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            DialogPanel tabCrossLine = BuilderKt.panel(p -> {
+                buildCrossGroup(p);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 【0.9.105 拆分】辉光组拆成两半：「辉光颜色」归标签 2，
+            // 「启用辉光 + 峰值 + 层数 + 锐度」留在这里（标签 5）。
+            // 淡出与实验性（拖尾渲染模式）也是「不常调的东西」，同放标签 5。
+            DialogPanel tabSpecial = BuilderKt.panel(p -> {
+                buildGlowGroup(p);
+                buildFadeGroup(p);
+                buildExperimentalGroup(p);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            DialogPanel tabDiag = BuilderKt.panel(p -> {
+                buildDiagGroup(p);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            com.intellij.ui.components.JBTabbedPane tabs =
+                    new com.intellij.ui.components.JBTabbedPane();
+            tabs.addTab("总开关", tabMaster);
+            tabs.addTab("颜色", tabColor);
+            tabs.addTab("光标行手感", tabCursorLine);
+            tabs.addTab("列手感", tabCrossLine);
+            tabs.addTab("特殊", tabSpecial);
+            tabs.addTab("调试", tabDiag);
+
+            DialogPanel outer = BuilderKt.panel(panel -> {
+                // 整页只放这一行：标签页占满宽度（Cell 默认横向 FILL）
+                panel.row("", row -> {
+                    row.cell(tabs);
+                    return kotlin.Unit.INSTANCE;
+                });
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 登记之后，外层的 apply / reset / isModified 才会覆盖这 6 个内层。
+            // 漏掉这一步的症状是「控件能改、点应用没反应」—— 与陷阱 2（字段接通了
+            // ≠ 字段生效了）同类的静默失效，所以放在 return 之前且不可省略。
+            outer.registerIntegratedPanel(tabMaster);
+            outer.registerIntegratedPanel(tabColor);
+            outer.registerIntegratedPanel(tabCursorLine);
+            outer.registerIntegratedPanel(tabCrossLine);
+            outer.registerIntegratedPanel(tabSpecial);
+            outer.registerIntegratedPanel(tabDiag);
+            return outer;
         } finally {
             suppressDerive = false;
         }
@@ -1240,9 +1285,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             + "选了彩虹预设时走色相循环，本项不生效。"
             + "<br/>辉光本身的颜色不受本项影响 —— 它始终用「辉光颜色」那一项。";
 
-    /** C. 颜色 —— 拖尾纯色 + 不透明度。光标渐变在「光标」组，两者互斥。 */
+    /** C. 颜色 —— 拖尾纯色 + 不透明度 + 辉光色 + 光标渐变。 */
     private void buildColorGroup(Panel panel) {
         panel.group("颜色", true, g -> {
+            // 【0.9.105 起本组是标签页 2 的全部内容】
+            //
+            // 原来「辉光颜色」在辉光组、「光标渐变」在光标组，两者都与「颜色」
+            // 强相关却在别的组里 —— 分标签时必须归到这里，否则「辉光颜色」
+            // 会留在标签 5（那里讲的是辉光的形状），用户找颜色会找错页。
+            //
+            // 归属变了，联动没变：「辉光颜色」仍然挂 enabledIf(shadowOn)，
+            // 关掉「启用辉光」（标签 5 里那个复选框）时它照样变灰。
             g.row("拖尾颜色", row -> {
                 row.topGap(TopGap.MEDIUM);
                 tailColorPanel = new ColorPanel();
@@ -1259,11 +1312,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
+            g.row("辉光颜色", row -> {
+                shadowColorPanel = new ColorPanel();
+                shadowColorPanel.setSupportTransparency(false);
+                shadowColorPanel.addActionListener(e -> onColorPanelChanged());
+                row.cell(shadowColorPanel).enabledIf(shadowOn);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 【0.9.83】改名 + 重写说明。
+            //
+            // 原名「RGB 渐变（实验性）」+ 文案「下端=蓝紫」，但 0.9.75 起
+            // 实现被换成了色相循环（彩虹），文案与实际行为早已不符。
+            // 现在恢复「光标自身的同色系渐变」语义，文案同步重写。
+            g.row("光标渐变（上下深浅）", row -> {
+                bindCheck(row, () -> pending.rgbGradient,
+                        v -> pending.rgbGradient = v)
+                        .comment(TAG_COLOR + W_CURSOR_GRADIENT, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
+
             return kotlin.Unit.INSTANCE;
         });
     }
 
-    /** C2. 辉光 —— 围绕光标矩形的光晕。四个参数全部受「启用辉光」联动置灰。 */
+    /** C2. 辉光 —— 围绕光标矩形的光晕。「辉光颜色」不在这里，在标签 2（颜色）。 */
     private void buildGlowGroup(Panel panel) {
         panel.group("辉光", true, g -> {
             g.row("启用辉光", row -> {
@@ -1275,14 +1348,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("辉光颜色", row -> {
-                shadowColorPanel = new ColorPanel();
-                shadowColorPanel.setSupportTransparency(false);
-                shadowColorPanel.addActionListener(e -> onColorPanelChanged());
-                row.cell(shadowColorPanel).enabledIf(shadowOn);
-                return kotlin.Unit.INSTANCE;
-            });
-
+            // 【0.9.105 迁走】「辉光颜色」这一行现在在 buildColorGroup（标签 2）。
+            // 留在本组会让「改颜色」这件事分散在两个标签页里。
+            // shadowColorPanel 的创建 / 监听没有丢：只是换了个组构建它。
+            // 本组下面三项的 enabledIf(shadowOn) 与它仍然是同一个属性对象，联动同步。
             g.row("辉光峰值不透明度", row -> {
                 addSlider(row, specOf("glowOpacity"), shadowOn);
                 return kotlin.Unit.INSTANCE;
@@ -1304,15 +1373,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     /**
-     * C3. 光标（尺寸 / 颜色效果）—— 只管「光标这个矩形本身」。
+     * C3. 光标尺寸（宽度 / 高度）—— 只管「光标这个矩形多大」。
      *
-     * <p>【职责边界】多大、什么颜色效果。与「辉光」（围绕矩形的光晕）
-     * 和「淡出」（时间上的衰减）分开。光标尺寸和辉光没有因果关系，
-     * 放在一起会让人以为调宽度会影响辉光 —— 用户为此专门提过。
+     * <p>【0.9.105 拆分】原方法叫 {@code buildCursorGroup}，把「尺寸」和
+     * 「光标渐变」放在同一组。分标签后「光标渐变」是颜色语义，搬去标签 2
+     * （{@link #buildColorGroup}），本组只剩尺寸，放在标签 3（光标行手感）
+     * 的「单行输入输出」组后面 —— 用户调完打字手感顺手就能调宽高。
      *
-     * <p>这三项都是<b>持久配置</b>，不随动画预设变化。
+     * <p>【组标题未改】「光标（尺寸 / 颜色效果）」字面上还带着「颜色效果」，
+     * 但任务纪律是「不改文案」，所以保留原文。要改的是标题文案，属于另一件事。
+     *
+     * <p>这两项都是<b>持久配置</b>，不随动画预设变化。
      */
-    private void buildCursorGroup(Panel panel) {
+    private void buildCursorSizeGroup(Panel panel) {
         panel.group("光标（尺寸 / 颜色效果）", true, cur -> {
             cur.row("光标宽度", row -> {
                 // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
@@ -1323,17 +1396,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            // 【0.9.83】改名 + 重写说明。
-            //
-            // 原名「RGB 渐变（实验性）」+ 文案「下端=蓝紫」，但 0.9.75 起
-            // 实现被换成了色相循环（彩虹），文案与实际行为早已不符。
-            // 现在恢复「光标自身的同色系渐变」语义，文案同步重写。
-            cur.row("光标渐变（上下深浅）", row -> {
-                bindCheck(row, () -> pending.rgbGradient,
-                        v -> pending.rgbGradient = v)
-                        .comment(TAG_COLOR + W_CURSOR_GRADIENT, COMMENT, NO_LINK);
-                return kotlin.Unit.INSTANCE;
-            });
+            // 【0.9.105 迁走】「光标渐变（上下深浅）」这一行现在在 buildColorGroup。
 
             cur.row("光标高度（% 行高）", row -> {
                 addSlider(row, specOf("cursorHeightRatio"), null);

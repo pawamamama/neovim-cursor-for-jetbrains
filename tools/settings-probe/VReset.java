@@ -310,8 +310,34 @@ public final class VReset {
 
     // ---------------------------------------------------------------- 观测器
 
-    @SuppressWarnings("unchecked")
     private static int instrument(DialogPanel panel, String fieldName, boolean isReset) {
+        // 【2026-10-29 分标签适配：回调表按面板分开存放】
+        //
+        // 分成 6 个标签页后，外层 DialogPanel 自己**一条**回调都没有 ——
+        // 所有控件的 reset / apply 回调都在各自标签页那个 DialogPanel 的表里。
+        // 平台的 reset() / apply() 都是「先逐个跑 integratedPanels，再跑自己的表」
+        // （javap 实证），所以「外层 + 集成面板」的**合计**才等于原来的那张表。
+        //
+        // 断言的语义没变：R-1..R-5 判的是「一次操作把每条回调跑了几轮」，
+        // 分母 resetCb / applyCb 现在是全部面板的回调总数，分子也按同一范围累计，
+        // 比值仍然是「轮数」。
+        int n = 0;
+        List<DialogPanel> panels = new ArrayList<>();
+        panels.add(panel);
+        panels.addAll(panel.getIntegratedPanels());
+        for (DialogPanel p : panels) {
+            int k = instrumentOne(p, fieldName, isReset);
+            if (k < 0) {
+                return -1;
+            }
+            n += k;
+        }
+        return n;
+    }
+
+    /** 只给「一个」面板的回调表套包装。原 instrument 的方法体原样搬进来。 */
+    @SuppressWarnings("unchecked")
+    private static int instrumentOne(DialogPanel panel, String fieldName, boolean isReset) {
         try {
             Field f = DialogPanel.class.getDeclaredField(fieldName);
             f.setAccessible(true);

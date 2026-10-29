@@ -129,6 +129,30 @@ public final class VDead {
 
     @SuppressWarnings("unchecked")
     private static int instrumentApply(DialogPanel panel, NeovideCursorConfigurable conf) {
+        // 【2026-10-29 分标签适配：回调表按面板分开存放】
+        //
+        // 分成 6 个标签页后，外层 DialogPanel 自己**一条** apply 回调都没有 ——
+        // 所有控件的回调都在各自标签页那个 DialogPanel 的 applyCallbacks 里。
+        // 平台的 apply() 会先逐个调用 integratedPanels 的 apply() 再跑自己的表
+        // （javap 实证），所以「外层 + 集成面板」才是完整的一组。
+        // 只读外层 → 读到 0 条 → D-0 直接红（本次实测就是这样红的）。
+        int n = 0;
+        List<DialogPanel> panels = new ArrayList<>();
+        panels.add(panel);
+        panels.addAll(panel.getIntegratedPanels());
+        for (DialogPanel p : panels) {
+            int k = instrumentOneApply(p, conf);
+            if (k < 0) {
+                return -1;
+            }
+            n += k;
+        }
+        return n;
+    }
+
+    /** 只给「一个」面板的 apply 回调套包装。原 instrumentApply 的方法体原样搬进来。 */
+    @SuppressWarnings("unchecked")
+    private static int instrumentOneApply(DialogPanel panel, NeovideCursorConfigurable conf) {
         try {
             Field f = DialogPanel.class.getDeclaredField("applyCallbacks");
             f.setAccessible(true);

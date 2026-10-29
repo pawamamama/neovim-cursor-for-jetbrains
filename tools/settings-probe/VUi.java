@@ -184,11 +184,11 @@ public final class VUi {
     // ==================================================================
 
     /**
-     * 面板从上到下的 13 个滑块字段名。
+     * 面板从上到下的 14 个滑块字段名。
      *
      * <p><b>0.9.71 补了 2 项</b>：{@code cursorWidthPx} / {@code cursorHeightRatio}
      * 在 0.9.57 加入面板时本表没跟上 —— 那份「第 11 个滑块走兜底」的旧注释说的问题
-     * 又重演了一次。现在 13 项与面板实际一致。
+     * 又重演了一次。0.9.105 起面板分成 6 个标签页，本表顺序随之重排，项数仍是 14。
      */
     public static final String[] KEYS = {
             // ===== 【顺序 = 面板真实渲染顺序，不是 SPECS 声明顺序】=====
@@ -206,34 +206,48 @@ public final class VUi {
             //
             // 现在严格按渲染顺序。校验方法：跑 ZzSliderOrder 打印面板量程，
             // 与下面 SPEC 的 [min,max] 逐项比对。
-            "shortAnimationLength",   // [0]  Inline 组
-            "typingSmoothness",       // [1]  Inline 组
-            "stretchRatioK",          // [2]  Inline 组
-            "slopeTicks",             // [3]  Inline 组（0.9.79 新增）
-            "trailSize",              // [4]  Cross 组
-            "animationLength",        // [5]  Cross 组
-            "tailOpacity",            // [6]  Color 组
-            "cursorWidthPx",          // [7]  Cursor 组（★ 在 Glow 之前，见 851/854 行）
-            "cursorHeightRatio",      // [8]  Cursor 组
-            "glowOpacity",            // [9]  Glow 组
-            "glowLayers",             // [10] Glow 组
-            "shadowBlurFactor",       // [11] Glow 组
-            "cursorDisappearDelay",   // [12] Fade 组
-            "cursorFadeOutDuration"   // [13] Fade 组
+            // ===== 【0.9.105 分标签后的新顺序】=====
+            // 6 个标签页：总开关 / 颜色 / 光标行手感 / 列手感 / 特殊 / 调试。
+            // 标签 1 与标签 6 没有滑块，所以滑块顺序 = 标签 2 → 3 → 4 → 5 的页内顺序。
+            //
+            //   [0]      tailOpacity          ← 标签2（颜色）    原来在 [6]
+            //   [1..6]   标签3（光标行手感）  原来在 [0..3] + [7][8]
+            //   [7..8]   标签4（列手感）      原来在 [4][5]
+            //   [9..13]  标签5（特殊）        原来在 [9..13]，位置未变
+            //
+            // 换句话说：只有 tailOpacity 从 [6] 挪到 [0]，其余 13 个滑块各自整体
+            // 平移 1 位、相对先后不变。这就是 7 个探针在分标签后立刻变红的原因 ——
+            // 它们按**下标**取滑块，而第 0 个已经不是 shortAnimationLength 了。
+            // 正确改法是把定位换成按 key（sliderByKey / textFieldOf / labelOf），
+            // 而不是改断言的期望值。
+            "tailOpacity",             // [0]  标签2 颜色
+            "shortAnimationLength",   // [1]  标签3 光标行手感（单行组）
+            "typingSmoothness",       // [2]  标签3（单行组）
+            "stretchRatioK",          // [3]  标签3（单行组）
+            "slopeTicks",             // [4]  标签3（单行组，0.9.79 新增）
+            "cursorWidthPx",          // [5]  标签3（光标尺寸组）
+            "cursorHeightRatio",      // [6]  标签3（光标尺寸组）
+            "trailSize",              // [7]  标签4 列手感
+            "animationLength",        // [8]  标签4 列手感
+            "glowOpacity",            // [9]  标签5 特殊（辉光组）
+            "glowLayers",             // [10] 标签5（辉光组）
+            "shadowBlurFactor",       // [11] 标签5（辉光组）
+            "cursorDisappearDelay",   // [12] 标签5（淡出组）
+            "cursorFadeOutDuration"   // [13] 标签5（淡出组）
     };
 
-    /** {min, max, step}，下标与 {@link #KEYS} 一一对应。 */
+    /** {min, max, step}，下标与 {@link #KEYS} 一一对应。量程数值与分标签前逐项相同。 */
     private static final int[][] SPEC = {
             // 下标与 KEYS 一一对应（= 面板渲染顺序，见 KEYS 上方注释）
-            {2, 25, 1},        // [0]  shortAnimationLength   —— 10ms 一档
-            {0, 100, 5},       // [1]  typingSmoothness       —— 5% 一档
-            {10, 80, 5},       // [2]  stretchRatioK          —— 0.5 倍一档
-            {0, 100, 5},       // [3]  slopeTicks             —— 5% 一档（0.9.80 起进预设域，82=上游）
-            {0, 100, 5},       // [4]  trailSize              —— 5% 一档
-            {5, 35, 1},        // [5]  animationLength        —— 10ms 一档
-            {0, 100, 5},       // [6]  tailOpacity            —— 5% 一档
-            {1, 5, 1},         // [7]  cursorWidthPx          —— 1px 一档
-            {30, 100, 10},     // [8]  cursorHeightRatio      —— 10% 一档
+            {0, 100, 5},       // [0]  tailOpacity            —— 5% 一档
+            {2, 25, 1},        // [1]  shortAnimationLength   —— 10ms 一档
+            {0, 100, 5},       // [2]  typingSmoothness       —— 5% 一档
+            {10, 80, 5},       // [3]  stretchRatioK          —— 0.5 倍一档
+            {0, 100, 5},       // [4]  slopeTicks             —— 5% 一档（0.9.80 起进预设域，82=上游）
+            {1, 5, 1},         // [5]  cursorWidthPx          —— 1px 一档
+            {30, 100, 10},     // [6]  cursorHeightRatio      —— 10% 一档
+            {0, 100, 5},       // [7]  trailSize              —— 5% 一档
+            {5, 35, 1},        // [8]  animationLength        —— 10ms 一档
             {0, 100, 5},       // [9]  glowOpacity            —— 5% 一档
             {1, 12, 1},        // [10] glowLayers             —— 逐层
             {0, 100, 1},       // [11] shadowBlurFactor       —— 锐度 0–100，步长 1
