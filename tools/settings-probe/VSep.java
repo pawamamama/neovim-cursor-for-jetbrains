@@ -424,10 +424,13 @@ public final class VSep {
         String all = CustomPresets.put("", name, "PLACEHOLDER");
         // 用反射构造一个 Entry 实例（只为驱动 format 的快照路径）
         try {
+            // 【2026-10-29 父链重构】Entry 构造器多了 parent（三参）。
+            // 这里传空父：本探针测的是「格式/分隔符」，老格式条目本来就没有父引用。
             java.lang.reflect.Constructor<CustomPresets.Entry> c =
-                    CustomPresets.Entry.class.getDeclaredConstructor(String.class, String.class);
+                    CustomPresets.Entry.class.getDeclaredConstructor(
+                            String.class, String.class, String.class);
             c.setAccessible(true);
-            return c.newInstance(name, snap);
+            return c.newInstance(name, "", snap);
         } catch (Throwable t) {
             // 退化：拿 parse 出来的条目（快照占位），用不了就返回 null 由调用方兜
             List<CustomPresets.Entry> l = CustomPresets.parse(all);

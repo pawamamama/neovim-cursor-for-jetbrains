@@ -382,8 +382,11 @@ public final class VPreset {
         //   diagLogging / multiCursorNoGlow / cursorWidthPx / cursorHeightRatio /
         //   rgbGradient / targetFps / slopeTicks  → 23 变 30
         // 这条断言的用途是「新增字段要有人知道」，它工作了。
-        check("V14-1 State 的 public 实例字段数 == 30（23 + 后续 7 个新增）",
-                fields == 30, "fields=" + fields);
+        // 【2026-10-29 契约变更，非缺陷】颜色预设三件套（colorPresetBase /
+        // customColorPresets / colorCustomName）→ 30 变 33。
+        // 用户要求「颜色也做成完整预设」，与动画的三件套完全对称。
+        check("V14-1 State 的 public 实例字段数 == 33（30 + 颜色预设三件套）",
+                fields == 33, "fields=" + fields);
 
         // 契约 §5.2 的 P-1 语义是「预设是纯动作，不持久化『当前选中了哪个预设的哪个值副本』」，
         // 但它允许两个**元数据**字段：
@@ -395,7 +398,9 @@ public final class VPreset {
         // 白名单只列「名字里含 preset」的元数据字段 —— 本断言本身就是按这个过滤的，
         // animCustomName 不含 "preset"，它由 V14-1 的字段总数覆盖。
         java.util.Set<String> allowedPreset = new java.util.HashSet<>(java.util.Arrays.asList(
-                "animPresetBase", "customAnimPresets"));
+                "animPresetBase", "customAnimPresets",
+                // 2026-10-29：颜色预设的基准与自建表，与动画的同名同义
+                "colorPresetBase", "customColorPresets"));
         java.util.List<String> illegalPreset = new java.util.ArrayList<>();
         java.util.Set<String> presentPreset = new java.util.HashSet<>();
         for (java.lang.reflect.Field f : NeovideCursorSettings.State.class.getDeclaredFields()) {

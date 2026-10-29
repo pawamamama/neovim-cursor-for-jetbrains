@@ -605,6 +605,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private javax.swing.JButton animRenameBtn;
     private javax.swing.JButton animDeleteBtn;
     private javax.swing.JButton colorRestoreBtn;
+    /** 颜色预设的三个动作按钮（2026-10-29，与动画侧完全对称）。 */
+    private javax.swing.JButton colorNewBtn;
+    private javax.swing.JButton colorRenameBtn;
+    private javax.swing.JButton colorDeleteBtn;
     private com.intellij.openapi.ui.ComboBox<String> colorPresetCombo;
 
     private final List<String> animPresetItems = new ArrayList<>();
@@ -862,7 +866,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             paintDiag = NeovideCaretManager.isPaintDisabled();
             // 基准预设从持久化状态里读（不是从值猜）—— 否则重启后当前项会漂到别的内置预设
             animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
-            colorBaseIdx = CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
+            // 2026-10-29：从持久化基准读，不再每次打开都重置成 0 ——
+            // 原来那个 0 会让「自定义颜色」状态下重新打开面板后恢复到错误的预设。
+            colorBaseIdx = CursorPresets.clampColorPresetIndex(pending.colorPresetBase);
 
             // 0.9.6 / M5-fix：下拉**只有真预设**，没有「已修改」伪条目。
             // 「已修改」是把基准那一项**就地改名**（不新增条目），由 refreshPresetDisplay() 负责。
@@ -1022,6 +1028,24 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 初值：内置预设选中时改名/删除置灰。之后每次 refreshPresetDisplay 会再刷。
             animRenameBtn.setEnabled(false);
             animDeleteBtn.setEnabled(false);
+            return kotlin.Unit.INSTANCE;
+        });
+
+        // 0c2. 颜色预设的三个动作（2026-10-29）：与动画侧完全对称。
+        // 用户要求「颜色也做成完整预设」—— 颜色也能新建 / 改名 / 删除 / 派生副本 / 恢复默认。
+        panel.row("", row -> {
+            row.bottomGap(BottomGap.SMALL);
+            colorNewBtn = new javax.swing.JButton("新建颜色预设…");
+            colorNewBtn.addActionListener(e -> createCustomColorPreset());
+            row.cell(colorNewBtn);
+            colorRenameBtn = new javax.swing.JButton("重命名颜色…");
+            colorRenameBtn.addActionListener(e -> renameCustomColorPreset());
+            row.cell(colorRenameBtn);
+            colorDeleteBtn = new javax.swing.JButton("删除颜色");
+            colorDeleteBtn.addActionListener(e -> deleteCustomColorPreset());
+            row.cell(colorDeleteBtn);
+            colorRenameBtn.setEnabled(false);
+            colorDeleteBtn.setEnabled(false);
             return kotlin.Unit.INSTANCE;
         });
 
@@ -1830,13 +1854,36 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return;
         }
         int idx = colorPresetCombo.getSelectedIndex();
-        if (idx < 0 || idx >= CursorPresets.COLOR_PRESETS.length) {
+        if (idx < 0) {
             refreshPresetDisplay();
             return;
         }
-        CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[idx];
-        pending.tailColor = p.tailColor();
-        pending.shadowColor = p.shadowColor();
+        if (idx < CursorPresets.COLOR_PRESETS.length) {
+            // 内置颜色预设：写两个 HEX，并把「基准」记下来
+            CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[idx];
+            pending.tailColor = p.tailColor();
+            pending.shadowColor = p.shadowColor();
+            pending.colorPresetBase = idx;
+            pending.colorCustomName = "";
+        } else {
+            // 自定义颜色预设，或末项「自定义颜色」（它不是可选项）
+            java.util.List<CustomPresets.Entry> entries =
+                    CustomPresets.parse(pending.customColorPresets);
+            int ci = idx - CursorPresets.COLOR_PRESETS.length;
+            if (ci < 0 || ci >= entries.size()) {
+                refreshPresetDisplay();          // 末项「自定义颜色」：只刷新，不写字段
+                return;
+            }
+            CustomPresets.Entry e = entries.get(ci);
+            String[] hex = CursorPresets.parseColorSnapshot(e.snapshot);
+            if (hex == null) {
+                refreshPresetDisplay();          // 坏快照 → 当作选中失败，不写半套颜色
+                return;
+            }
+            pending.tailColor = hex[0];
+            pending.shadowColor = hex[1];
+            pending.colorCustomName = e.name;
+        }
         // 【0.9.88 删除：不再写 rgbGradient】
         // 用户的光标渐变开关不该被颜色预设改写（详见 CursorPresetApplier 同一处说明）。
         // 彩虹靠 resolveRgbWash() 从预设反推，不需要这个字段参与。
@@ -1861,6 +1908,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         // 颜色面板：控件 → State（统一走 ColorPanelBinding）
         colorBindings.pushAll(pending);
+        // 【2026-10-29】站在自定义颜色预设上改颜色 → 同步更新它的快照。
+        // 与动画的 afterPendingEdited 分支 A 同构：编辑即保存，内置预设永远不被污染。
+        if (!pending.colorCustomName.isEmpty()
+                && CustomPresets.has(pending.customColorPresets, pending.colorCustomName)) {
+            pending.customColorPresets = CustomPresets.put(pending.customColorPresets,
+                    pending.colorCustomName,
+                    CursorPresets.colorSnapshot(pending.tailColor, pending.shadowColor));
+        } else {
+            // 【2026-10-29 审查 M4】名字还在、条目没了（手改 XML / 状态不一致）→ 自愈。
+            //
+            // 不自愈的话会进入幽灵态：下拉空白，但 refreshCustomButtons 认为
+            // 「在自定义预设上」，改名/删除按钮可点；此时改名会把一个不存在的名字
+            // 永久写进配置。动画侧 afterPendingEdited 分支 A 早有这条自愈，颜色侧补齐。
+            pending.colorCustomName = "";
+        }
         refreshPresetDisplay();
     }
 
@@ -1912,8 +1974,25 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
         // 2) 基准与颜色匹配
         animBaseIdx = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
+
+        // 颜色（2026-10-29）：先看是否站在某个自定义颜色预设上，否则按 HEX 匹配内置。
+        // 自定义优先 —— 与动画下拉的 selectedCustom 判据同构。
+        java.util.List<CustomPresets.Entry> colorEntries =
+                CustomPresets.parse(pending.customColorPresets);
+        int selectedColorCustom = -1;
+        for (int i = 0; i < colorEntries.size(); i++) {
+            if (colorEntries.get(i).name.equals(pending.colorCustomName)) {
+                selectedColorCustom = i;
+            }
+        }
         CursorPresets.ColorPreset c = CursorPresetApplier.matchColorPreset(pending);
-        if (c != null) {
+        if (selectedColorCustom < 0 && c != null) {
+            // 【2026-10-29 审查 H3】只更新显示态，绝不写 pending。
+            //
+            // 写 pending 会让「刷新显示」这个只读操作把 dirtyAnyField 弄脏
+            // （它本次新加了 colorPresetBase 比较）→ 面板一打开就亮「应用」，
+            // 用户点一下还会持久化一个他从来没选过的基准。动画侧从不这么做
+            // （它只写局部 animBaseIdx），这里与它对齐。
             colorBaseIdx = indexOfColor(c);
         }
 
@@ -1935,7 +2014,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         syncingControls = true;
         try {
             replaceModel(animPresetCombo, animPresetItems, names);
-            rebuildColorItems(colorPresetCombo, colorPresetItems);
+            rebuildColorItems();
             // 当前项：自定义优先（animCustomName 非空就是它），否则内置基准。
             //
             // 【第二轮审查 O-8/O-14/O-15：下拉不能"自称"它是某个预设】
@@ -1959,7 +2038,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             }
             // -1 = 无选中，ComboBox 渲染为空白 —— 比一个点不动的假项诚实
             animPresetCombo.setSelectedIndex(sel);
-            colorPresetCombo.setSelectedIndex(c == null ? -1 : indexOfColor(c));
+            // 颜色选中：自定义优先，其次内置匹配，都没有 = -1（空白）
+            int colorSel;
+            if (selectedColorCustom >= 0) {
+                colorSel = CursorPresets.COLOR_PRESETS.length + selectedColorCustom;
+            } else {
+                colorSel = c == null ? -1 : indexOfColor(c);
+            }
+            colorPresetCombo.setSelectedIndex(colorSel);
             refreshRestoreButtonText();
             refreshCustomButtons();
         } finally {
@@ -1987,6 +2073,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         if (animDeleteBtn != null) {
             animDeleteBtn.setEnabled(onCustom);
+        }
+        // 颜色侧同构（2026-10-29）
+        boolean onColorCustom = !pending.colorCustomName.isEmpty();
+        if (colorNewBtn != null) {
+            colorNewBtn.setEnabled(CustomPresets.canAdd(pending.customColorPresets));
+        }
+        if (colorRenameBtn != null) {
+            colorRenameBtn.setEnabled(onColorCustom);
+        }
+        if (colorDeleteBtn != null) {
+            colorDeleteBtn.setEnabled(onColorCustom);
         }
     }
 
@@ -2052,19 +2149,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 .uniqueName(pending.customAnimPresets,
                         CursorPresets.ANIM_PRESETS[base].name() + " 副本");
         pending.animCustomName = name;
+        // 【2026-10-29 父链】自动派生只发生在「当前站在内置预设上」的分支（A 已提前 return），
+        // 所以父引用一定是 b<下标>。这一条必须写进去 —— 少了它，
+        // 「恢复默认值」就不知道该回哪个预设（旧版靠一个全局指针，实测会指错。
+        // 见 CustomPresets 类注释里的实测症状）。
         pending.customAnimPresets = CustomPresets
                 .put(pending.customAnimPresets, name,
+                        CustomPresets.builtinParent(base),
                         SettingsField
                                 .snapshot(pending));
     }
 
 
-    /** 颜色下拉：5 个预设 + 末项「自定义颜色」（颜色不参与预设语义，没有「已修改」）。 */
-    private static void rebuildColorItems(com.intellij.openapi.ui.ComboBox<String> combo,
-                                          List<String> items) {
+    /**
+     * 颜色下拉：内置 6 项 + 自定义 N 项 + 末项「自定义颜色」。
+     *
+     * <p>2026-10-29 从静态方法改成实例方法：自定义颜色预设表在 {@code pending} 里，
+     * 静态版本拿不到。与动画下拉的 {@code names} 构建方式保持同构。
+     */
+    private void rebuildColorItems() {
         List<String> next = new ArrayList<>(colorPresetNames());
+        for (CustomPresets.Entry e : CustomPresets.parse(pending.customColorPresets)) {
+            next.add(e.name);
+        }
         next.add(CursorPresets.CUSTOM_COLOR_LABEL);
-        replaceModel(combo, items, next);
+        replaceModel(colorPresetCombo, colorPresetItems, next);
     }
 
     /** 内容没变就不动模型（避免每次 refresh 都重置选中项与发事件）。 */
@@ -2078,48 +2187,97 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         combo.setModel(new javax.swing.DefaultComboBoxModel<>(next.toArray(new String[0])));
     }
 
-    /** 刷新两个「恢复为「X」默认值」按钮的文案（基准预设可能刚变过）。 */
+    /**
+     * 当前动画预设的「恢复默认值」目标。
+     *
+     * <p>三种情况：
+     * <ul>
+     *   <li>站在<b>内置预设</b>上 → 目标就是它自己（{@link CustomPresets#builtinBase}）；</li>
+     *   <li>站在<b>自定义预设</b>上 → 沿它记录的父链找最近一个还存在的祖先；</li>
+     *   <li>找不到（旧数据没有父引用 / 成环 / 父被删且无祖父）→ 返回空 Base，
+     *       调用方必须把按钮置灰 —— <b>绝不回退到某个内置预设</b>，那正是旧版的撒谎来源。</li>
+     * </ul>
+     */
+    private CustomPresets.Base currentAnimBase() {
+        if (!pending.animCustomName.isEmpty()) {
+            return CustomPresets.resolveBase(pending.customAnimPresets, pending.animCustomName);
+        }
+        return CustomPresets.builtinBase(
+                CursorPresets.clampAnimPresetIndex(pending.animPresetBase));
+    }
+
+    /** 解析出的目标名字；越界或不存在返回 {@code null}（调用方据此把按钮置灰）。 */
+    private static String animBaseName(CustomPresets.Base b) {
+        if (b == null || !b.exists()) {
+            return null;
+        }
+        if (b.builtinIdx >= 0) {
+            return b.builtinIdx < CursorPresets.ANIM_PRESETS.length
+                    ? CursorPresets.ANIM_PRESETS[b.builtinIdx].name() : null;
+        }
+        return b.custom.name;
+    }
+
+    /** 刷新两个「恢复为「X」默认值」按钮的文案与可用性（目标可能刚变过）。 */
     private void refreshRestoreButtonText() {
         if (animRestoreBtn != null) {
-            // 【2026-10-28 改】始终显示「目标父预设」的名字，不再显示副本名。
+            // 【2026-10-29 重构】文案直接来自 currentAnimBase()，与 restoreAnimPreset()
+            // 读的是同一个函数 —— 文案与行为不可能再分家。
             //
-            // 原来在自定义副本上显示副本名（如「基础 副本」），但按钮实际做的是
-            // 「回到 pending.animPresetBase 指向的内置预设」—— 文案与行为不一致，
-            // 用户实测报「显示副本名，点了却跳到父预设」。
-            //
-            // 用 pending.animPresetBase 而不是 animBaseIdx：restoreAnimPreset 读的是前者，
-            // 两者在跨预设切换后可能不同（见该方法的说明）。
-            String current = CursorPresets.ANIM_PRESETS[
-                    CursorPresets.clampAnimPresetIndex(pending.animPresetBase)].name();
-            animRestoreBtn.setText(String.format(RESTORE_TPL, current));
+            // 目标不存在时置灰而不是保留旧文案：一个永远写着「恢复为「缎带」」的按钮，
+            // 在选中「我的旧副本」时只会误导。
+            String target = animBaseName(currentAnimBase());
+            if (target != null) {
+                animRestoreBtn.setEnabled(true);
+                animRestoreBtn.setText(String.format(RESTORE_TPL, target));
+            } else {
+                animRestoreBtn.setEnabled(false);
+                animRestoreBtn.setText("恢复默认值（此预设没有可继承的父预设）");
+            }
         }
         if (colorRestoreBtn != null) {
-            colorRestoreBtn.setText(String.format(RESTORE_TPL,
-                    CursorPresets.COLOR_PRESETS[colorBaseIdx].name()));
+            // 2026-10-29：与动画侧同构 —— 文案与 restoreColorPreset() 读同一个函数，
+            // 目标不存在时置灰而不是继续显示一个会骗人的预设名。
+            String target = colorBaseName(currentColorBase());
+            if (target != null) {
+                colorRestoreBtn.setEnabled(true);
+                colorRestoreBtn.setText(String.format(RESTORE_TPL, target));
+            } else {
+                colorRestoreBtn.setEnabled(false);
+                colorRestoreBtn.setText("恢复默认值（此颜色预设没有可继承的父预设）");
+            }
         }
     }
 
     /**
      * 把<b>当前选中项</b>的值重新写进 pending。
      *
-     * <p><b>0.9.68：语义按用户要求统一成「回到默认值」</b>。
-     *
-     * <p>用户原话：「恢复为默认值 没有这个逻辑这么难吗 —— 直接从哪个预设拷贝的覆盖一下呗」。
-     *
-     * <p>旧行为（0.9.9~0.9.67）在自定义副本上是错的：它 restore 副本<b>自己存的快照</b>，
-     * 而按钮文案写的是「恢复为「基础 副本」默认值」—— 用户以为会回到「基础」的默认，
-     * 实际拿到的是副本当前存的值。**用户改了副本想反悔，点这个按钮毫无作用**，
-     * 因为它只是把自己又拷了一遍。
-     *
-     * <p>新行为：
+     * <p><b>2026-10-29 语义（P9-A 回归修复，docs/PROJECT-DECISIONS.md）</b>：
      * <ul>
-     *   <li><b>内置预设</b> → 写该预设的常量（原行为，正确）</li>
-     *   <li><b>自定义副本</b> → 回到它<b>派生自的那个内置预设</b>
-     *       （{@code pending.animPresetBase} 记着），并清掉自定义名 ——
-     *       也就是「放弃这份副本的改动，回到你最初拷贝的那一版」</li>
+     *   <li><b>内置预设</b> → 写该预设的常量；</li>
+     *   <li><b>自定义副本</b> → 写它派生自的那个内置预设（{@code pending.animPresetBase}）的常量，
+     *       但<b>留在副本上</b>：{@code animCustomName} 不清空，
+     *       {@code customAnimPresets} 里那条快照<b>一个字节都不动</b>。</li>
      * </ul>
      *
-     * <p>这正是用户说的「直接从哪个预设拷贝的覆盖一下」。
+     * <p><b>为什么副本条目不能改写</b>：2026-10-28 的 bd932b9 曾把副本快照改写成父预设值，
+     * 后果是用户<b>在副本上手调的一切被永久抹掉</b>（用户原话「手调过的值全部丢失」）。
+     * 点「恢复默认」只是想清掉面板里这一轮的值，<b>不是想销毁自己存下来的那份预设</b> ——
+     * 预设条目是他的数据，恢复按钮不该有删数据的权力。
+     *
+     * <p><b>为什么不清 animCustomName</b>：清空会让下拉跳回内置预设。
+     * 用户原话「跳回父预设」—— 恢复的是<b>值</b>，不是「你站在哪个预设上」这个身份。
+     * 留在副本上，用户之后随时能从下拉重新选中它（副本里的手调值这时还在）。
+     *
+     * <p><b>「派生时的状态」为什么不作为基线</b>（2026-10-29 用户拍板）：
+     * 它从来没有被持久化过 —— {@code afterPendingEdited} 的分支 A 在副本上每次编辑
+     * 都把快照重写成当前值，分支 B 派生时写进去的又已经是「改偏之后」的值。
+     * 要拿它必须新增存储（扩落地格式或加 State 字段），成本与收益不成比例；
+     * 用户选择「回到父预设常量」，与 b47443b 的值语义一致。
+     *
+     * <p>历史沿革：0.9.9~0.9.67 在副本上 restore 自己的快照（空操作）→
+     * b47443b 改为「值回父预设 + 清副本名」→ bd932b9 追加「改写副本条目」
+     * → 本次去掉 bd932b9 的两个副作用，保留 b47443b 的值语义。
      */
     private void restoreAnimPreset() {
         // 【必须在抑制档里做】syncAllControlsFromPending() 会走到
@@ -2128,64 +2286,202 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         boolean prev = suppressDerive;
         suppressDerive = true;
         try {
-            // ==================== 0.9.68 核心修改 ====================
+            // ==================== 2026-10-29 重构：沿父链求值 ====================
             //
-            // 原来这里有一段「在自定义副本上就 restore 它自己的快照」的分支，
-            // 那是**空操作**（把自己拷给自己），用户点了看不出任何变化。
-            // 现在统一走下面的「回到 animPresetBase 指向的内置预设」：
-            //   · 内置预设上：animPresetBase == 当前选中项，行为与原来一致
-            //   · 自定义副本上：animPresetBase 是它派生自的那一版，正是用户要的
-            //
-            // 副本名字在这里一并清掉 —— 因为值已经回到内置预设了，
-            // 再挂着副本名会让下拉显示与实际值不符（显示层撒谎）。
-            // 【用 pending.animPresetBase 而不是 animBaseIdx】
-            //
-            // 两者在内置预设上是同一个值，但**数据来源不同**：
-            //   animBaseIdx      面板打开时从 State 读出的快照，之后只在
-            //                    「用户在内置预设下拉里选了一项」时被改写；
-            //   animPresetBase   持久化字段，派生自定义副本时会被写成
-            //                    「副本派生自哪个内置预设」（见 afterPendingEdited / 派生逻辑）。
-            // 所以在自定义副本上，animPresetBase 才是权威的「我拷贝自谁」。
-            int base = CursorPresets.clampAnimPresetIndex(pending.animPresetBase);
-            String customName = pending.animCustomName;
-
-            // 写【全部】预设字段（含 0.9.67 补入的 tailOpacity / 淡出两项 / smooth）
-            applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[base]);
-            pending.animPresetBase = base;
-            animBaseIdx = base;
-
-            // 【2026-10-28 用户要求】副本条目**保留**，但内容一起对齐到父预设：
-            // 「恢复完 是父预设独立，个人自定义的也在，不过里面参数和父预设对齐，直接拷贝过去，
-            //   适合那种改坏了想重置」。
-            //
-            // 两个顺序都不能换：
-            //   ① 名字必须在 animCustomName 清空**之前**取到；
-            //   ② snapshot 必须在 applyAnimPresetFields **之后**取 ——
-            //      那时 pending 的 13 个观感字段才已经是父预设的值。
-            if (!customName.isEmpty() && CustomPresets.has(pending.customAnimPresets, customName)) {
-                pending.customAnimPresets = CustomPresets.put(
-                        pending.customAnimPresets, customName, SettingsField.snapshot(pending));
+            // 旧实现读一个全局可变指针 animPresetBase，而它会被「选内置预设」改写，
+            // 于是选中「基础 副本」后按钮可能写着「恢复为「缎带」默认值」并真的回到缎带。
+            // 现在目标来自条目自己记录的父链（CustomPresets.resolveBase），与选中顺序无关。
+            CustomPresets.Base base = currentAnimBase();
+            if (!base.exists()) {
+                // 没有可恢复的祖先（旧数据 / 环 / 父被删且无祖父）。
+                // 按钮本应已置灰；这里再挡一次，绝不在无目标时随便挑一个内置预设。
+                return;
+            }
+            if (base.builtinIdx >= 0) {
+                // 上界由调用方判（CustomPresets 不认识任何一张内置表）
+                if (base.builtinIdx >= CursorPresets.ANIM_PRESETS.length) {
+                    return;
+                }
+                applyAnimPresetFields(pending, CursorPresets.ANIM_PRESETS[base.builtinIdx]);
+                pending.animPresetBase = base.builtinIdx;
+                animBaseIdx = base.builtinIdx;
+            } else {
+                // 目标是另一个自定义预设 → 写它**当前**的快照（继承语义，用户 2026-10-29 拍板）。
+                // 用 restoreSkipping：快照里的设备开关不该被恢复动作改写。
+                SettingsField.restoreSkipping(pending, base.custom.snapshot);
             }
 
-            // 值已回到内置预设 —— 副本名必须清掉，否则下拉显示「基础 副本」
-            // 而实际值是「基础」的，显示层就撒谎了。
-            pending.animCustomName = "";
+            // 【不动 animCustomName、不动 customAnimPresets】
+            // 恢复的是「值」，不是「你站在哪个预设上」这个身份；
+            // 预设条目属于用户数据，恢复按钮没有改写它的权力。
             syncAllControlsFromPending();
         } finally {
             suppressDerive = prev;
         }
     }
 
-    /** M5：把基准颜色预设的 2 个 HEX 重新写进 pending。 */
+    /**
+     * 把颜色预设的默认值重新写进 pending（2026-10-29 改为沿父链求值）。
+     *
+     * <p>与 {@link #restoreAnimPreset()} 完全同构：站在内置上 → 它自己的常量；
+     * 站在自定义上 → 沿父链找最近存在的祖先；找不到 → 什么都不做（按钮已置灰）。
+     *
+     * <p>旧实现读 {@code colorBaseIdx} —— 那个字段只在「匹配上某个内置预设」时更新，
+     * 用户选「自定义颜色」后它<b>停在上一次的值</b>，按钮就一直在撒谎。
+     */
     private void restoreColorPreset() {
-        if (colorBaseIdx < 0 || colorBaseIdx >= CursorPresets.COLOR_PRESETS.length) {
+        boolean prev = suppressDerive;
+        suppressDerive = true;
+        try {
+            CustomPresets.Base b = currentColorBase();
+            if (!b.exists()) {
+                return;
+            }
+            if (b.builtinIdx >= 0) {
+                if (b.builtinIdx >= CursorPresets.COLOR_PRESETS.length) {
+                    return;
+                }
+                CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[b.builtinIdx];
+                pending.tailColor = p.tailColor();
+                pending.shadowColor = p.shadowColor();
+                pending.colorPresetBase = b.builtinIdx;
+            } else {
+                String[] hex = CursorPresets.parseColorSnapshot(b.custom.snapshot);
+                if (hex == null) {
+                    return;
+                }
+                pending.tailColor = hex[0];
+                pending.shadowColor = hex[1];
+            }
+            // 【0.9.88：不写 rgbGradient】与 onColorPresetPicked 一致，
+            // 彩虹靠 resolveRgbWash() 反推，不占用用户的光标渐变开关。
+            syncAllControlsFromPending();
+        } finally {
+            suppressDerive = prev;
+        }
+    }
+
+    /** 当前颜色预设的「恢复默认值」目标（与 {@link #currentAnimBase()} 同构）。 */
+    private CustomPresets.Base currentColorBase() {
+        if (!pending.colorCustomName.isEmpty()) {
+            return CustomPresets.resolveBase(pending.customColorPresets, pending.colorCustomName);
+        }
+        return CustomPresets.builtinBase(
+                CursorPresets.clampColorPresetIndex(pending.colorPresetBase));
+    }
+
+    /** 解析出的颜色目标名字；越界或不存在返回 {@code null}（按钮置灰）。 */
+    private static String colorBaseName(CustomPresets.Base b) {
+        if (b == null || !b.exists()) {
+            return null;
+        }
+        if (b.builtinIdx >= 0) {
+            return b.builtinIdx < CursorPresets.COLOR_PRESETS.length
+                    ? CursorPresets.COLOR_PRESETS[b.builtinIdx].name() : null;
+        }
+        return b.custom.name;
+    }
+
+    // ==================== 自定义颜色预设动作（2026-10-29）====================
+    //
+    // 与下面的动画动作完全同构：默认名「<父名> 副本」、父引用写进条目、
+    // 编辑实时保存、恢复默认沿父链。区别只有快照内容（2 个 HEX）。
+
+    /** 新建自定义颜色预设，父 = 当前所在的内置或自定义颜色预设。 */
+    private void createCustomColorPreset() {
+        if (!CustomPresets.canAdd(pending.customColorPresets)) {
+            Messages.showWarningDialog(
+                    "自定义颜色预设最多 " + CustomPresets.MAX_PRESETS + " 个。请先删除不用的。",
+                    "无法新建");
             return;
         }
-        CursorPresets.ColorPreset p = CursorPresets.COLOR_PRESETS[colorBaseIdx];
+        boolean fromCustom = !pending.colorCustomName.isEmpty();
+        int baseIdx = CursorPresets.clampColorPresetIndex(pending.colorPresetBase);
+        String base = fromCustom ? pending.colorCustomName
+                : CursorPresets.COLOR_PRESETS[baseIdx].name();
+        String parentRef = fromCustom
+                ? CustomPresets.customParent(pending.colorCustomName)
+                : CustomPresets.builtinParent(baseIdx);
+        String suggested = CustomPresets.uniqueName(
+                pending.customColorPresets, base + " 副本");
+        java.awt.Component parent = suppressDerive ? null : createComponent();
+        String name = Messages.showInputDialog(parent, "给这套颜色起个名字：", "新建颜色预设",
+                null, suggested, null);
+        if (name == null) {
+            return;
+        }
+        String trimmed = name.trim();
+        String err = CustomPresets.nameError(trimmed);
+        if (err != null) {
+            Messages.showWarningDialog(err + "。", "无法新建");
+            return;
+        }
+        if (CustomPresets.has(pending.customColorPresets, trimmed)) {
+            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法新建");
+            return;
+        }
+        pending.customColorPresets = CustomPresets.put(pending.customColorPresets, trimmed,
+                parentRef, CursorPresets.colorSnapshot(pending.tailColor, pending.shadowColor));
+        pending.colorCustomName = trimmed;
+        syncAllControlsFromPending();
+    }
+
+    /** 重命名当前自定义颜色预设（子预设的父引用会由 rename 一并改掉）。 */
+    private void renameCustomColorPreset() {
+        if (pending.colorCustomName.isEmpty()) {
+            Messages.showInfoMessage("内置颜色预设是只读的，不能改名。要改请先「新建颜色预设」。", "重命名");
+            return;
+        }
+        String from = pending.colorCustomName;
+        String name = Messages.showInputDialog(createComponent(), "新名字：", "重命名颜色预设",
+                null, from, null);
+        if (name == null) {
+            return;
+        }
+        String trimmed = name.trim();
+        if (trimmed.equals(from)) {
+            return;
+        }
+        String err = CustomPresets.nameError(trimmed);
+        if (err != null) {
+            Messages.showWarningDialog(err + "。", "无法重命名");
+            return;
+        }
+        if (CustomPresets.has(pending.customColorPresets, trimmed)) {
+            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法重命名");
+            return;
+        }
+        String next = CustomPresets.rename(pending.customColorPresets, from, trimmed);
+        if (next == null) {
+            Messages.showWarningDialog("重命名失败，请重试。", "无法重命名");
+            return;
+        }
+        pending.customColorPresets = next;
+        pending.colorCustomName = trimmed;
+        syncAllControlsFromPending();
+    }
+
+    /** 删除当前自定义颜色预设（子预设由 remove 接管到祖父）。 */
+    private void deleteCustomColorPreset() {
+        if (pending.colorCustomName.isEmpty()) {
+            Messages.showInfoMessage("内置颜色预设是只读的，不能删除。", "删除");
+            return;
+        }
+        String name = pending.colorCustomName;
+        int ok = Messages.showYesNoDialog(createComponent(),
+                "删除自定义颜色预设「" + name + "」？此操作不可撤销。",
+                "删除颜色预设", Messages.getQuestionIcon());
+        if (ok != Messages.YES) {
+            return;
+        }
+        pending.customColorPresets = CustomPresets.remove(pending.customColorPresets, name);
+        pending.colorCustomName = "";
+        // 吸附回基准颜色预设，避免停在「谁都不属于」的中间态
+        CursorPresets.ColorPreset p =
+                CursorPresets.COLOR_PRESETS[
+                        CursorPresets.clampColorPresetIndex(pending.colorPresetBase)];
         pending.tailColor = p.tailColor();
         pending.shadowColor = p.shadowColor();
-        // 【0.9.88 删除：不再写 rgbGradient】与 onColorPresetPicked 一致，
-        // 彩虹靠 resolveRgbWash() 反推，不占用用户的光标渐变开关。
         syncAllControlsFromPending();
     }
 
@@ -2211,10 +2507,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                             .MAX_PRESETS + " 个。请先删除不用的。", "无法新建");
             return;
         }
-        String base = pending.animCustomName.isEmpty()
-                ? CursorPresets.ANIM_PRESETS[
-                        CursorPresets.clampAnimPresetIndex(pending.animPresetBase)].name()
-                : pending.animCustomName;
+        boolean fromCustom = !pending.animCustomName.isEmpty();
+        String base = fromCustom
+                ? pending.animCustomName
+                : CursorPresets.ANIM_PRESETS[
+                        CursorPresets.clampAnimPresetIndex(pending.animPresetBase)].name();
+        // 【2026-10-29 父链】显式新建也要记父：
+        //   · 站在内置预设上新建 → 父 = b<下标>
+        //   · 站在自定义预设上新建 → 父 = c<当前名>（用户要求「个人自定义也能派生副本」）
+        // 若为空，这个新预设的「恢复默认值」就没有目标，按钮会置灰。
+        String parentRef = fromCustom
+                ? CustomPresets.customParent(pending.animCustomName)
+                : CustomPresets.builtinParent(
+                        CursorPresets.clampAnimPresetIndex(pending.animPresetBase));
         String suggested = CustomPresets
                 .uniqueName(pending.customAnimPresets, base + " 副本");
         java.awt.Component parent = suppressDerive ? null : createComponent();
@@ -2239,7 +2544,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return;
         }
         pending.customAnimPresets = CustomPresets
-                .put(pending.customAnimPresets, trimmed,
+                .put(pending.customAnimPresets, trimmed, parentRef,
                         SettingsField.snapshot(pending));
         pending.animCustomName = trimmed;
         syncAllControlsFromPending();
@@ -2670,6 +2975,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 .textSame(pending.animCustomName, baseline.animCustomName)) {
             target.animCustomName = pending.animCustomName;
         }
+        // 2026-10-29：颜色预设三件套（与动画同一套脏合并纪律）
+        if (!SettingsField
+                .textSame(pending.customColorPresets, baseline.customColorPresets)) {
+            target.customColorPresets = pending.customColorPresets;
+        }
+        if (!SettingsField
+                .textSame(pending.colorCustomName, baseline.colorCustomName)) {
+            target.colorCustomName = pending.colorCustomName;
+        }
+        if (pending.colorPresetBase != baseline.colorPresetBase) {
+            target.colorPresetBase = pending.colorPresetBase;
+        }
 
 
         // A4：落盘
@@ -2806,6 +3123,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         animNewBtn = null;
         animRenameBtn = null;
         animDeleteBtn = null;
+        // 【2026-10-29 审查 M1】颜色三个新按钮也要释放 —— 漏掉会让已 dispose 的
+        // Swing 组件仍被强引用，且延迟事件/探针调到 refreshCustomButtons() 时会
+        // 对已释放组件 setEnabled。
+        colorNewBtn = null;
+        colorRenameBtn = null;
+        colorDeleteBtn = null;
         colorPresetCombo = null;
         singleMoveHint = null;
         crossMoveHint = null;
@@ -3090,6 +3413,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     /** 探针/调试用：自定义预设的三个动作按钮（0.9.9）。缺任何一个都说明没挂到界面上。 */
+    // 【2026-10-29 审查 M2】颜色三个按钮的探针访问器。
+    // 项目有过「方法写了、字段声明了，但 createPanel 里从没创建按钮」的历史，
+    // 所以凡是要用户点的东西都要有一条断言证明它真的在组件树上。
+    public javax.swing.JButton colorNewButtonForProbe() {
+        return colorNewBtn;
+    }
+
+    public javax.swing.JButton colorRenameButtonForProbe() {
+        return colorRenameBtn;
+    }
+
+    public javax.swing.JButton colorDeleteButtonForProbe() {
+        return colorDeleteBtn;
+    }
+
     public javax.swing.JButton animNewButtonForProbe() {
         return animNewBtn;
     }

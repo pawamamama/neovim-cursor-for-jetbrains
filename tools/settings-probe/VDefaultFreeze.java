@@ -77,6 +77,10 @@ public final class VDefaultFreeze {
         GOLDEN.put("animPresetBase", "0");
         GOLDEN.put("customAnimPresets", "");
         GOLDEN.put("animCustomName", "");
+        // 2026-10-29：颜色预设三件套（与动画对称；默认值必须是出厂空态）
+        GOLDEN.put("colorPresetBase", "0");
+        GOLDEN.put("customColorPresets", "");
+        GOLDEN.put("colorCustomName", "");
     }
 
     public static void main(String[] a) throws Exception {

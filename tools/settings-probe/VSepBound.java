@@ -668,10 +668,13 @@ public final class VSepBound {
 
     private static CustomPresets.Entry entryOf(String name, String snap) {
         try {
+            // 【2026-10-29 父链重构】Entry 构造器多了 parent（三参）。
+            // 这里传空父：本探针测的是「格式/分隔符与边界」，老格式条目本来就没有父引用。
             java.lang.reflect.Constructor<CustomPresets.Entry> c =
-                    CustomPresets.Entry.class.getDeclaredConstructor(String.class, String.class);
+                    CustomPresets.Entry.class.getDeclaredConstructor(
+                            String.class, String.class, String.class);
             c.setAccessible(true);
-            return c.newInstance(name, snap);
+            return c.newInstance(name, "", snap);
         } catch (Throwable t) {
             return null;
         }

@@ -377,6 +377,11 @@ public final class CursorPresets {
         return Math.max(0, Math.min(ANIM_PRESETS.length - 1, idx));
     }
 
+    /** 颜色版钳制（2026-10-29，与 {@link #clampAnimPresetIndex} 同构）。 */
+    public static int clampColorPresetIndex(int idx) {
+        return Math.max(0, Math.min(COLOR_PRESETS.length - 1, idx));
+    }
+
     // 【0.9.88 删除：预设覆盖值机制（177 行）】
     //
     // 这是 0.9.8 的「每个内置预设各自记住用户改动」机制：
@@ -482,4 +487,43 @@ public final class CursorPresets {
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */
     public static final int COLOR_PRESET_DEFAULT_INDEX = 0;
+
+    /**
+     * 自定义颜色预设的快照串（2026-10-29）。
+     *
+     * <p>只有两个 HEX，但仍沿用动画预设的 {@code key=value;key=value} 风格 ——
+     * 两张自定义预设表共用 {@link CustomPresets} 的序列化与父链，
+     * 快照内部再发明一套格式只会多一种要维护的解析器。
+     */
+    public static String colorSnapshot(String tail, String shadow) {
+        return "tailColor=" + tail + ";shadowColor=" + shadow;
+    }
+
+    /**
+     * 解析颜色快照。
+     *
+     * @return {@code [tailColor, shadowColor]}；缺任一项或格式不对返回 {@code null}
+     *         （调用方当作「无此预设」，绝不抛异常 —— 手改坏一个字符不该让面板打不开）
+     */
+    public static String[] parseColorSnapshot(String snap) {
+        if (snap == null || snap.isEmpty()) {
+            return null;
+        }
+        String tail = null;
+        String shadow = null;
+        for (String kv : snap.split(";")) {
+            int eq = kv.indexOf('=');
+            if (eq <= 0) {
+                continue;
+            }
+            String k = kv.substring(0, eq);
+            String v = kv.substring(eq + 1);
+            if ("tailColor".equals(k)) {
+                tail = v;
+            } else if ("shadowColor".equals(k)) {
+                shadow = v;
+            }
+        }
+        return (tail == null || shadow == null) ? null : new String[]{tail, shadow};
+    }
 }

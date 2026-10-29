@@ -149,6 +149,21 @@ public final class CursorPresetApplier {
         NeovideCursorSettings.State s = svc.getState();
         s.tailColor = p.tailColor();
         s.shadowColor = p.shadowColor();
+        // 【2026-10-29 审查 H2】与 applyAnimPreset 对称：记基准 + 清自定义名。
+        //
+        // 不清 colorCustomName 的后果是一条完整的数据丢失链：
+        //   ① 用户站在自定义颜色预设「我的蓝」上，从 Tools 选「冰蓝」；
+        //   ② 两个 HEX 变成冰蓝的，但 colorCustomName 仍是「我的蓝」；
+        //   ③ 面板按「自定义优先」显示「我的蓝」—— 显示层撒谎；
+        //   ④ 用户接着在取色器里拖一下，onColorPanelChanged 看到名字非空，
+        //      就把冰蓝的颜色写进「我的蓝」的快照 → 用户手调的颜色被永久覆盖。
+        for (int i = 0; i < CursorPresets.COLOR_PRESETS.length; i++) {
+            if (CursorPresets.COLOR_PRESETS[i] == p) {
+                s.colorPresetBase = i;
+                break;
+            }
+        }
+        s.colorCustomName = "";
         // 【0.9.88 删除：不再写 rgbGradient】
         //
         // 这里原来有一行 `s.rgbGradient = p.rgbWash();`（0.9.79 加的）。
@@ -166,6 +181,33 @@ public final class CursorPresetApplier {
         LOG.info("neovide-cursor: 已应用颜色预设 " + p.name()
                 + " rgbWash=" + p.rgbWash());
         return p;
+    }
+
+    /**
+     * Tools 菜单专用：应用一个<b>自定义颜色预设</b>（2026-10-29）。
+     *
+     * <p>与 {@code applyCustomAnimPreset} 同构：只写两个 HEX 与「当前选中的自定义名」，
+     * 快照坏了就返回 false（绝不写半套颜色）。
+     */
+    public static boolean applyCustomColorPreset(String name) {
+        NeovideCursorSettings svc = NeovideCursorSettings.getInstance();
+        if (svc == null || name == null || name.isEmpty()) {
+            return false;
+        }
+        NeovideCursorSettings.State s = svc.getState();
+        String[] hex = CursorPresets.parseColorSnapshot(
+                com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
+                        .get(s.customColorPresets, name));
+        if (hex == null) {
+            return false;
+        }
+        s.tailColor = hex[0];
+        s.shadowColor = hex[1];
+        s.colorCustomName = name;
+        svc.persistQuietly();
+        NeovideCaretManager.applyConfig();
+        LOG.info("neovide-cursor: 已应用自定义颜色预设 " + name);
+        return true;
     }
 
     // ==================== 匹配判据（界面「当前是哪个预设」用）====================

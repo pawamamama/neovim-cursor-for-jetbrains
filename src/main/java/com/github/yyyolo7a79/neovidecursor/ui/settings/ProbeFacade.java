@@ -73,6 +73,13 @@ public interface ProbeFacade {
 
     JButton colorRestoreButtonForProbe();
 
+    /** 2026-10-29：颜色预设的三个动作按钮（审查 M2 —— 写了不等于挂在界面上）。 */
+    JButton colorNewButtonForProbe();
+
+    JButton colorRenameButtonForProbe();
+
+    JButton colorDeleteButtonForProbe();
+
     void pickAnimPresetForProbe(int index);
 
     void pickColorPresetForProbe(int index);

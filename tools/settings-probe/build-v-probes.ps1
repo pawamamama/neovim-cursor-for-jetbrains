@@ -84,6 +84,15 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         'VRestoreDefault', 'VDefaultFreeze', 'VColorBinding', 'VTextFacts', 'VLoadState',
         'VReviewFixes', 'VQuadProbeTruth', 'VRgbWash', 'VRankCollapse', 'VDeadField',
         'VSlopePreset', 'VSlopeMigration',
+        # ============ 2026-10-29：恢复默认值的第三次回归守门 ============
+        # VPresetReset 补的是 VRestoreDefault 测不到的缺口：
+        # 「恢复按钮有没有顺手把副本条目（customAnimPresets）改写掉」——
+        # 那正是 bd932b9 造成用户手调数据丢失的地方。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VPresetReset',
+        # 2026-10-29 父链重构：派生记父 / 自定义派生自定义 / 删除接管祖父 /
+        # 改名同步子引用 / 旧格式兼容 / 环检测。纯逻辑层，不需要平台桩。
+        'VPresetChain',
         # ============ 0.9.83：补回被遗忘的探针 ============
         # 这些探针引用的生产类都还在、且 27 个实测全过 ——
         # 它们只是从这份清单里掉了，等于「写了但从不运行」。

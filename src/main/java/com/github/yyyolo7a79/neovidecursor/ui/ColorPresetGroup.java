@@ -1,6 +1,7 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
+import com.github.yyyolo7a79.neovidecursor.settings.CustomPresets;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.DefaultActionGroup;
@@ -17,8 +18,38 @@ public final class ColorPresetGroup extends DefaultActionGroup {
 
     public ColorPresetGroup() {
         super(CursorPresets.MENU_COLOR, true);
+        rebuild();
+    }
+
+    /**
+     * 每次弹出前重建（2026-10-29）。
+     *
+     * <p>与 {@link AnimPresetGroup} 同构：用户刚在面板里新建/改名/删除的颜色预设，
+     * 必须立刻反映到菜单。整体重建而不是增量删改 —— 增量实现漏删分隔线会把菜单撑爆
+     * （AnimPresetGroup 里记录过那次 blocker）。
+     */
+    @Override
+    public void update(@NotNull AnActionEvent e) {
+        rebuild();
+    }
+
+    private void rebuild() {
+        removeAll();
         for (CursorPresets.ColorPreset p : CursorPresets.COLOR_PRESETS) {
             add(new ApplyColorPresetAction(p));
+        }
+        NeovideCursorSettings svc = NeovideCursorSettings.getInstance();
+        if (svc == null) {
+            return;
+        }
+        java.util.List<CustomPresets.Entry> list =
+                CustomPresets.parse(svc.getState().customColorPresets);
+        if (list.isEmpty()) {
+            return;
+        }
+        addSeparator();
+        for (CustomPresets.Entry entry : list) {
+            add(new ApplyCustomColorPresetAction(entry.name));
         }
     }
 
@@ -33,8 +64,17 @@ public final class ColorPresetGroup extends DefaultActionGroup {
 
         @Override
         public boolean isSelected(@NotNull AnActionEvent e) {
-            return currentState() != null
-                    && CursorPresetApplier.matchColorPreset(currentState()) == preset;
+            // 【2026-10-29 审查 H1】必须要求「当前没站在自定义颜色预设上」。
+            //
+            // 不加这个守卫时，两套判据可以同时为真：内置项按 HEX 相等判定，
+            // 自定义项按名字判定。于是刚从一个内置色派生出的副本（还没改过色，
+            // 数值必然与父相同）会让「薄荷」和「薄荷 副本」**同时打勾**，单选契约破裂。
+            //
+            // 动画侧 AnimPresetGroup 早就因为同一个问题（第三轮审查 ④，high）加了
+            // `animCustomName.isEmpty()`，颜色侧这次补上。
+            NeovideCursorSettings.State st = currentState();
+            return st != null && st.colorCustomName.isEmpty()
+                    && CursorPresetApplier.matchColorPreset(st) == preset;
         }
 
         @Override
@@ -57,6 +97,30 @@ public final class ColorPresetGroup extends DefaultActionGroup {
             } catch (Throwable t) {
                 return null;
             }
+        }
+    }
+
+    /** 自定义颜色预设的菜单项（2026-10-29）。选中判据按名字，与面板同源。 */
+    static final class ApplyCustomColorPresetAction extends ToggleAction {
+        private final String presetName;
+
+        ApplyCustomColorPresetAction(String name) {
+            super(name);
+            this.presetName = name;
+        }
+
+        @Override
+        public boolean isSelected(@NotNull AnActionEvent e) {
+            NeovideCursorSettings svc = NeovideCursorSettings.getInstance();
+            return svc != null && presetName.equals(svc.getState().colorCustomName);
+        }
+
+        @Override
+        public void setSelected(@NotNull AnActionEvent e, boolean state) {
+            if (!state) {
+                return;         // 取消勾选不做事（预设是单选语义）
+            }
+            CursorPresetApplier.applyCustomColorPreset(presetName);
         }
     }
 }

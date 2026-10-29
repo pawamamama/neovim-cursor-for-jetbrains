@@ -2,40 +2,54 @@ package com.github.yyyolo7a79.neovidecursor.settings;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * 自定义预设的<b>纯函数层</b>（0.9.9）。无状态、不碰任何单例、可独立单测。
+ * 自定义预设的<b>纯函数层</b>。无状态、不碰任何单例、可独立单测。
  *
- * <h2>模型（为什么和 0.9.8 不同）</h2>
+ * <h2>模型（2026-10-29 重构：从「平铺列表」改成「带父链的树」）</h2>
  *
- * <p>0.9.8 的模型是「每个内置预设各自记住用户的改动」（6 个字段的覆盖值）。
- * 问题：<b>内置预设被污染了</b>。用户改了「原版粉色」之后，那个内置预设不再是原版，
- * 只能靠「（已修改）」后缀 + 「恢复为默认值」按钮收场。
+ * <p>旧模型只有 {@code 名称␟快照} 两段，预设之间没有任何关系。后果是
+ * 「恢复默认值」根本不知道这个副本派生自谁 —— 只能去读一个全局可变指针
+ * （{@code animPresetBase}），而那个指针会被「选内置预设」改写。
+ * 实测症状：选中「基础 副本」后，按钮写着「恢复为「缎带」默认值」。
  *
- * <p>0.9.9 改成 IntelliJ 配色方案 / GIMP 工具预设的模型：
- * <ul>
- *   <li><b>内置预设永久只读</b>（{@link CursorPresets#ANIM_PRESETS} 是常量表，一位数都不动）；</li>
- *   <li>用户改动任何参数 → <b>自动派生</b>一个自定义预设（GIMP 官方文档：编辑内置预设时
- *       自动创建副本，因此「Duplicate」命令永远是禁用的 —— 不需要）；</li>
- *   <li>自定义预设可<b>改名</b>、<b>删除</b>，全参数快照持久化；</li>
- *   <li>于是「已修改」这个概念连同它的后缀一起消失。</li>
- * </ul>
- *
- * <h2>存储格式</h2>
+ * <p>新模型给每个条目补一段<b>父引用</b>：
  *
  * <pre>
- *   customAnimPresets = 名称[U+241F]快照[U+241E]名称[U+241F]快照
- *   快照              = key=value;key=value;...   （{@link SettingsField#snapshot} 产出）
+ *   条目        = 名称 ␟ 父引用 ␝ 快照
+ *   父引用      = ""            无父（旧数据 / 用户手工新建）
+ *               | "b&lt;下标&gt;"     内置预设（如 b0 = 基础）
+ *               | "c&lt;名字&gt;"     自定义预设（如 c基础 副本）
  * </pre>
  *
- * <h2>分隔符为什么是 U+241F / U+241E（这条踩过大坑，务必别改回去）</h2>
+ * <p><b>「恢复默认值」= 沿父链向上找最近一个还存在的祖先</b>：
+ * <ul>
+ *   <li>找到内置 → 写该内置预设的常量；</li>
+ *   <li>找到自定义 → 写它<b>当前</b>的快照（用户 2026-10-29 拍板：继承语义）；</li>
+ *   <li>父被删了 → 删除时已把子节点接到祖父（见 {@link #remove}）；</li>
+ *   <li>一路都没有 → 返回空 {@link Base}，调用方据此把按钮置灰（绝不说谎）。</li>
+ * </ul>
  *
- * <p>最初用的是 `U+0001`(SOH) / `U+0002`(STX)，理由是「用户不可能从键盘键入」。
- * 但那是<b>键盘视角</b>，不是<b>存储视角</b> ——
- * <b>U+0001/U+0002 是 XML 1.0 非法码点</b>（XML 1.0 只允许
- * `#x9 | #xA | #xD | [#x20-#xD7FF] | ...`），
- * 而 IDEA 的 {@code XmlSerializer} 把它们<b>静默丢弃</b>、也不会写成字符引用。
+ * <h2>为什么父引用用「名字」而不是下标</h2>
+ *
+ * <p>自定义预设会增删，下标不稳定。名字在很长的生命周期内是稳定的（改名走
+ * {@link #rename}，它会把所有引用一起改掉）。内置预设是编译期常量表，下标永远不变，
+ * 所以用 {@code b<下标>} 最直接。
+ *
+ * <h2>存储格式与分隔符（这条踩过大坑，务必别改回去）</h2>
+ *
+ * <pre>
+ *   customAnimPresets = 名称␟父␝快照 ␞ 名称␟父␝快照
+ *   快照               = key=value;key=value;...   （{@link SettingsField#snapshot} 产出）
+ * </pre>
+ *
+ * <p><b>U+241F / U+241E 的来历</b>：最初用的是 U+0001(SOH) / U+0002(STX)，
+ * 理由是「用户不可能从键盘键入」。但那是<b>键盘视角</b>，不是<b>存储视角</b> ——
+ * <b>U+0001/U+0002 是 XML 1.0 非法码点</b>，而 IDEA 的 {@code XmlSerializer}
+ * 把它们<b>静默丢弃</b>、也不会写成字符引用。
  *
  * <p>实测后果（2026-10-22 用真实平台类复现）：
  * <pre>
@@ -44,13 +58,17 @@ import java.util.List;
  *   回读：  解析出 0 条预设                              &lt;- 用户建的自定义预设【全部消失】
  * </pre>
  *
- * <p>换成 `U+241F`(SYMBOL FOR UNIT SEPARATOR) / `U+241E`(SYMBOL FOR RECORD SEPARATOR)：
- * 两者都在 XML 1.0 合法区间内，且仍是「用户不可能从面板键入」的可打印符号
- * （它们本身就是「可见形式的控制字符」符号，语义恰好对应）。
- * 实测回读后 2 条预设完整保留。
+ * <p>所以三个分隔符都必须落在 XML 1.0 合法区间内：
+ * <ul>
+ *   <li>{@link #NAME_SEP} = U+241F（SYMBOL FOR UNIT SEPARATOR）</li>
+ *   <li>{@link #PARENT_SEP} = U+241D（SYMBOL FOR GROUP SEPARATOR）—— 2026-10-29 新增</li>
+ *   <li>{@link #ENTRY_SEP} = U+241E（SYMBOL FOR RECORD SEPARATOR）</li>
+ * </ul>
+ * 它们本身就是「可见形式的控制字符」符号，语义恰好对应，且用户不可能从面板键入。
  *
- * <p><b>兼容旧值</b>：{@link #parse} 同时接受旧分隔符（`U+0001`/`U+0002`），
- * 这样已经落盘过的用户数据不会因为换分隔符而报废。
+ * <p><b>兼容旧值</b>：{@link #parse} 同时接受旧分隔符（U+0001/U+0002）与旧的两段式条目
+ * （没有父引用）。这样已经落盘的用户数据不会因为换格式而报废 —— 用户 2026-10-29
+ * 明确要求「以后有用户用，他更新我们必须保住他的预设」。
  *
  * <p><b>解析绝不抛异常</b>：坏条目整条忽略，其余照常。
  * 手改坏一个字符不该让整页设置打不开。
@@ -58,12 +76,24 @@ import java.util.List;
 public final class CustomPresets {
 
     /**
-     * 名称与快照之间的分隔符 = U+241F（SYMBOL FOR UNIT SEPARATOR）。
+     * 名称与父引用之间的分隔符 = U+241F（SYMBOL FOR UNIT SEPARATOR）。
      *
      * <p><b>必须是 XML 1.0 合法码点</b>。U+0001 曾是这里，被平台静默丢弃
      * → 自定义预设重启后全消失。详见类注释。
      */
-    public static final char NAME_SEP = '\u241F';
+    public static final char NAME_SEP = '␟';
+
+    /**
+     * 父引用与快照之间的分隔符 = U+241D（SYMBOL FOR GROUP SEPARATOR）。
+     *
+     * <p>2026-10-29 引入。为什么不复用 {@link #NAME_SEP}：父引用里的自定义名字
+     * 本身可以含除分隔符外的任意字符，若「名称/父/快照」共用同一个字符，
+     * 解析就得靠「出现第几次」来数，一处数错整条就废。加一个独立字符后，
+     * 歧义面只剩「旧两段式 vs 新三段式」一种，且能在一次 indexOf 内判完。
+     *
+     * <p>U+241D 同样是 XML 1.0 合法码点，理由见类注释。
+     */
+    public static final char PARENT_SEP = '␝';
 
     /**
      * 条目之间的分隔符 = U+241E（SYMBOL FOR RECORD SEPARATOR）。
@@ -72,11 +102,19 @@ public final class CustomPresets {
      * 而<b>名称允许含 {@code ;}</b>。两者共用 {@code ;} 时，一个带分号的名称会把条目切碎
      * （探针 C-6/C-8/C-10 当场抓到过）。
      */
-    public static final char ENTRY_SEP = '\u241E';
+    public static final char ENTRY_SEP = '␞';
 
     /** 旧分隔符（XML 非法，仅为兼容已经落盘的数据而保留读取能力）。 */
     private static final char LEGACY_NAME_SEP = (char) 1;
     private static final char LEGACY_ENTRY_SEP = (char) 2;
+
+    /** 内置父引用的前缀。 */
+    private static final String PARENT_BUILTIN = "b";
+    /** 自定义父引用的前缀。 */
+    private static final String PARENT_CUSTOM = "c";
+
+    /** 父链最大步数 —— 防环上限。超过它一定是有环或数据损坏。 */
+    private static final int MAX_CHAIN = 64;
 
     private CustomPresets() {
     }
@@ -85,13 +123,82 @@ public final class CustomPresets {
     public static final class Entry {
         /** 显示名（可含任意字符，包括中文与空格）。 */
         public final String name;
+
+        /**
+         * 父引用：{@code ""} 无父 / {@code "b<下标>"} 内置 / {@code "c<名字>"} 自定义。
+         *
+         * <p>永远不为 {@code null}（旧数据解析成空串），调用方不必判空。
+         */
+        public final String parent;
+
         /** 快照串（{@link SettingsField#snapshot} 的产出）。 */
         public final String snapshot;
 
-        Entry(String name, String snapshot) {
+        Entry(String name, String parent, String snapshot) {
             this.name = name;
+            this.parent = parent == null ? "" : parent;
             this.snapshot = snapshot;
         }
+
+        @Override
+        public String toString() {
+            return name + "（parent=" + (parent.isEmpty() ? "-" : parent) + "）";
+        }
+    }
+
+    /**
+     * 「恢复默认值」解析出来的目标。
+     *
+     * <p>恰好二选一：{@link #builtinIdx} &gt;= 0 表示内置预设；
+     * {@link #custom} 非 null 表示自定义预设。两者都空表示<b>没有可恢复的祖先</b> ——
+     * 调用方必须把按钮置灰，而不是随便挑一个内置预设（那正是本次重构要消灭的撒谎）。
+     */
+    public static final class Base {
+        /** 内置预设下标；-1 表示不是内置。 */
+        public final int builtinIdx;
+        /** 自定义预设条目；null 表示不是自定义。 */
+        public final Entry custom;
+
+        private Base(int builtinIdx, Entry custom) {
+            this.builtinIdx = builtinIdx;
+            this.custom = custom;
+        }
+
+        /** 是否真的解析到了目标。 */
+        public boolean exists() {
+            return builtinIdx >= 0 || custom != null;
+        }
+    }
+
+    /** 构造内置父引用。 */
+    public static String builtinParent(int idx) {
+        return PARENT_BUILTIN + idx;
+    }
+
+    /**
+     * 直接构造一个「目标是内置预设」的 {@link Base}。
+     *
+     * <p>给「当前选中的本来就是内置预设」这一种情况用 —— 那时不需要查任何父链，
+     * 它的默认值就是它自己。把这条路径也收进 {@link Base}，调用方就只需要面对
+     * 一种返回类型，不必在 UI 里写两套分支。
+     */
+    public static Base builtinBase(int idx) {
+        return new Base(idx, null);
+    }
+
+    /** 构造自定义父引用。 */
+    public static String customParent(String name) {
+        return PARENT_CUSTOM + name;
+    }
+
+    /** 这个父引用是不是内置。 */
+    public static boolean isBuiltinParent(String parent) {
+        return parent != null && parent.length() > 1 && parent.charAt(0) == PARENT_BUILTIN.charAt(0);
+    }
+
+    /** 这个父引用是不是自定义。 */
+    public static boolean isCustomParent(String parent) {
+        return parent != null && parent.length() > 1 && parent.charAt(0) == PARENT_CUSTOM.charAt(0);
     }
 
     /**
@@ -116,34 +223,56 @@ public final class CustomPresets {
             if (raw == null || raw.isEmpty()) {
                 continue;
             }
-            // 逐条找名称分隔符。
-            //
-            // 【第二轮审查 F2：迁移边界，medium】
-            // 0.9.9 首版（没有 sanitizeName 的那版）落的数据，名字里可能天然含 U+241F
-            // （用户从网页粘贴的符号）。如果无脑「先找新分隔符」，会把
-            //   A<U+241F>B<U+0001>a=1     （名字"A␟B"，旧分隔符）
-            // 在中间的 U+241F 处切开 → 名字变 "A"、快照变 "B<U+0001>a=1" → 一个字段都还原不出。
-            //
-            // 正解：**旧分隔符存在时优先按旧的切**（旧格式里 U+0001 才是权威名分隔符，
-            // U+241F 只是一段普通文本）；只有不含旧分隔符时才用新的。
-            int sep;
-            int legacyAt = raw.indexOf(LEGACY_NAME_SEP);
-            if (legacyAt > 0) {
-                sep = legacyAt;
-            } else {
-                sep = raw.indexOf(NAME_SEP);
+            Entry e = parseOne(raw);
+            if (e == null || find(out, e.name) != null) {
+                continue;                       // 坏条目 / 重名 → 忽略后者
             }
-            if (sep <= 0) {
-                continue;                       // 缺分隔符 / 名称为空 → 坏条目，忽略
-            }
-            String name = raw.substring(0, sep);
-            String snap = raw.substring(sep + 1);
-            if (snap.isEmpty() || find(out, name) != null) {
-                continue;                       // 空快照 / 重名 → 忽略后者
-            }
-            out.add(new Entry(name, snap));
+            out.add(e);
         }
         return out;
+    }
+
+    /**
+     * 解析单条。三种形态都认：
+     * <pre>
+     *   名称 ␟ 父 ␝ 快照      新格式（2026-10-29）
+     *   名称 ␟ 快照           旧格式（0.9.9~0.9.104），父 = 空
+     *   名称 [U+0001] 快照    更旧的格式（分隔符 XML 非法），父 = 空
+     * </pre>
+     */
+    private static Entry parseOne(String raw) {
+        // 先找名称分隔符：旧分隔符存在时优先按旧的切（旧格式里 U+0001 才是权威名分隔符，
+        // U+241F 只是一段普通文本）。这是第二轮审查 F2 的结论，别改回去。
+        int sep;
+        int legacyAt = raw.indexOf(LEGACY_NAME_SEP);
+        if (legacyAt > 0) {
+            sep = legacyAt;
+        } else {
+            sep = raw.indexOf(NAME_SEP);
+        }
+        if (sep <= 0) {
+            return null;                        // 缺分隔符 / 名称为空 → 坏条目
+        }
+        String name = raw.substring(0, sep);
+        String rest = raw.substring(sep + 1);
+
+        // rest 里若含 PARENT_SEP，就是新格式：父␝快照。
+        // 只在【第一个】 PARENT_SEP 处切 —— 快照内部不含它（键值都由字段表产出），
+        // 即使含了也只会落到快照里，不影响父引用的正确性。
+        int pAt = rest.indexOf(PARENT_SEP);
+        String parent;
+        String snap;
+        if (pAt >= 0) {
+            parent = rest.substring(0, pAt);
+            snap = rest.substring(pAt + 1);
+        } else {
+            parent = "";                        // 旧两段式：无父
+            snap = rest;
+        }
+        if (snap.isEmpty()) {
+            return null;
+        }
+        return new Entry(name, parent, snap);
     }
 
     /** 序列化整张表（{@link #parse} 的逆运算）。 */
@@ -168,27 +297,36 @@ public final class CustomPresets {
             // 正确做法：**入口处拒绝**非法名（见 put/rename），format 只做序列化。
             // 这里的防御只处理「理论上不该出现」的残留分隔符：直接跳过该条目，
             // 而不是悄悄改名 —— 静默改数据比丢一条更糟。
-            // 入口已经用 isValidName 拦过，正常路径不会走到这里。
-            // 但万一某个调用方漏了校验，宁可【跳过这一条】也不能让它切碎整张表；
-            // 同时不静默 —— 留一行日志，便于日后定位（第二轮审查 F5）。
             if (!isValidName(e.name)) {
                 java.util.logging.Logger.getLogger("neovide-cursor")
                         .warning("跳过非法预设名（含 XML 非法码点或分隔符），长度=" + e.name.length());
                 continue;
             }
-            sb.append(e.name).append(NAME_SEP).append(e.snapshot);
+            sb.append(e.name).append(NAME_SEP);
+            // 旧格式（无父）继续输出两段式：不给旧数据平白加一个空父段，
+            // 免得每次读写都在用户配置里制造无意义的 diff。
+            if (e.parent != null && !e.parent.isEmpty()) {
+                sb.append(e.parent).append(PARENT_SEP);
+            }
+            sb.append(e.snapshot);
         }
         return sb.toString();
     }
 
     /** 按名字取快照；不存在返回 {@code null}。 */
     public static String get(String all, String name) {
+        Entry e = getEntry(all, name);
+        return e == null ? null : e.snapshot;
+    }
+
+    /** 按名字取整个条目；不存在返回 {@code null}。 */
+    public static Entry getEntry(String all, String name) {
         if (name == null || name.isEmpty()) {
             return null;
         }
         for (Entry e : parse(all)) {
             if (e.name.equals(name)) {
-                return e.snapshot;
+                return e;
             }
         }
         return null;
@@ -196,7 +334,7 @@ public final class CustomPresets {
 
     /** 是否存在该名字的预设。 */
     public static boolean has(String all, String name) {
-        return get(all, name) != null;
+        return getEntry(all, name) != null;
     }
 
     /**
@@ -221,8 +359,8 @@ public final class CustomPresets {
         }
         for (int i = 0; i < name.length(); i++) {
             char c = name.charAt(i);
-            // ① 四个分隔符（会切碎存储格式）
-            if (c == NAME_SEP || c == ENTRY_SEP
+            // ① 五个分隔符（会切碎存储格式）
+            if (c == NAME_SEP || c == PARENT_SEP || c == ENTRY_SEP
                     || c == LEGACY_NAME_SEP || c == LEGACY_ENTRY_SEP) {
                 return false;
             }
@@ -237,16 +375,15 @@ public final class CustomPresets {
     /**
      * 这个码点能否安全地写进 XML 属性值。
      *
-     * <p><b>为什么必须逐字符查，而不是只管那 4 个分隔符</b>
-     * （第二轮审查 F1，high）：F2 的根因是「用了 XML 非法字符做分隔符」，
-     * 但那只修了分隔符本身。用户还可能把任意控制字符<b>粘进名字里</b>：
+     * <p><b>为什么必须逐字符查，而不是只管那几个分隔符</b>（第二轮审查 F1，high）：
+     * F2 的根因是「用了 XML 非法字符做分隔符」，但那只修了分隔符本身。
+     * 用户还可能把任意控制字符<b>粘进名字里</b>：
      * <pre>
      *   名字 = "A\u000BB"      (垂直制表符)
      *   落盘 → "AB"            (平台静默吞掉 U+000B)
      *   回读 → animCustomName 悬空 → 预设在下拉里再也选不中
      * </pre>
-     * VSepDiag 实测丢在 {@code XmlSerializer.serialize()} 这一层，
-     * 与当年 U+0001 完全同源。
+     * VSepDiag 实测丢在 {@code XmlSerializer.serialize()} 这一层，与当年 U+0001 完全同源。
      *
      * <p>合法范围按 XML 1.0 规范：
      * {@code 0x09 | 0x0A | 0x0D | 0x20-0xD7FF | 0xE000-0xFFFD | 0x10000-0x10FFFF}
@@ -282,28 +419,55 @@ public final class CustomPresets {
     }
 
     /**
-     * 新增<b>或替换</b>一个预设（按名字）。
+     * 新增<b>或替换</b>一个预设（按名字），同时更新父引用。
      *
      * <p>重名时原位替换、不改变顺序 —— 这样「改了参数再保存」不会让下拉里的项跳位置。
      */
-    public static String put(String all, String name, String snapshot) {
+    public static String put(String all, String name, String parent, String snapshot) {
         // 入口校验：非法名直接拒绝（不静默改名，见 isValidName 的注释）
         if (!isValidName(name) || snapshot == null || snapshot.isEmpty()) {
             return all == null ? "" : all;
         }
+        // 【2026-10-29 审查 M5】悬空父引用降级为空父。
+        //
+        // 调用方在「当前站在某个自定义预设上」时会传 customParent(当前名)，
+        // 而那个名字可能已被删除、或被手改 XML 改坏。直接写进去就是一条永久悬空引用 ——
+        // 新预设的「恢复默认值」会永远置灰，且用户无从知道为什么。
+        // 降级成空父后表现同样是置灰，但它是「明确的没有父」，不是断链。
+        String safeParent = parent == null ? "" : parent;
+        if (isCustomParent(safeParent) && !has(all, safeParent.substring(1))) {
+            safeParent = "";
+        }
         List<Entry> list = new ArrayList<>(parse(all));
         for (int i = 0; i < list.size(); i++) {
             if (list.get(i).name.equals(name)) {
-                list.set(i, new Entry(name, snapshot));
+                list.set(i, new Entry(name, safeParent, snapshot));
                 return format(list);
             }
         }
-        list.add(new Entry(name, snapshot));
+        list.add(new Entry(name, safeParent, snapshot));
         return format(list);
     }
 
     /**
+     * 新增/替换，但<b>保留已有的父引用</b>（没有则空）。
+     *
+     * <p>这是最常用的重载：用户在副本上拖滑块时，快照要更新，但「我是谁的孩子」
+     * 不该被一次编辑改掉。
+     */
+    public static String put(String all, String name, String snapshot) {
+        Entry old = getEntry(all, name);
+        return put(all, name, old == null ? "" : old.parent, snapshot);
+    }
+
+    /**
      * 改名。目标名已存在时<b>拒绝</b>（返回原串）—— 静默覆盖别人的预设是数据丢失。
+     *
+     * <p><b>必须同时改写所有子节点的父引用</b>，否则改名后：
+     * <pre>
+     *   子.parent = "c旧名"  → 旧名已不存在 → 子的「恢复默认值」一路找不到祖先
+     * </pre>
+     * 这是父链模型里最容易漏的一环。
      *
      * <p>返回 {@code null} 表示「改名失败」，调用方据此提示用户；返回原串表示「没必要改」。
      */
@@ -318,26 +482,109 @@ public final class CustomPresets {
         if (has(all, to)) {
             return null;                        // 目标名已被占用 → 失败
         }
-        List<Entry> list = new ArrayList<>(parse(all));
+        List<Entry> out = new ArrayList<>();
         boolean hit = false;
-        for (int i = 0; i < list.size(); i++) {
-            if (list.get(i).name.equals(from)) {
-                list.set(i, new Entry(to, list.get(i).snapshot));
+        String oldRef = customParent(from);
+        String newRef = customParent(to);
+        for (Entry e : parse(all)) {
+            String name = e.name;
+            String parent = e.parent;
+            if (name.equals(from)) {
+                name = to;
                 hit = true;
-                break;
             }
+            // 子节点：父引用指向旧名 → 跟着改
+            if (oldRef.equals(parent)) {
+                parent = newRef;
+            }
+            out.add(new Entry(name, parent, e.snapshot));
         }
-        return hit ? format(list) : (all == null ? "" : all);
+        return hit ? format(out) : (all == null ? "" : all);
     }
 
-    /** 删除（幂等）。 */
+    /**
+     * 删除（幂等）。
+     *
+     * <p><b>删除必须「接管子节点」</b>（用户 2026-10-29 要求）：
+     * 「父子自定义删除了，子自定义不能恢复默认值，只能恢复到祖父内置预设」。
+     *
+     * <p>做法：把所有 {@code parent == "c<被删名>"} 的条目改成被删者自己的父引用。
+     * 这样子的「恢复默认值」会直接落到祖父（内置或更上一层的自定义），
+     * 不需要在恢复路径上再写一遍「找不到就往上」的兜底 —— 一次改数据，
+     * 比每次恢复都做一次链式查找更可靠（也更容易测）。
+     */
     public static String remove(String all, String name) {
         if (name == null || name.isEmpty()) {
             return all == null ? "" : all;
         }
-        List<Entry> list = new ArrayList<>(parse(all));
-        list.removeIf(e -> e.name.equals(name));
-        return format(list);
+        Entry victim = getEntry(all, name);
+        if (victim == null) {
+            return all == null ? "" : all;
+        }
+        String victimRef = customParent(name);
+        List<Entry> out = new ArrayList<>();
+        for (Entry e : parse(all)) {
+            if (e.name.equals(name)) {
+                continue;                       // 自己被删掉
+            }
+            String parent = e.parent;
+            if (victimRef.equals(parent)) {
+                parent = victim.parent;         // 子节点上移，接到祖父
+            }
+            out.add(new Entry(e.name, parent, e.snapshot));
+        }
+        return format(out);
+    }
+
+    /**
+     * 解析「恢复默认值」的目标 —— 沿父链向上找<b>最近一个还存在的</b>祖先。
+     *
+     * <p>返回的 {@link Base} 要么 {@link Base#exists() exists()}，要么全空。
+     * 全空表示「这条链上没有任何可恢复的东西」（旧数据、手工清空、或环），
+     * 调用方必须把按钮置灰 —— <b>绝不回退到某个内置预设</b>，那是本次重构要消灭的撒谎。
+     *
+     * <p>防环：最多走 {@link #MAX_CHAIN} 步，且记录已访问名字。
+     */
+    public static Base resolveBase(String all, String name) {
+        Entry self = getEntry(all, name);
+        if (self == null) {
+            return new Base(-1, null);
+        }
+        String parent = self.parent;
+        Set<String> seen = new HashSet<>();
+        seen.add(self.name);
+        for (int step = 0; step < MAX_CHAIN; step++) {
+            if (parent == null || parent.isEmpty()) {
+                return new Base(-1, null);      // 无父（旧数据）→ 没有默认值
+            }
+            if (isBuiltinParent(parent)) {
+                int idx;
+                try {
+                    idx = Integer.parseInt(parent.substring(1));
+                } catch (NumberFormatException ex) {
+                    return new Base(-1, null);  // 坏引用 → 当作没有
+                }
+                // 【不在这里校验上界】动画内置表 3 项、颜色内置表 6 项，
+                // 而本类是两套预设共用的纯函数层 —— 把某个表的具体长度写死在这里，
+                // 颜色一加进来就会误判动画的下标。上界由调用方按自己的表判。
+                return idx < 0 ? new Base(-1, null) : new Base(idx, null);
+            }
+            if (!isCustomParent(parent)) {
+                return new Base(-1, null);      // 认不出的引用 → 当作没有
+            }
+            String ancestorName = parent.substring(1);
+            if (!seen.add(ancestorName)) {
+                return new Base(-1, null);      // 环 → 放弃，绝不死循环
+            }
+            Entry ancestor = getEntry(all, ancestorName);
+            if (ancestor != null) {
+                return new Base(-1, ancestor);  // 找到最近存在的自定义祖先
+            }
+            // 祖先已被删除（remove 已接管，但手改数据 / 更早版本的数据仍可能出现）
+            // → 这条链断了，没有可恢复的目标。
+            return new Base(-1, null);
+        }
+        return new Base(-1, null);
     }
 
     /**

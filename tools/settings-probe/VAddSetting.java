@@ -34,7 +34,11 @@ public final class VAddSetting {
             "stateVersion",          // 版本号，由 loadState 单独处理
             "customAnimPresets",     // 自定义预设表，由 CustomPresets 单独管理
             "animCustomName",        // 派生名，同上
-            "animPresetBase"         // 进表但标记为「不进快照」，见 presetPointer()
+            "animPresetBase",        // 进表但标记为「不进快照」，见 presetPointer()
+            // 2026-10-29：颜色预设三件套 —— 与动画的对应项同理由
+            "colorPresetBase",       // 颜色基准下标，与 animPresetBase 对称
+            "customColorPresets",    // 自定义颜色预设表，由 CustomPresets 单独管理
+            "colorCustomName"        // 当前选中的自定义颜色预设名
     ));
 
     public static void main(String[] a) throws Exception {

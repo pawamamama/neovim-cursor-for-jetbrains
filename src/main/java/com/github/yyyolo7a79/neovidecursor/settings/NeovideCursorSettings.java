@@ -179,6 +179,20 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         target.animCustomName =
                 (from.animCustomName == null) ? "" : from.animCustomName;
 
+        // ==================== 2026-10-29：颜色预设三件套（与动画对称）====================
+        // 同样的 null → "" 约定（见上面两行）：空串是「没有自建预设」的唯一表示。
+        // 越界的 colorPresetBase 回落默认下标，理由与 animPresetBase 相同 ——
+        // 手改 XML 塞进 99 不该让面板打不开。
+        target.colorPresetBase =
+                (from.colorPresetBase >= 0
+                        && from.colorPresetBase < CursorPresets.COLOR_PRESETS.length)
+                        ? from.colorPresetBase
+                        : CursorPresets.COLOR_PRESET_DEFAULT_INDEX;
+        target.customColorPresets =
+                (from.customColorPresets == null) ? "" : from.customColorPresets;
+        target.colorCustomName =
+                (from.colorCustomName == null) ? "" : from.colorCustomName;
+
         // ==================== 0.9.72：补上漏拷的 5 个字段 ====================
         //
         // 【这是 BLOCKER：它们是「重启即失效」的根因】
@@ -1024,6 +1038,29 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
          */
         public String animCustomName = "";
 
+        /**
+         * 23（2026-10-29）：当前<b>颜色</b>预设的「基准」内置下标。
+         *
+         * <p>与 {@link #animPresetBase} 对称。颜色以前没有基准字段 ——
+         * 面板靠 {@code colorBaseIdx} 这个局部变量猜，匹配不上任何预设时它<b>停在上一次的值</b>，
+         * 于是「恢复为「冰蓝」默认值」会在一段自定义颜色上继续显示并生效（文案撒谎）。
+         */
+        public int colorPresetBase = 0;
+
+        /**
+         * 24（2026-10-29）：<b>自定义颜色预设表</b>。
+         *
+         * <p>与 {@link #customAnimPresets} <b>完全同构</b>（同一套 {@link CustomPresets}
+         * 序列化与父链语义），只是快照里只有两个 HEX。
+         * 空串 = 用户还没有自建颜色预设。
+         */
+        public String customColorPresets = "";
+
+        /**
+         * 25（2026-10-29）：当前选中的<b>自定义颜色预设名</b>；空串 = 在内置颜色预设上。
+         */
+        public String colorCustomName = "";
+
         public State() {
         }
 
@@ -1057,6 +1094,10 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             animPresetBase = from.animPresetBase;
             customAnimPresets = from.customAnimPresets;
             animCustomName = from.animCustomName;
+            // 2026-10-29：颜色预设三件套（与动画同一套拷贝纪律，漏一个就是「重启即失效」）
+            colorPresetBase = from.colorPresetBase;
+            customColorPresets = from.customColorPresets;
+            colorCustomName = from.colorCustomName;
         // 【0.9.51 修复：copyFrom 漏了 diagLogging】
         //
         // 「勾选诊断日志 → 应用 → 消失」的第二层原因。

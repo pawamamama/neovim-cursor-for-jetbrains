@@ -653,7 +653,11 @@ public final class SettingsField {
         //      的多/少一个字符（数值位数差异），于是 isModified() 恒为真 —— 假脏；
         //   ② 真正的「值改了」已经由上面 20 个字段覆盖，比它没有额外信息量。
         // 「当前选中了哪个自定义预设」必须比：重命名/切换后要让应用按钮亮起来。
-        return !textSame(p.animCustomName, s.animCustomName);
+        // 2026-10-29：颜色预设的「当前选中项 / 基准」也要点亮应用按钮。
+        // customAnimPresets / customColorPresets 仍不比 —— 它们是派生数据（理由同上）。
+        return !textSame(p.animCustomName, s.animCustomName)
+                || !textSame(p.colorCustomName, s.colorCustomName)
+                || p.colorPresetBase != s.colorPresetBase;
     }
 
     /** {@code null} 当 {@code ""} 的文本比较。 */

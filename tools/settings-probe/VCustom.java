@@ -245,6 +245,25 @@ public final class VCustom {
         check("C-30 内置预设选中时：新建可用、重命名与删除置灰",
                 add.isEnabled() && !ren.isEnabled() && !del.isEnabled(),
                 "new=" + add.isEnabled() + " ren=" + ren.isEnabled() + " del=" + del.isEnabled());
+
+        // ---- 2026-10-29 审查 M2：颜色侧三个按钮 ----
+        //
+        // 为什么要单独守：项目历史上有过「方法写了、字段声明了，但 createPanel 里
+        // 从没创建按钮」的缺陷（见本文件上方那段注释）。颜色侧这次是新加的，
+        // 在补这几条断言之前，没有任何探针证明它真的挂在界面上。
+        javax.swing.JButton cAdd = conf.colorNewButtonForProbe();
+        javax.swing.JButton cRen = conf.colorRenameButtonForProbe();
+        javax.swing.JButton cDel = conf.colorDeleteButtonForProbe();
+        check("C-40 颜色「新建颜色预设…」按钮已创建", cAdd != null,
+                cAdd == null ? "null（createPanel 里忘了 new）" : cAdd.getText());
+        check("C-41 颜色「重命名颜色…」按钮已创建", cRen != null,
+                cRen == null ? "null（createPanel 里忘了 new）" : cRen.getText());
+        check("C-42 颜色「删除颜色」按钮已创建", cDel != null,
+                cDel == null ? "null（createPanel 里忘了 new）" : cDel.getText());
+        check("C-43 三个颜色按钮都在面板组件树里（不是只 new 了对象）",
+                inTree(root, cAdd) && inTree(root, cRen) && inTree(root, cDel),
+                "add=" + inTree(root, cAdd) + " ren=" + inTree(root, cRen)
+                        + " del=" + inTree(root, cDel));
     }
 
     /** 组件是否真的在某棵容器树里（递归）。 */

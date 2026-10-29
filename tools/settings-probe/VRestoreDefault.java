@@ -1,6 +1,9 @@
 import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
+import com.github.yyyolo7a79.neovidecursor.settings.CustomPresets;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.github.yyyolo7a79.neovidecursor.settings.SettingsField;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
+
 
 import java.lang.reflect.Method;
 
@@ -13,8 +16,13 @@ import java.lang.reflect.Method;
  * 副本<b>自己存的快照</b> —— 等于把自己又拷了一遍，<b>点完看不出任何变化</b>。
  * 而按钮文案写着「恢复为「基础 副本」默认值」，用户以为会回到「基础」。
  *
- * <p><b>新行为</b>：副本 → 回到它派生自的那个内置预设（{@code animPresetBase}），
- * 并清掉副本名。内置预设 → 回到自己的常量（原行为不变）。
+ * <p><b>新行为（2026-10-29 修订，P9-A）</b>：副本 → 值回到它派生自的那个内置预设
+ * （{@code animPresetBase}），<b>但副本名保留、副本条目不被改写</b>。
+ * 内置预设 → 回到自己的常量（原行为不变）。
+ *
+ * <p>2026-10-28 的 bd932b9 曾在副本上额外做两件事：把副本快照改写成父预设值、
+ * 清空副本名。前者会永久抹掉用户手调的数据，后者就是用户报的「跳回父预设」。
+ * 本次修复删掉这两条副作用，值语义不变。
  */
 public final class VRestoreDefault {
     private static int pass = 0, fail = 0;
@@ -54,6 +62,11 @@ public final class VRestoreDefault {
         s2.animCustomName = "基础 副本";
         NeovideCursorConfigurable.applyAnimPresetFields(
                 s2, CursorPresets.ANIM_PRESETS[0]);
+        // 【2026-10-29 父链】副本条目必须带父引用，否则「恢复默认值」没有目标。
+        // 新模型下「不知道父 → 按钮置灰」是正确行为，不是缺陷 —— 这里补数据，
+        // 让 D-2 继续测「有父时恢复到父」。
+        s2.customAnimPresets = CustomPresets.put("", s2.animCustomName,
+                CustomPresets.builtinParent(0), SettingsField.snapshot(s2));
         // 用户在副本上乱改（这正是用户想反悔的场景）
         s2.animationLength = 0.31f;
         s2.tailOpacity = 0.33f;
@@ -73,9 +86,17 @@ public final class VRestoreDefault {
                         + " smooth=" + s2.typingSmoothness + "（期望 0.77）"
                         + " layers=" + s2.glowLayers);
 
-        // ---- D-3: 恢复后副本名必须清掉（否则下拉撒谎）----
-        check("D-3 恢复后 animCustomName 被清空（下拉不能显示副本名而值是内置的）",
-                s2.animCustomName.isEmpty(), "name=\"" + s2.animCustomName + "\"");
+        // ---- D-3: 恢复后必须【留在副本上】—— 副本名保留 ----
+        //
+        // 【2026-10-29 断言方向变更 —— 契约变更，非缺陷】
+        // 原断言是「恢复后 animCustomName 被清空」，那是 bd932b9 的行为：
+        // 值回父预设 + 名字清空 = 用户报的「跳回父预设」。
+        //
+        // 2026-10-29 用户拍板（docs/PROJECT-DECISIONS.md P9-A）：
+        // 恢复的是「值」，不是「你站在哪个预设上」这个身份 ——
+        // 副本名必须保留，副本条目也不许被改写（见 restoreAnimPreset 的 javadoc）。
+        check("D-3 恢复后 animCustomName 保留（留在副本上，不跳回父预设）",
+                "基础 副本".equals(s2.animCustomName), "name=\"" + s2.animCustomName + "\"");
 
         // ---- D-4: 副本派生自「缎带」时，恢复要回到缎带而不是基础 ----
         NeovideCursorSettings.State s3 = new NeovideCursorSettings.State();
@@ -83,6 +104,9 @@ public final class VRestoreDefault {
         s3.animCustomName = "缎带 副本";
         NeovideCursorConfigurable.applyAnimPresetFields(
                 s3, CursorPresets.ANIM_PRESETS[1]);
+        // 同上：D-4/D-5 要测「派生自缎带的副本恢复到缎带」，必须先把父引用写进去。
+        s3.customAnimPresets = CustomPresets.put("", s3.animCustomName,
+                CustomPresets.builtinParent(1), SettingsField.snapshot(s3));
         s3.animationLength = 0.05f;
         restore(s3, 1);
         check("D-4 派生自「缎带」的副本，恢复回到缎带（anim=0.28 而不是 0.10）",
