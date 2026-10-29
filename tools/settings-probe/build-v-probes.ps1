@@ -158,7 +158,14 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 与 trace 的 TRACE_MAX_LINES 同一策略）。守门：前 N 行逐字节不变 /
         # 超限只补一条 / 多编辑器分桶独立 / 超限后不再增长。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VTrailCap')
+        'VTrailCap',
+        # 【2026-10-29】分标签页后的守门缺口：漏一句 registerIntegratedPanel(page)
+        # → 该页控件改了不写进 pending、点应用没反应、重置不回灌，
+        # 而且【不报错、不抛异常、界面一切正常】。
+        # 变异实测：删掉 registerIntegratedPanel(tabDiag) 时全量门禁 0 条红 ——
+        # 因为没有任何探针通过面板去改「调试」页的控件。VTabPages 用结构判据补上：
+        # 标签页集合 ⊆ outer.getIntegratedPanels()，与页里放什么控件无关。
+        'VTabPages')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

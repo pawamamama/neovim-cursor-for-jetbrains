@@ -60,11 +60,11 @@ do not hold back on token usage.
 分支         main（2026-10-27 起；此前长期在 fix/f7-override-read）
 ```
 
-## 规模（实测 · 2026-10-28）
+## 规模（实测 · 2026-10-29）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    35 文件 / 16,166 行
-探针       tools/settings-probe/*.java        116 文件 / 26,248 行（101 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/    35 文件 / 17,190 行
+探针       tools/settings-probe/*.java        117 文件 / 26,677 行（102 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
 
@@ -97,7 +97,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         101 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap）/ **ALL PASS（0 失败）**
+探针         102 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages）/ **ALL PASS（0 失败）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）
@@ -705,12 +705,17 @@ docs/archive/  （整目录）
 `reset()` / `isModified()` 第一段就是遍历 `integratedPanels` 并委托（javap 实证），
 所以**只有登记过的标签页**才会被应用 / 重置 / 计入改动检测。
 
-> ⚠️ **已知守门缺口（2026-10-29 变异测试实测）**：漏掉一句
-> `registerIntegratedPanel(tabDiag)`，门禁**全绿**（0 条红）——
-> 因为没有任何探针通过面板去改「诊断日志」。漏 `tabMaster` 会红
-> （VDefects 1 + VerifyPanel 3），漏标签页顺序会红
-> （VSnap 12 + VPreset 8 + VHints 2 + VLabel 1）。
-> 加第 7 个标签页时，别指望门禁替你发现忘了登记。
+> **守门探针 `VTabPages`（2026-10-29 新增，8 条断言）**：T-5 断言「标签页集合 ⊆
+> `outer.getIntegratedPanels()`」，T-6 断言两集合数量一致（无游离/重复登记）；
+> 另有标签页数量、名字与顺序、每页内容是不是 DialogPanel、有无空白页，
+> 以及 **T-8 每页控件构成**（滑块/复选框/下拉/色板，照任务书 §2 的分配表）。
+> 它存在的理由来自变异测试：漏掉一句 `registerIntegratedPanel(tabDiag)` 时，
+> **其余全部探针 0 条红** —— 因为没有任何探针通过面板去改「诊断日志」；
+> 而 T-5 / T-6 会当场红。**T-8 是补出来的**：把标签2 与标签3 的组件对调、
+> 标题跟着组件走时，其余 7 条全绿（页都在、都登记、都不空），只有 T-8 抓到
+> 「颜色页里全是滑块」。
+> 加第 7 个标签页时：`tabs.addTab` 与 `registerIntegratedPanel` 成对写，
+> 顺序与构成归 `VTabPages` 守。
 
 对应构建方法：`buildVersionRow` / `buildPresetRows` / `buildMasterGroup` /
 `buildColorGroup` / `buildInlineGroup` / `buildCursorSizeGroup` / `buildCrossGroup` /
