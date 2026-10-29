@@ -93,6 +93,12 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 2026-10-29 父链重构：派生记父 / 自定义派生自定义 / 删除接管祖父 /
         # 改名同步子引用 / 旧格式兼容 / 环检测。纯逻辑层，不需要平台桩。
         'VPresetChain',
+        # 2026-10-29 BUG-011：彩虹预设的 shadowColor 定成中性白雾 #FFFFFF。
+        # 这条盯的是「预设 shadowColor → CaretTrailPanel.glowColor → 辉光」的链路。
+        # 之前没有任何探针覆盖它：VColorMatchBug 只验匹配、VRainbowSep/VRgbWash
+        # 只验本体填充、VGradAllPresets 明确跳过彩虹 —— 所以那个 bug 才能活到用户发现。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VGlowFog',
         # ============ 0.9.83：补回被遗忘的探针 ============
         # 这些探针引用的生产类都还在、且 27 个实测全过 ——
         # 它们只是从这份清单里掉了，等于「写了但从不运行」。

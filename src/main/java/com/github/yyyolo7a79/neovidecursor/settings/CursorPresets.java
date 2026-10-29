@@ -479,10 +479,27 @@ public final class CursorPresets {
             //
             // 改法：给彩虹一对**独有**的 HEX，判据退回纯 HEX 比对即可。
             //
-            // 为什么这两个值不影响彩虹效果：rgbWash=true 时走色相循环，
-            // 两个 HEX 都不参与绘制，只在「关掉动态后回到什么颜色」时用到。
-            // 取天蓝/紫罗兰 —— 是彩虹的典型代表色，关掉动态后落到这个色也不突兀。
-            new ColorPreset("彩虹（动态）", "#4FC3F7", "#B388FF", true),
+            // 【0.9.88 当时写的理由有错，0.9.105 已纠正 —— 见 BUG-011】
+            //
+            // 原文是「rgbWash=true 时两个 HEX 都不参与绘制」，这句话
+            // **只对 tailColor 成立**：彩虹走色相循环时它只剩 alpha 被借去
+            // 当不透明度（CaretTrailPanel.buildRgbWashPaint 的 userAlpha）。
+            //
+            // shadowColor 恰恰相反，它从头到尾都在喂辉光：
+            //   CaretTrailPanel.refreshStyles()  →  glowColor = parse(shadowColor, 1.0f)
+            //   CaretTrailPanel.drawQuadGlow()   →  直接拿 glowColor 的 RGB 逐层填充
+            // 于是 0.9.88 顺手挑的「紫罗兰 #B388FF」，把彩虹光标旁边的雾
+            // 从原来的粉雾换成了一片淡紫 —— 用户看到的「光标和辉光不搭」就是这么来的。
+            //
+            // 现在 shadowColor 取 #FFFFFF（中性白雾）。三条理由：
+            //   1. 色相环上任何颜色转到它旁边都不打架；
+            //   2. 再经 glowOpacity 压暗，就是用户记忆里的「半透明雾色」；
+            //   3. 与其余五个预设的 HEX 对都不重复，匹配唯一性不受影响。
+            //
+            // 唯一的独有性由 tailColor（#4FC3F7）保证 —— 匹配判据要两个 HEX
+            // 都相等（CursorPresetApplier.matchColorPreset），所以彩虹与
+            // 「原版粉色」不会因为这里改成白色而撞车。守门探针：VGlowFog。
+            new ColorPreset("彩虹（动态）", "#4FC3F7", "#FFFFFF", true),
     };
 
     /** 预设 1 的<b>下标</b>（= 原版粉色 = {@link NeovideConfig} 默认值）。 */
