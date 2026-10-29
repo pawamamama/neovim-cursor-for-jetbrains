@@ -41,8 +41,47 @@ public final class VUi {
         ui.panel.component = panel;
         V0Env.disableValidators(panel);   // 离线探针没有 JBPopupFactory，必须走平台官方的 disableValidation 旁路
 
-        // 面板是扁平结构：每个 row 依次是 [标题 JLabel] [控件...]
-        Component[] kids = ((Container) panel).getComponents();
+        collect(panel, ui);
+        return ui;
+    }
+
+    /**
+     * 深度优先收集控件（一个容器 = 一层，逐层下钻）。
+     *
+     * <p><b>为什么是递归</b>：2026-10-29 起面板要拆成「标签页」（见
+     * {@code docs/THREE-DAY-PLAN.md} Day 1）。标签页一上，每个 build*Group 造出来的 row
+     * 就不在 DialogPanel 的直接子级里了，而是被包进 JTabbedPane → tab 内容面板 → row 面板
+     * 好几层。只取一层 {@code getComponents()} 会**拿不到标签页非当前页里的控件**，
+     * 依赖 {@code ui.sliders} 的几十个探针会集体失效。递归是分标签的前置条件。
+     *
+     * <p><b>为什么现在改成递归，收集结果却一个字都不变</b>：当前面板仍是扁平的 ——
+     * 14 滑块 / 9 复选框 / 4 下拉全部是 DialogPanel 的直接子级（{@code V0Tree} 实测），
+     * 递归进任何子容器都收不到控件。而顶层那几个「非控件的 Container」
+     * （顶栏 {@code JPanel}、分隔行 {@code PanelImplKt$createSeparatorRow$1}、
+     * 说明文字 {@code DslLabel}）里一个控件都没有，被 {@link #containsControl} 判掉，
+     * 不会下钻 —— 所以它们内部的 JLabel 也不会混进 {@code rowTitles}。
+     * 换句话说：现有结构下递归的遍历序列与旧的单层遍历**逐项相同**，顺序不动。
+     *
+     * <p><b>为什么用「里面有没有控件」当判据，而不是按类名判断</b>：
+     * 类名字符串（如 {@code BasicTabbedPaneUI$TabContainer}、平台内部类名）会随平台版本变，
+     * 而且装饰容器的类名是一长串内部类，写死必然漏。改问「这个容器子树里到底有没有
+     * JSlider / JCheckBox / ComboBox」是**结构性事实**，与平台实现无关：
+     * <ul>
+     *   <li>纯装饰容器（分隔行、顶栏、说明文字、tab 头部条）没有控件 → 不下钻，</li>
+     *   <li>真正的表单容器（不论外面套了几层）一定有控件 → 下钻。</li>
+     * </ul>
+     *
+     * <p><b>给分标签的人留个提醒</b>：判据是「子树里有控件就整个下钻」，所以
+     * tab 内容面板里那些**与控件同级的说明 JLabel**（比如每组的小标题）会进
+     * {@code rowTitles}；而 tab 头部（只有文字、没有控件）不会。分标签后若有探针
+     * 按 {@code rowTitles.get(n)} 定位，要改用按文案找 —— 顺序本身仍是
+     * 「标签页内从上到下、页与页按加入顺序」。
+     */
+    private static void collect(Component root, VUi ui) {
+        if (!(root instanceof Container)) {
+            return;
+        }
+        Component[] kids = ((Container) root).getComponents();
         for (int i = 0; i < kids.length; i++) {
             Component c = kids[i];
             if (c instanceof JSlider) {
@@ -51,6 +90,9 @@ public final class VUi {
                 // 若定位器依赖那个顺序，顺序一反探针就自己崩掉，测的就不是被测代码了。
                 // 因此：输入框取「同一行内距离最近的 JTextComponent」（前后都看），
                 // 数值标签取「滑块之后第一个 JLabel」。
+                //
+                // 注意这里传的是 kids —— 滑块自己所在那一层的兄弟数组。递归之后这一条更不能省：
+                // 行内邻居只可能在同一行容器里，不能拿根容器的子级去比。
                 ui.textFields.add(nearestTextComponent(kids, i));
                 ui.valueLabels.add(firstLabelAfter(kids, i));
             } else if (c instanceof JCheckBox) {
@@ -59,9 +101,30 @@ public final class VUi {
                 ui.combos.add((com.intellij.openapi.ui.ComboBox) c);
             } else if (c instanceof JLabel) {
                 ui.rowTitles.add((JLabel) c);
+            } else if (c instanceof Container && containsControl((Container) c)) {
+                collect(c, ui);
             }
         }
-        return ui;
+    }
+
+    /**
+     * 这个容器的子树里有没有「要被收集的控件」（JSlider / JCheckBox / ComboBox）。
+     *
+     * <p>用来把装饰容器挡在递归之外 —— 见 {@link #collect} 的注释。
+     * JLabel 不算控件：否则顶栏那种「只有文字」的容器也会被下钻，label 就混进 rowTitles 了。
+     */
+    private static boolean containsControl(Container root) {
+        Component[] kids = root.getComponents();
+        for (Component c : kids) {
+            if (c instanceof JSlider || c instanceof JCheckBox
+                    || c instanceof com.intellij.openapi.ui.ComboBox) {
+                return true;
+            }
+            if (c instanceof Container && containsControl((Container) c)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 同一行里距离最近的输入框（前或后都算）。 */
