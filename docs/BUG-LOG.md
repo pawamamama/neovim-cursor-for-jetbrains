@@ -590,6 +590,53 @@ N 帧内无条件记录绘制耗时。
 > 2026-10-28 用户报。**本会话按要求未做任何验证**，只记录现象与待查方向。
 > 这些不是「坏了」，是「行为与预期/与别处不一致」；动手前先确认到底是哪一种。
 
+## BUG-008 PyCharm 2025.2（平台 252）覆盖层光标冻结在第一行第一字符（**已修复，0.9.104**）
+
+**用户报**：在 PyCharm 2025.2（PY-252.23892.515）里覆盖层光标停在第一行第一字符，
+移动与打字都不动；换 IDEA 2026.1（build 261）就正常。
+
+**我怎么想的（错误的推理方向）**：第一反应会怀疑「事件没收到 / trail 没初始化 /
+坐标换算坏了」—— 因为这些都是本项目历史上光标不动的常见原因。
+但本地 IDEA 复现不了、日志里连一条异常都没有，说明问题不在业务逻辑，
+而在**平台对访问上下文的限制**。
+
+**实际是什么**：栈是
+```
+CaretAnimator.refreshTarget → CaretImpl.getOffset
+  → EditorThreading.assertInteractionAllowed
+  → "Read access is allowed from inside read-action only"
+```
+252 要求「读 Editor / Caret / Document 必须在 read action 内」。
+我们的 tick 由 `invokeLater` 投递到 EDT —— **在 EDT 上不等于持有读锁**。
+异常被 `refreshTarget` 自己的 `catch (Throwable)` 吞掉并返回 `false`，
+于是拖尾永远停在初始位置，日志里只有一条被限流的 warn（默认还看不到）。
+261 放宽了该判定，所以同一份 jar 不触发 —— **平台版本差异**。
+
+**修法**：新增 `readEditor(ThrowableComputable) = ReadAction.compute`，
+把 `refreshTarget`（拆成 6 行包装 + 原实现体**一行未动**）、构造函数 4 处读取、
+`traceCaretEvent`、`caretAdded/Removed`、`recordFrameStats` 全部包进 read action。
+用 `compute` 而不是 `runReadAction(Runnable)`：后者拿不到 `changed`，
+只能靠字段绕，会破坏 P0-5 的调用次数契约。
+
+**守门**：`VReadAction`（12 条断言）。**关键设计**：它不检查字符串，
+而是用「只允许 read action 内访问」的 Editor/Caret/Document 桩复现 252 判据 ——
+桩在读取时若不在 read action 内就抛与平台同文的 `AssertionError`。
+三组变异分别红 8 / 1 / 1 条（去 refreshTarget 包装 / 去构造期包装 / 去 caretAdded 包装），
+证明桩抓得住。另有一条 R-10 常驻自证：绕过包装直接调实现体时桩必须判红，
+否则整份探针就是空转。
+
+**教训**：
+1. **「在 EDT 上」不等于「持有读锁」**。跨大版本做兼容时，先查平台在目标版本上
+   对「读访问上下文」的要求，而不是先怀疑自己的业务逻辑。
+2. **`catch (Throwable)` 会把平台断言吞成「什么都没发生」**。这类吞异常只在
+   诊断日志开启时留痕，默认配置下用户看到的就是「光标不动、日志干净」——
+   排查时必须先把 `diagLogging` 打开。
+3. 新增平台调用时，要问一句「这个调用在旧版本上有没有前置条件」。
+   本次的 `getLineHeight` / `getVisualPosition` / `getOffset` 在 261 上无条件可用，
+   在 252 上却都要求读锁。
+
+---
+
 ### N-2 开辉光 + 渐变时形状看着像梯形（**视觉错位，非代码缺陷** —— 2026-10-28 用户定性）
 
 **用户观察**：斜度设成 0 时，开辉光 + 渐变，光标形状看着像一个梯形（下宽上窄）。

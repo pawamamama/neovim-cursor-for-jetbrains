@@ -1,6 +1,6 @@
 # 下一步做什么
 
-> 状态：**v0.9.102 本地已装**（未发布）· fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· git tag 停在 0.9.83
+> 状态：**v0.9.104 本地已装**（未发布）· fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· git tag 停在 0.9.83
 > 本文最后更新：2026-10-27
 
 > ⚠️ **本文的数字曾长期失真，请勿直接采信或转抄。**
@@ -12,20 +12,48 @@
 
 ---
 
-## 一、当前硬状态（2026-10-27 实测）
+## 一、当前硬状态（2026-10-29 实测）
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v0.9.102**（读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
-| dist 最新 jar | `dist/neovide-cursor-0.9.102.jar`（2026-10-28） |
-| git tag | 停在 **v0.9.83**（0.9.84~0.9.102 缺 19 个，版本未发布） |
+| 版本 | **v0.9.104**（IDEA 2026.1 与 PyCharm 2025.2 都已装；读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
+| dist 最新 jar | `dist/neovide-cursor-0.9.104.jar`（2026-10-29） |
+| git tag | 停在 **v0.9.83**（0.9.84~0.9.104 缺 21 个，版本未发布） |
 | 探针文件 | **97 个 `V*.java`**（全部 .java 112 个，2026-10-28 实测） |
 | 探针基线 | **ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针，见 §7.1 第 1 项 |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
 | PhysicsParity | PASS |
-| 生产代码 | **15,164 行 / 34 文件** |
+| 生产代码 | **16,261 行 / 35 文件** |
 | 探针代码 | **25,463 行 / 112 文件** |
 | 构建 | javac + 手写 plugin.xml；Gradle 也完整入库（两条路径并存） |
+
+---
+
+## 一甲、2026-10-29 已修复：平台 252 覆盖层光标冻结（0.9.104）
+
+**症状**：PyCharm 2025.2（PY-252.23892.515）里覆盖层光标冻结在第一行第一字符，
+移动 / 打字都不动；同一份 jar 在 IDEA 2026.1（261）正常 → **平台版本差异，不是产品差异**。
+
+**根因**：252 要求「读 Editor / Caret / Document 必须在 read action 内」。
+我们的 tick 由 `invokeLater` 投递到 EDT —— **在 EDT 上不等于持有读锁**。
+`CaretImpl.getOffset()` 触发 `EditorThreading.assertInteractionAllowed`，
+异常被 `refreshTarget` 自己的 `catch (Throwable)` 吞掉并返回 `false`。
+
+**修法**：`CaretAnimator` 新增 `readEditor(ThrowableComputable) = ReadAction.compute`
+（平台字节码核实：`compute → computeBlocking → Application.runReadAction`）；
+`refreshTarget` 拆成 6 行包装 + 原实现体（**一行未动**，让「行为不变」可验证）；
+构造函数 4 处读取、`traceCaretEvent`、`caretAdded/Removed`、`recordFrameStats` 一并包装。
+`tickStaticCaret` / `tickAfterimage` / `caretPositionChanged` 不读编辑器，未动。
+
+**守门**：`tools/settings-probe/VReadAction.java`（12 条断言）。它不用「代码里有没有
+`ReadAction`」这种字符串判据，而是用「只允许 read action 内访问」的
+Editor / CaretModel / Caret / Document / SelectionModel / InlayModel 桩**复现 252 的判据**，
+报错文本与平台原文一致。三组变异（去 refreshTarget 包装 / 去构造期包装 /
+去 caretAdded 包装）分别红 **8 / 1 / 1** 条，恢复后 12 全绿。
+
+**验证**：PyCharm 2025.2 实机由用户确认可用（0.9.104）；全量门禁 97 探针
+`V-PROBES RESULT: ALL PASS`；D0 零 diff；P0-5 调用次数契约不变
+（慢路径帧 `Caret.getOffset` 恰好 1 次、快速路径 0 次，由 R-7/R-7b/R-8 直接计数）。
 
 ---
 
@@ -309,6 +337,6 @@ TR（前缘单角）   2.11     7.43    11.58
 
 | 项 | 现状 |
 |---|---|
-| `git tag` | 停在 `v0.9.83`；实际已装到 **0.9.102**，中间十几个版本无 tag |
+| `git tag` | 停在 `v0.9.83`；实际已装到 **0.9.104**，中间二十个版本无 tag |
 | 探针总数 | **97 个** `V*.java`（新增 `VBoot` / `VDocCheck` / `VBuildDecl` / `VReadAction`），文档数字已由 `VDocCheck` 纳入门禁 |
-| `CLAUDE.md` 状态数字 | 已同步为 0.9.102 / 97 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |
+| `CLAUDE.md` 状态数字 | 已同步为 0.9.104 / 97 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |
