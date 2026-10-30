@@ -164,10 +164,19 @@ function Get-SettingsFieldCount {
     if (-not (Test-Path -LiteralPath $f)) { return -1 }
     try {
         # build() 里每个字段都是一条 out.add(<工厂>(...))。
-        # 【必须匹配工厂名】`buildPresetFields()` 里还有一句 `out.add(f)`，
+        # 【必须要求「工厂名 + 左括号」】`buildPresetFields()` 里还有一句 `out.add(f)`，
         # 只按 `out.add(` 数会把 27 个字段数成 28 —— 探针/文档都会跟着错。
+        #
+        # 【工厂名用 \w+ 通配，不要枚举 —— 2026-10-30 修的漏报】
+        # 原正则写的是 (bools|ints|floats|hexColors|enums|presetPointer)，
+        # 漏了带 Global 后缀的两种：boolsGlobal(rgbGradient)、floatsGlobal(typingSmoothness)。
+        # 后果是 27 个字段被数成 25，而且漏在**唯一要抓的那个场景**上：
+        # 以后新增的字段若用 *Global 工厂，指纹数字不变 → 该出的 ⚠ 警告不出现。
+        # 漏报（该警告不警告）比多报（数字当场看得见，人工复核一眼就能发现）危险得多，
+        # 所以这里改成 \w+ 通配：任何新工厂名自动被认到，不会再漏第二次。
+        # 守门探针：VBuildDecl 的 B-7 会拿本行正则去跑 SettingsField 里的真实工厂名。
         return @(Select-String -LiteralPath $f `
-            -Pattern '^\s*out\.add\((bools|ints|floats|hexColors|enums|presetPointer)\(').Count
+            -Pattern '^\s*out\.add\(\w+\(').Count
     } catch {
         return -1
     }

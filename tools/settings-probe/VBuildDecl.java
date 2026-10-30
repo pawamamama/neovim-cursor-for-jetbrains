@@ -42,8 +42,33 @@ import java.util.regex.Pattern;
  *   <li><b>B-5</b> {@code until-build} 必须写成「大版本.*」而不是精确 build 号
  *       （写 {@code 261.25134.95} 会把 2026.1.4 一起拒掉）；</li>
  *   <li><b>B-6</b> {@code build/install.ps1} 的自检段也校验 {@code until-build}
- *       （防止「打包脚本加了、安装自检又退回只打 since-build」这种半截改动）。</li>
+ *       （防止「打包脚本加了、安装自检又退回只打 since-build」这种半截改动）；</li>
+ *   <li><b>B-7</b> {@code build/install.ps1} 的「结构指纹」正则必须数全 {@code build()} 里
+ *       所有 {@code out.add(<工厂>(} 行，且不得把 {@code buildPresetFields()} 里的
+ *       {@code out.add(f)} 算成字段。</li>
  * </ol>
+ *
+ * <h2>B-7 为什么存在（2026-10-30）</h2>
+ *
+ * <p>安装脚本会在每次安装前数一遍 {@code SettingsField} 的字段数（结构指纹），
+ * 与上次记录比对，不一致就警告「配置结构变了，请复核脚本」。它的<b>唯一用途</b>
+ * 就是抓住「加了新字段」这一种情况 —— 加字段后旧值写回去是不是脏数据，需要人看一眼。
+ *
+ * <p>原正则把工厂名<b>枚举</b>成 {@code (bools|ints|floats|hexColors|enums|presetPointer)}，
+ * 而 {@code build()} 里还有两个带 {@code Global} 后缀的工厂
+ * （{@code boolsGlobal(rgbGradient)}、{@code floatsGlobal(typingSmoothness)}），
+ * 后缀不是 {@code (} 所以匹配不上 —— 27 个字段被数成 25。
+ *
+ * <p>后果不是「数字不好看」，而是<b>漏报</b>：以后新增的字段若用 {@code *Global} 工厂，
+ * 指纹前后都是同一个数，⚠ 警告不会出现，而它本来唯一要抓的就是这个。
+ * 更坏的次生伤害是这个错数字还被当成「权威口径」抄进了文档
+ * （曾据此误判 {@code CLAUDE.md} 里正确的 27 是「过期数字」）。
+ *
+ * <p>所以断言不是「等于 27」这种会随字段增删而过期的常数，而是
+ * <b>「脚本口径的数 == 源码里真实的工厂字段数」</b> —— 两边都是派生量，加字段时自动同步，
+ * 只有「正则漏计某种工厂」这一种情况会让它们分家，而那正是要抓的。
+ * 取正则的方式是<b>从 {@code install.ps1} 文本里读出来再编译</b>，不是在本探针里重写一份，
+ * 否则探针守的就是自己的副本（陷阱 3：探针复刻逻辑而不是调用生产代码）。</p>
  *
  * <h2>运行前提</h2>
  *
@@ -58,6 +83,22 @@ public final class VBuildDecl {
     /** 打包脚本与安装脚本，相对仓库根。 */
     private static final String BUILD_PS1 = "build/offline-build.ps1";
     private static final String INSTALL_PS1 = "build/install.ps1";
+
+    /** 结构指纹的口径来源：字段声明都在这个文件里。 */
+    private static final String SETTINGS_FIELD =
+            "src/main/java/com/github/yyyolo7a79/neovidecursor/settings/SettingsField.java";
+
+    /**
+     * 「真实字段」的判据：{@code out.add(<工厂>(}。
+     *
+     * <p><b>不是</b>裸的 {@code out.add(} —— {@code buildPresetFields()} 里还有一句
+     * {@code out.add(f)}，那是循环搬自定义预设，不是字段声明；按裸的 {@code out.add(} 数
+     * 会多算一条（27 → 28）。
+     *
+     * <p>工厂名用 {@code \w+} 而不是枚举：枚举必然在下次新增工厂时漏掉，
+     * 2026-10-30 漏的就是 {@code boolsGlobal} / {@code floatsGlobal}。
+     */
+    private static final Pattern REAL_FIELD = Pattern.compile("^\\s*out\\.add\\(\\w+\\(");
 
     public static void main(String[] args) throws IOException {
         System.out.println("=== V-BUILD：打包注入的兼容区间（since-build / until-build）===");
@@ -119,8 +160,8 @@ public final class VBuildDecl {
                 coarse, "until=" + until + (coarse ? "" : " → 应以 .* 结尾"));
 
         // ---------------- B-6：安装脚本的自检段也要校验 until-build ----------------
-        if (Files.isRegularFile(installPs1)) {
-            String install = read(installPs1);
+        String install = Files.isRegularFile(installPs1) ? read(installPs1) : null;
+        if (install != null) {
             // 判据是「真的在读它」的形态：属性名带引号出现在一个列表里
             // （脚本里写的是 @('since-build', 'until-build') 这种）。
             // 只在注释里提一句不算 —— 那正是"半截改动"的样子。
@@ -129,9 +170,92 @@ public final class VBuildDecl {
                     installChecksIt, installChecksIt ? "已校验" : INSTALL_PS1 + " 里找不到对 until-build 的校验");
         } else {
             check("B-6 build/install.ps1 必须存在", false, INSTALL_PS1 + " 不存在");
+            check("B-7 安装脚本存在才能校验结构指纹", false, INSTALL_PS1 + " 不存在");
+        }
+
+        // ---------------- B-7：结构指纹必须数得全 ----------------
+        if (install != null) {
+            checkFingerprintMatchesFields(install, root);
         }
 
         finish();
+    }
+
+    /**
+     * B-7：{@code install.ps1} 的结构指纹口径 == 源码里真实的工厂字段数。
+     *
+     * <p>为什么断言「两个派生量相等」而不是「== 27」：27 会随字段增删立刻过期，
+     * 到时候探针天天红，人就学会了忽略它。而这两个数只在「脚本正则漏计某种工厂」时
+     * 才会分家 —— 那正是要抓的唯一情况。
+     *
+     * <p>正则<b>从脚本文本里读出来再编译</b>，不在本探针里重写一份：
+     * 否则探针守的是自己的副本，脚本改坏了它也照样绿（陷阱 3）。
+     */
+    private static void checkFingerprintMatchesFields(String install, Path root) throws IOException {
+        Path fieldSrc = root.resolve(SETTINGS_FIELD);
+        if (!Files.isRegularFile(fieldSrc)) {
+            check("B-7 能读到 SettingsField.java（否则无法核对结构指纹）",
+                    false, SETTINGS_FIELD + " 不存在");
+            return;
+        }
+        String raw = fingerprintPattern(install);
+        if (raw == null) {
+            check("B-7 能从 install.ps1 里取出结构指纹的正则",
+                    false, "找不到同时含 -Pattern '...' 与 out\\.add 的非注释行");
+            return;
+        }
+        Pattern scriptPattern;
+        try {
+            scriptPattern = Pattern.compile(raw);
+        } catch (RuntimeException e) {
+            check("B-7 结构指纹的正则必须能被编译", false, raw + " → " + e);
+            return;
+        }
+
+        String src = read(fieldSrc);
+        int real = 0;
+        int counted = 0;
+        for (String line : src.split("\r?\n", -1)) {
+            if (REAL_FIELD.matcher(line).find()) {
+                real++;
+            }
+            if (scriptPattern.matcher(line).find()) {
+                counted++;
+            }
+        }
+        check("B-7a install.ps1 的结构指纹必须数全 build() 里所有工厂字段（不等 = 正则漏计某种工厂）",
+                real > 0 && counted == real,
+                "脚本口径 " + counted + " / 真实 " + real + "  [正则: " + raw + "]");
+
+        boolean loopCounted = scriptPattern.matcher("        out.add(f);").find();
+        check("B-7b 结构指纹不得把 buildPresetFields() 里的 out.add(f) 算成字段",
+                !loopCounted, loopCounted ? "out.add(f) 被计入 → 会多算一条" : "已排除");
+    }
+
+    /**
+     * 从 {@code install.ps1} 文本里取出结构指纹那条 {@code -Pattern '...'} 的内容。
+     *
+     * <p>跳过注释行：脚本头部「维护须知」里也用文字描述过这个正则，
+     * 那只是描述，不是执行体（同 {@link #findIdeaVersionLine} 的教训）。
+     * 取不到返回 {@code null} —— 调用方据此报 FAIL，绝不当作「没问题」。
+     */
+    private static String fingerprintPattern(String ps1) {
+        for (String line : ps1.split("\r?\n", -1)) {
+            String t = line.trim();
+            if (t.startsWith("#") || !t.contains("out\\.add")) {
+                continue;
+            }
+            int i = t.indexOf("-Pattern '");
+            if (i < 0) {
+                continue;
+            }
+            int start = i + "-Pattern '".length();
+            int end = t.indexOf('\'', start);
+            if (end > start) {
+                return t.substring(start, end);
+            }
+        }
+        return null;
     }
 
     // ==================== 辅助 ====================

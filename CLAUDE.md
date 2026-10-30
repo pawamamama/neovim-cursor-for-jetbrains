@@ -181,8 +181,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <本次
 - 先看清单不动手：`-DryRun`
 - 备份落在 `D:\deepseekwork\_config-backup\`（`personal-state-<时间戳>.json` + 原始 XML 副本）
 - **加了新的 State 字段 / 改了字段语义后，必须回来复核这个脚本**（见其文件头「维护须知」）；
-  脚本会用「结构指纹」（`SettingsField.java` 的 `out.add(` 条数）在每次安装时对比上次，
-  对不上就打 ⚠ 警告。
+  脚本会用「结构指纹」（`SettingsField.java` 的 `out.add(<工厂>(` 条数，当前 27 —— 不是裸的
+  `out.add(`，那样会把 `buildPresetFields()` 里的 `out.add(f)` 多算一条）在每次安装时对比上次，
+  对不上就打 ⚠ 警告。**这个数必须等于 §7.0 里说的字段数**，不等就是脚本正则漏计了工厂。
 
 ---
 
@@ -479,6 +480,18 @@ TR（前缘单角）   2.11     7.43    11.58
 | 9 | 同文件 `ANIM_PRESETS` 三档 | 各补 1 个值 | 内置预设与自定义快照语义分裂 |
 | 10 | `applyAnimPresetFields()` | 一行赋值 | 切预设不生效 |
 | 11 | `CursorPresetApplier.matchAnimPreset()`（现 9 个条件） | 加 1 个比较 | 下拉/菜单显示「已选中」但观感不是它 |
+
+> **「现 27 项」这个数怎么来的（2026-10-30 补，防止再被误判成过期）**
+>
+> 数法唯一：`SettingsField.java` 的 `build()` 里，`out.add(<工厂>(` 的条数。
+> 第 608 行 `buildPresetFields()` 里的 `out.add(f)` **不算** —— 那是循环搬自定义预设，不是字段声明。
+> 当前 27 = `bools 7 + boolsGlobal 1 + enums 1 + floats 9 + floatsGlobal 1 + hexColors 2 + ints 5 + presetPointer 1`。
+>
+> **同一口径下，`build/install.ps1` 打印的「结构指纹」也必须等于这个数。**
+> 两个数对不上，就是安装脚本的正则漏计了某种工厂，**不是字段数变了** ——
+> 2026-10-30 就是这样漏掉 `boolsGlobal` / `floatsGlobal`，把 27 数成 25，
+> 于是「加了新字段要警告」这个唯一用途，在新增 `*Global` 类字段时静默失效。
+> 已把正则改成 `\w+` 通配，并由探针 `VBuildDecl` 的 B-7 守门（脚本口径数 ≠ 真实工厂数即红）。
 
 ### B. 探针：不加就会红，而**红的部分不是 bug**
 
