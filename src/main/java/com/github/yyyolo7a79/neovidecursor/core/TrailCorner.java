@@ -61,6 +61,34 @@ public class TrailCorner {
      */
     private int charsMoved = -1;
 
+    /**
+     * 上一帧的短跳判定（L-8）。
+     *
+     * <p>分母为零时用它兜底，而不是让 {@code NaN} 替我们「猜」成跨行。
+     * 初值 {@code false} 与「今天 NaN 的比较结果」完全一致 —— 也就是首帧行为不变。
+     */
+    private boolean lastShortJump;
+
+    /** 零尺寸告警只报一次：四角每帧都会 jump，逐次记会把日志刷爆。 */
+    private static final java.util.concurrent.atomic.AtomicBoolean ZERO_SIZE_WARNED =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** 日志子系统故障只降级一次。 */
+    private static volatile boolean logBroken;
+
+    /** 打一条 warn；日志子系统不可用时降级到 stderr（只报一次）。 */
+    private static void safeWarn(String msg) {
+        try {
+            com.intellij.openapi.diagnostic.Logger.getInstance(TrailCorner.class)
+                    .warn("neovide-cursor: " + msg);
+        } catch (Throwable t) {
+            if (!logBroken) {
+                logBroken = true;
+                System.err.println("[neovide-cursor] 日志不可用（只报一次）: " + t);
+            }
+        }
+    }
+
     public TrailCorner(double relativeX, double relativeY, NeovideConfig config) {
         this.relativeX = relativeX;
         this.relativeY = relativeY;
@@ -82,6 +110,18 @@ public class TrailCorner {
      */
     public void setCharsMoved(int charsMoved) {
         this.charsMoved = charsMoved;
+    }
+
+    /**
+     * 探针专用：读本角点<b>最近一次 {@link #jump} 实际分配到的动画时长</b>。
+     *
+     * <p>{@code animationLength} 是 {@code jump} 里的局部变量，落到 {@code springX/springY}
+     * 之后就再也读不出来（{@code DampedSpring} 那份是私有的）。没有这个访问器，
+     * 守门探针就无法区分「走了短跳分支」和「走了跨行分支」——
+     * 而那正是 L-8（兜底分支分母为零导致静默退化）唯一的可观测后果。
+     */
+    public double animationLengthForProbe() {
+        return springX.getAnimationLengthForProbe();
     }
 
     // ==================== 目标位置计算 ====================
@@ -205,14 +245,39 @@ public class TrailCorner {
         // 且横向位移没有超出「一次合理跳转」的像素上限，就归为短跳。
         // 这样无论一帧合并了几次击键，行为都一致。
         boolean isShortJump;
+        boolean decided = true;
         if (charsMoved >= 0) {
             boolean sameLine = Math.abs(deltaYpx) <= height * 0.5;
             isShortJump = sameLine && charsMoved <= config.typingMaxChars;
+        } else if (!(width > 0) || !(height > 0)) {
+            // 【L-8，2026-10-30】分母为零/非有限时不做除法。
+            //
+            // 原写法 `deltaXpx / width`：width=0 时 0/0 得 NaN、x/0 得 ±Infinity，
+            // 而下面两个 `<=` 比较对它们都为 false → isShortJump 静默变成 false
+            // → 退化成跨行分支（时长与短跳差一个量级），零日志。
+            //
+            // 用 `!(w > 0)` 而不是 `w == 0`：顺手把 NaN 尺寸也挡住（NaN 同样让
+            // 两个比较都 false，后果一样）。
+            //
+            // 为什么「保持上一帧判定」比「让 NaN 猜」正确：这个兜底分支只在调用方
+            // 还没给出 charsMoved 时走（预览的早期帧），用户眼前正在发生的事
+            // 大概率与上一帧同类；而 NaN 的结果永远是「跨行」。
+            isShortJump = lastShortJump;
+            decided = false;
+            if (!ZERO_SIZE_WARNED.getAndSet(true)) {
+                safeWarn("jump 收到零尺寸（width=" + width + ", height=" + height
+                        + "），退回上一帧判定；后续不再重复记录");
+            }
         } else {
             // 兜底：调用方尚未提供字符偏移时，退回按归一化长度判定
             double jumpX = deltaXpx / width;
             double jumpY = deltaYpx / height;
             isShortJump = Math.abs(jumpX) <= config.shortMoveThreshold && Math.abs(jumpY) <= 0.001;
+        }
+        if (decided) {
+            // 只有真的做出了判定才更新 —— 兜底那一帧的「保持上一帧」不能覆盖记忆，
+            // 否则连续两帧零尺寸之后就没有「上一帧」可保持了。
+            lastShortJump = isShortJump;
         }
 
         if (isShortJump) {

@@ -165,7 +165,14 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 变异实测：删掉 registerIntegratedPanel(tabDiag) 时全量门禁 0 条红 ——
         # 因为没有任何探针通过面板去改「调试」页的控件。VTabPages 用结构判据补上：
         # 标签页集合 ⊆ outer.getIntegratedPanels()，与页里放什么控件无关。
-        'VTabPages')
+        'VTabPages',
+        # 【2026-10-30】审计第 1 批（健壮性 / 零观感变化）的守门探针。
+        # 这一批 8 条（H-2/H-3/M-4/M-10/L-4/L-5/L-6/L-8）的共同点是：
+        # 非法输入不会崩，只会「静默地做错事」—— 失败不记日志、失败还宣称成功、
+        # NaN 进了弹簧就再也出不来。正常路径全对，所以跑一遍功能永远测不出来。
+        # 它靠 Logger.setFactory 捕获平台日志，把「某条 warn 打没打」变成可断言的事实。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VAuditBatch1')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

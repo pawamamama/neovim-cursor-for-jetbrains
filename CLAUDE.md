@@ -60,13 +60,19 @@ do not hold back on token usage.
 分支         main（2026-10-27 起；此前长期在 fix/f7-override-read）
 ```
 
-## 规模（实测 · 2026-10-29）
+## 规模（实测 · 2026-10-30，命令见本节末尾）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    35 文件 / 17,190 行
-探针       tools/settings-probe/*.java        117 文件 / 26,677 行（102 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/    36 文件 / 17,990 行
+探针       tools/settings-probe/*.java        118 文件 / 27,675 行（103 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
+
+量法（**写之前先跑，别手抄上一版**）：
+`ls tools/settings-probe/V*.java | wc -l` / `ls tools/settings-probe/*.java | wc -l` /
+`cat tools/settings-probe/*.java | wc -l` / `find src/main/java -name '*.java' | wc -l` /
+`find src/main/java -name '*.java' -exec cat {} + | wc -l`。
+行数口径是 `wc -l`（末尾无换行的文件少计 1 行）。
 
 > 这几个数字与「状态块」一样，**改完代码就重新量一遍**，不要沿用上一版：
 > `ls tools/settings-probe/V*.java | wc -l`、`cat tools/settings-probe/*.java | wc -l`。
@@ -97,7 +103,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         102 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages）/ **ALL PASS（0 失败）**
+探针         103 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1）/ **ALL PASS（0 失败）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）

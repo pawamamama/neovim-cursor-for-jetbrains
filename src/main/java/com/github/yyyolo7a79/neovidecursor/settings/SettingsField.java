@@ -1,6 +1,7 @@
 package com.github.yyyolo7a79.neovidecursor.settings;
 
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+import com.intellij.openapi.diagnostic.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -50,6 +51,17 @@ import java.util.function.Function;
  * 新增参数时自定义预设自动包含它，不需要另写第二份清单。
  */
 public final class SettingsField {
+
+    private static final Logger LOG = Logger.getInstance(SettingsField.class);
+
+    /**
+     * 拒绝日志里原值的最大展示长度。
+     *
+     * <p>预设串可能被手改成几 KB，整条打进 idea.log 会把「是哪个键坏了」这条唯一有用的
+     * 信息淹掉。截断后仍保留前 24 个字符与<b>总长度</b> —— 足够判断「是个正常值写错了」
+     * 还是「整条数据被截断/污染了」。
+     */
+    private static final int RAW_LOG_MAX = 24;
 
     /** 字段类型。只用于原始值编解码，不参与比较（比较由 {@code same} 负责）。 */
     public enum Kind {
@@ -235,7 +247,7 @@ public final class SettingsField {
      */
     public boolean decode(NeovideCursorSettings.State s, String raw) {
         if (raw == null) {
-            return false;
+            return reject(null, "值为 null");
         }
         try {
             Object v;
@@ -243,7 +255,7 @@ public final class SettingsField {
                 case FLOAT: {
                     float f = Float.parseFloat(raw.trim());
                     if (Float.isNaN(f) || Float.isInfinite(f)) {
-                        return false;
+                        return reject(raw, "不是有限数");
                     }
                     v = f;
                     break;
@@ -259,14 +271,14 @@ public final class SettingsField {
                     } else if ("0".equals(t) || "false".equalsIgnoreCase(t)) {
                         v = Boolean.FALSE;
                     } else {
-                        return false;
+                        return reject(raw, "不是 0/1/true/false");
                     }
                     break;
                 }
                 case ENUM: {
                     v = resolveEnum(getState.apply(s), raw.trim());
                     if (v == null) {
-                        return false;
+                        return reject(raw, "不是合法枚举名");
                     }
                     break;
                 }
@@ -282,7 +294,7 @@ public final class SettingsField {
                     // 让调用方保持原值 —— 与 ENUM 分支「非法就不写」的语义一致。
                     String hex = raw.trim();
                     if (!isValidHexColor(hex)) {
-                        return false;
+                        return reject(raw, "不是 #RRGGBB / #AARRGGBB");
                     }
                     v = hex;
                     break;
@@ -295,8 +307,51 @@ public final class SettingsField {
             setState.accept(s, v);
             return true;
         } catch (RuntimeException ex) {
-            return false;
+            // 【必须带堆栈】这一类不可能是「脏数据」—— 脏数据在上面的各分支就已经被
+            // 自己那条 reject 拦下了。能走到这里的只有 setState.accept 里的
+            // NPE / ClassCastException，也就是<b>代码 bug</b>，而它是唯一真正需要堆栈的一类。
+            return reject(raw, "解析抛异常", ex);
         }
+    }
+
+    /**
+     * 记录一次「已知键、值非法」的拒绝，并返回 {@code false}。
+     *
+     * <p><b>为什么能确定是「值非法」而不是「缺键」</b>：未知键在
+     * {@link #restore}/{@link #restoreSkipping} 的 {@code byKey()} 处就被 continue 掉了，
+     * 而缺键根本不会走到 {@code decode}。所以 {@code decode} 返回 false
+     * 一定等于「这个键存在、但值不合法」—— 这两者必须能区分开：前者是数据坏了要留痕，
+     * 后者是版本兼容的正常宽容，不该刷日志（见这两处方法的 javadoc）。
+     *
+     * <p><b>日志本身也包了 try/catch</b>：{@code decode} 的第一契约是「绝不抛异常」
+     * （见其 javadoc），日志子系统failure 不能反过来破坏它。
+     */
+    private boolean reject(String raw, String why) {
+        return reject(raw, why, null);
+    }
+
+    /**
+     * 同上，但把异常一起带进日志。
+     *
+     * <p>只有 {@code catch (RuntimeException)} 那一条路径用得到 —— 那类失败是代码 bug，
+     * 只留一个类名（{@code NullPointerException}）对定位毫无帮助。
+     */
+    private boolean reject(String raw, String why, Throwable t) {
+        String shown = raw == null ? "(null)"
+                : (raw.length() <= RAW_LOG_MAX ? raw
+                   : raw.substring(0, RAW_LOG_MAX) + "…(共 " + raw.length() + " 字符)");
+        try {
+            String msg = "neovide-cursor: 预设字段 " + key + " 的值非法（" + why
+                    + "），保持当前值。值=[" + shown + "]";
+            if (t == null) {
+                LOG.warn(msg);
+            } else {
+                LOG.warn(msg, t);
+            }
+        } catch (Throwable ignored) {
+            // 见上：日志失败不得让 decode 抛异常
+        }
+        return false;
     }
 
     /**

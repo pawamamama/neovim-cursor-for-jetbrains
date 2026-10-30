@@ -46,6 +46,27 @@ public class DampedSpring {
         this.position = position;
     }
 
+    // ==================== 探针访问器（纯新增，零行为变化）====================
+    //
+    // 【为什么需要】velocity 与 animationLength 都没有访问器，而守门探针
+    // VAuditBatch1 必须能把 NaN 精确喂进这两个量、并在 jump 之后读出实际分到的时长。
+    // 没有它们，「只删掉 velocity 那一条守卫」这种变异不会让任何断言变红 —— 等于没测。
+
+    /** 探针专用：直接写入速度（生产代码只通过 {@link #update} 改它）。 */
+    public void setVelocityForProbe(double velocity) {
+        this.velocity = velocity;
+    }
+
+    /** 探针专用：读当前速度。 */
+    public double getVelocityForProbe() {
+        return velocity;
+    }
+
+    /** 探针专用：读当前动画时长（{@code TrailCorner.jump} 每帧写入）。 */
+    public double getAnimationLengthForProbe() {
+        return animationLength;
+    }
+
     /**
      * 按 dt 推进弹簧状态。
      *
@@ -53,6 +74,24 @@ public class DampedSpring {
      * @return true 表示仍在运动（需要继续重绘）；false 表示已静止
      */
     public boolean update(double dt) {
+        // ==================== 【M-4，2026-10-30】非有限值守卫 ====================
+        //
+        // 【为什么必须有】下面那个复位分支用的是 `Math.abs(position) < 0.001`，
+        // 而 `Math.abs(NaN) < 0.001` 恒为 false —— 于是 NaN 一旦进来，复位分支
+        // 永不触发；同时 TrailCorner.update() 用 `destX != previousDestX` 判断目标是否变化，
+        // 这个比较对 NaN 恒为 true，于是每帧都把 NaN 重新写回弹簧。
+        // 结果是：该角点<b>永久 NaN</b> → `Path2D.lineTo(NaN, …)` 被 Java2D 静默忽略
+        // → 光标不显示、日志里一个字都没有，直到某次显式 jump/snapTo 才可能恢复。
+        //
+        // 【归零而不是「忽略本帧」】position=0 的语义是「已在目标位置上」，
+        // 视觉上是「没有拖尾」而不是「光标消失」；而且下一次 jump() 会重新写入
+        // 有限时长与位置，有限值一进来就正常推进 —— 这就是自愈。
+        if (!Double.isFinite(position) || !Double.isFinite(velocity)
+                || !Double.isFinite(animationLength)) {
+            reset();
+            return false;
+        }
+
         // 动画时长已短于时间步长，或位移已足够小 —— 直接归零，避免无意义的微小抖动
         if (animationLength <= dt || Math.abs(position) < 0.001) {
             position = 0.0;

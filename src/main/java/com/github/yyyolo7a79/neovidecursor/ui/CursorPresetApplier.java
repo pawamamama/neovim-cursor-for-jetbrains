@@ -113,11 +113,32 @@ public final class CursorPresetApplier {
         // 这四个是「运行环境开关」，不是「观感参数」—— 不该被预设快照带走。
         // 【runtimeSwitch 重构】跳过清单已搬进字段自身（f.runtimeSwitch），
         // 调用方不再传数组 —— 判定标准见 SettingsField.runtimeSwitch 的 javadoc。
-        com.github.yyyolo7a79.neovidecursor.settings.SettingsField.restoreSkipping(s, snap);
+        int applied = com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                .restoreSkipping(s, snap);
+        // 【H-2，2026-10-30】返回值以前被直接丢弃，于是「整条快照全坏」与「全部应用成功」
+        // 在调用方看起来完全一样：都写名字、都落盘、都打「已应用」、都返回 true。
+        // 用户看到的是「下拉说切成功了、日志说成功了，实际一个参数都没变」。
+        int total = com.github.yyyolo7a79.neovidecursor.settings.SettingsField
+                .PRESET_FIELDS.size();
+        if (applied == 0) {
+            LOG.warn("neovide-cursor: 自定义预设 " + name
+                    + " 里没有任何可应用的字段（快照可能已损坏），"
+                    + "本次不应用、不写名字、不落盘");
+            return false;
+        }
+        if (applied < total) {
+            // 【措辞必须同时覆盖两种原因】`applied` 只数「写成功了几项」，分不清
+            // 「这个键不在快照里」（旧版本存的预设，新增字段自然缺键 —— 那是
+            // snapshot/restore 文档化的兼容行为）与「这个键在、但值非法」。
+            // 只写「值非法」会把正常的向后兼容报成故障，维护者会去查不存在的问题。
+            LOG.warn("neovide-cursor: 自定义预设 " + name + " 只应用了 "
+                    + applied + "/" + total + " 项（缺失的键与非法值都保持当前值）");
+        }
         s.animCustomName = name;
         svc.persistQuietly();
         NeovideCaretManager.applyConfig();
-        LOG.info("neovide-cursor: 已应用自定义预设 " + name);
+        LOG.info("neovide-cursor: 已应用自定义预设 " + name
+                + "（" + applied + "/" + total + " 项）");
         return true;
     }
 

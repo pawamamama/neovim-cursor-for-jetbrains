@@ -57,6 +57,23 @@ public class AfterimageTrail {
 
     private final NeovideConfig config;
 
+    /** 残影存活时长的下限（秒）。低于它残影几乎立刻消失，没有拖尾感。 */
+    private static final double LIFETIME_MIN = 0.02;
+
+    /**
+     * 残影存活时长的上限（秒）。
+     *
+     * <p>再往上没有任何观感意义，却会让 {@link #record} 里的
+     * {@code (long)(lifetime * 1e9)} 顶到 {@code Long.MAX_VALUE}
+     * （double→long 是<b>饱和</b>转换，不是回绕，见 JLS 5.1.3）。
+     * 于是 {@code cutoff = nowNanos - Long.MAX_VALUE} 变成一个很大的负数，
+     * {@code history.peekLast().timeNanos < cutoff} 一次都不成立 ——
+     * <b>残影永不过期</b>，同时 {@link #alphaOf} 算出的存活比几乎为 0、
+     * 所有残影接近全不透明。最终只靠 {@link #MAX_GHOSTS} 兜住，不会无限涨，
+     * 但观感已经完全不是「残影」了。
+     */
+    private static final double LIFETIME_MAX = 10.0;
+
     /** 残影存活时长（秒）：越大拖尾越长 */
     private double lifetime = 0.15;
 
@@ -169,6 +186,13 @@ public class AfterimageTrail {
     }
 
     public void setLifetime(double lifetime) {
-        this.lifetime = Math.max(0.02, lifetime);
+        // 【M-4，2026-10-30】原来只有 Math.max(0.02, lifetime)：
+        //   · Math.max(0.02, NaN) 仍是 NaN → NaN 一路进 alphaOf → 所有残影 alpha 全 NaN；
+        //   · 没有上界 → 1e10 时 (long)(lifetime*1e9) 饱和到 Long.MAX_VALUE →
+        //     cutoff 变成大负数 → 残影永不过期、全部接近全不透明（详见 LIFETIME_MAX 的注释）。
+        if (!Double.isFinite(lifetime)) {
+            return;                     // 非法值保持原值，绝不把 NaN 放进来
+        }
+        this.lifetime = Math.min(LIFETIME_MAX, Math.max(LIFETIME_MIN, lifetime));
     }
 }

@@ -1,13 +1,25 @@
 package com.github.yyyolo7a79.neovidecursor.settings;
 
+import com.intellij.openapi.diagnostic.Logger;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 自定义预设的<b>纯函数层</b>。无状态、不碰任何单例、可独立单测。
+ * 自定义预设的<b>纯函数层</b>：不持有业务状态、不碰任何单例，可在离线探针里独立驱动
+ * （日志走平台 {@link Logger}，所以运行时需要 idea-libs 在 classpath 上 ——
+ * 与 {@code NeovideCursorSettings} / {@code SettingsField} 的既有写法一致）。
+ *
+ * <p><b>唯一的副作用是写日志</b>（M-10，2026-10-30）。{@link Logger} 属于平台而不是本类的
+ * 状态，所以「无状态」这个性质仍然成立 —— 同一份输入永远得到同一份输出。
+ *
+ * <p>为什么必须有这条日志：坏条目 / 重名条目在 {@link #parse} 里是<b>静默跳过</b>的，
+ * 而<b>下一次任何 put / remove / rename 后的 {@link #format} 都会把磁盘上的它一起抹掉</b>。
+ * 也就是说「丢一条」是一次性的、不可逆的；没有日志，用户只会看到「我的预设不见了」。
  *
  * <h2>模型（2026-10-29 重构：从「平铺列表」改成「带父链的树」）</h2>
  *
@@ -116,6 +128,117 @@ public final class CustomPresets {
     /** 父链最大步数 —— 防环上限。超过它一定是有环或数据损坏。 */
     private static final int MAX_CHAIN = 64;
 
+    // ==================== 丢弃日志（M-10，2026-10-30）====================
+
+    private static final Logger LOG = Logger.getInstance(CustomPresets.class);
+
+    /**
+     * 「已报过的丢弃组」上限。
+     *
+     * <p>为什么需要上限：{@link #parse} 不是一次性调用 —— 菜单每次重建、每次
+     * {@link #get} 都会跑一遍。同一条坏数据留在磁盘上，每次都会触发一次跳过；
+     * 不设上限就是把 idea.log 刷成一片，等于从「没有日志」变成「日志没用」。
+     * 这与 {@code CursorDiag} 的预算表是同一套思路。
+     */
+    private static final int PARSE_REPORTED_MAX = 16;
+
+    /**
+     * 单次 {@link #parse} 里逐条打印的上限。
+     *
+     * <p>与 {@link #PARSE_REPORTED_MAX} 是两道不同的闸门：
+     * 这一道防「一次解析遇到 50 条坏数据 → 一瞬间刷 50 行」，
+     * 那一道防「同一条坏数据每次解析都再报一遍」。
+     * 少任何一道，坏数据都会把 idea.log 刷成一片。
+     */
+    private static final int PARSE_WARN_LIMIT = 5;
+
+    /** 已报过的（原因 + 名字）。同一组只报一次。 */
+    private static final Set<String> PARSE_REPORTED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 已报过的「汇总」组合（{@code 坏条数/重名数}）。同一组只报一次。
+     *
+     * <p><b>为什么汇总也需要去重</b>：{@link #parse} 在<b>读路径</b>上被高频调用 ——
+     * 菜单每次弹出（{@code AnimPresetGroup.update}）、面板每次刷新（{@code canAdd}）都会跑。
+     * 只要磁盘上躺着一条坏条目，不加这道闸门就会「每弹一次菜单刷一行同样的汇总」，
+     * 正是本批要消灭的日志洪水。
+     *
+     * <p>键里带 {@code 坏条数/重名数} 而不是固定串：数量变化时值得再报一次
+     * （用户删掉一条坏的之后还剩几条，是排查时的有效信息）。
+     */
+    private static final Set<String> PARSE_SUMMARY_REPORTED = ConcurrentHashMap.newKeySet();
+
+    /** 逐条记录达到上限后只补一条汇总，用这个标志保证只补一次。 */
+    private static volatile boolean parseCapLogged;
+
+    /**
+     * 记录一次「跳过了一条」。
+     *
+     * <p><b>绝不打印快照正文</b>：快照可能很长，而且里面是用户的配置值。
+     * 只打名字、原因、条目长度 —— 足够定位是哪一条，又不会淹掉日志。
+     */
+    private static boolean reportDropped(String reason, String name, int length,
+                                         boolean allowDetail) {
+        try {
+            if (PARSE_REPORTED.size() >= PARSE_REPORTED_MAX) {
+                if (!parseCapLogged) {
+                    parseCapLogged = true;
+                    LOG.warn("neovide-cursor: 自定义预设的丢弃记录已达上限 "
+                            + PARSE_REPORTED_MAX + " 组，后续不再逐条记录");
+                }
+                return false;
+            }
+            // 【登记无条件，打印才受预算约束】
+            //
+            // 反过来做（预算用完了就不登记）会造成一个隐蔽的循环：第一次解析只登记
+            // 前 5 条，第二次解析这 5 条被去重、预算又落到第 6~10 条…… 于是同一条
+            // 坏数据会被「每弹一次菜单多报 5 条」，一共报 10 轮才停。登记了却不打印
+            // 只是少一条明细，总量由汇总那条交代，这才是「有界」的正确含义。
+            //
+            // 键用截断后的名字：否则手改 XML 塞进几 MB 的名字时，这个集合会各自
+            // 驻留整份原文（最多 16 份，进程内永不释放）。
+            String shown = cut(name, NAME_LOG_MAX);
+            if (!PARSE_REPORTED.add(reason + '\u0000' + shown)) {
+                return false;                       // 同一组已登记过
+            }
+            if (!allowDetail) {
+                return false;                       // 本次解析的逐条预算已用完（只登记不打印）
+            }
+            LOG.warn("neovide-cursor: 跳过一条" + reason + "的自定义预设（名字=" + shown
+                    + "，条目长度=" + length + "）。它会在下次保存时从磁盘上永久消失");
+            return true;
+        } catch (Throwable ignored) {
+            // parse 的契约是「永不抛异常」（见类注释），日志失败不得反过来破坏它
+            return false;
+        }
+    }
+
+    /** 从一条坏条目里尽力取出名字（第一个名称分隔符之前的部分）。取不到返回 {@code (取不到)}。 */
+    private static String bestEffortName(String raw) {
+        int sep = raw.indexOf(LEGACY_NAME_SEP);
+        if (sep <= 0) {
+            sep = raw.indexOf(NAME_SEP);
+        }
+        return sep <= 0 ? "(取不到)" : raw.substring(0, sep);
+    }
+
+    /** 日志里字符串的最大展示长度。按 UTF-16 code unit 计，与项目里 charsMoved 的口径一致。 */
+    private static final int NAME_LOG_MAX = 24;
+
+    /**
+     * 把字符串截断到 {@code max} 个 char，超出时补上原长。
+     *
+     * <p>可能切在代理对中间（得到一个未配对代理）。后果<b>仅限日志显示</b>：
+     * 平台的 UTF-8 编码器会把它替换成 {@code ?}，不会抛异常。为这点收益去用
+     * {@code offsetByCodePoints} 不划算，故只在此说明。
+     */
+    private static String cut(String s, int max) {
+        if (s == null) {
+            return "(null)";
+        }
+        return s.length() <= max ? s : s.substring(0, max) + "…(共 " + s.length() + " 字符)";
+    }
+
     private CustomPresets() {
     }
 
@@ -219,15 +342,47 @@ public final class CustomPresets {
         // 全局判定会让另一半被吞掉（实测 2 条只读出 1 条）。
         // 正确做法：【逐条】切分，两种条目分隔符都认。
         List<Entry> out = new ArrayList<>();
+        int bad = 0;
+        int dup = 0;
+        int detailBudget = PARSE_WARN_LIMIT;
         for (String raw : splitOnAny(all, ENTRY_SEP, LEGACY_ENTRY_SEP)) {
             if (raw == null || raw.isEmpty()) {
-                continue;
+                continue;                       // 相邻分隔符产生的空段，不是坏数据
             }
             Entry e = parseOne(raw);
-            if (e == null || find(out, e.name) != null) {
-                continue;                       // 坏条目 / 重名 → 忽略后者
+            if (e == null) {
+                bad++;
+                if (reportDropped("坏", bestEffortName(raw), raw.length(), detailBudget > 0)) {
+                    detailBudget--;
+                }
+                continue;
+            }
+            if (find(out, e.name) != null) {
+                dup++;
+                if (reportDropped("重名", e.name, raw.length(), detailBudget > 0)) {
+                    detailBudget--;
+                }
+                continue;                       // 重名 → 保留先出现的那个
             }
             out.add(e);
+        }
+        if (bad + dup > 0) {
+            // 逐条上限之外必须有一条「总量」：坏表很大时用户只看得到前几条，
+            // 却不知道一共丢了多少。这一条就是那个总数。
+            //
+            // 但它同样必须去重 —— parse 在读路径上会被菜单/面板反复调用，
+            // 磁盘上只要留着一条坏数据，不去重就是「每弹一次菜单刷一行」。
+            try {
+                String key = bad + "/" + dup;
+                if (PARSE_SUMMARY_REPORTED.size() < PARSE_REPORTED_MAX
+                        && PARSE_SUMMARY_REPORTED.add(key)) {
+                    LOG.warn("neovide-cursor: 自定义预设表解析完成：共跳过 " + bad
+                            + " 条坏条目、" + dup + " 条重名条目（当前有效 "
+                            + out.size() + " 条）");
+                }
+            } catch (Throwable ignored) {
+                // 同上：日志不得让 parse 抛异常
+            }
         }
         return out;
     }
@@ -281,6 +436,8 @@ public final class CustomPresets {
             return "";
         }
         StringBuilder sb = new StringBuilder();
+        int in = entries.size();
+        int written = 0;
         for (Entry e : entries) {
             if (e == null || e.name == null || e.name.isEmpty() || e.snapshot == null
                     || e.snapshot.isEmpty()) {
@@ -309,6 +466,18 @@ public final class CustomPresets {
                 sb.append(e.parent).append(PARENT_SEP);
             }
             sb.append(e.snapshot);
+            written++;
+        }
+        if (written < in) {
+            // 【M-10，2026-10-30】这一条是「不可逆」的直接证据：parse 阶段只是跳过，
+            // 而这里一旦少写，磁盘上那条就永久没了。所以必须留痕。
+            // 注：上面那条 java.util.logging 是既有的 L-7 债务，属第 3 批，本次不动它。
+            try {
+                LOG.warn("neovide-cursor: 序列化自定义预设时丢弃 " + (in - written)
+                        + " 条（名称非法或快照为空），这些条目会从磁盘上永久消失");
+            } catch (Throwable ignored) {
+                // format 也被工具链直接调用，日志失败不得让它抛异常
+            }
         }
         return sb.toString();
     }

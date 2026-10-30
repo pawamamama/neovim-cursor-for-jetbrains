@@ -44,6 +44,15 @@ public final class V0Env {
     public static FakeBus bus;
     public static FakeEditorFactory editors;
 
+    /**
+     * 探针注入：{@code > 0} 时下一次「取 PropertiesComponent 服务」抛异常，计数递减。
+     *
+     * <p><b>默认 0，只有 {@code VAuditBatch1} 会设它。</b>模拟审计 L-5 的场景：
+     * {@code ApplicationManager.getApplication().getService(PropertiesComponent.class)}
+     * 在平台早期初始化时抛异常。
+     */
+    public static int throwOnPropertiesLookup;
+
     public static final ExperimentalUIStub EXPERIMENTAL_UI = new ExperimentalUIStub();
 
     private V0Env() {
@@ -169,6 +178,10 @@ public final class V0Env {
             return svc;
         }
         if (c == PropertiesComponent.class) {
+            if (throwOnPropertiesLookup > 0) {
+                throwOnPropertiesLookup--;
+                throw new IllegalStateException("V0Env: 注入的 PropertiesComponent 获取失败");
+            }
             return props;
         }
         if (c == com.intellij.ui.ExperimentalUI.class) {
@@ -253,9 +266,29 @@ public final class V0Env {
     }
 
     public static final class FakeProps extends PropertiesComponent {
+
+        /**
+         * 探针注入：让<b>下一次</b> {@code isValueSet} 抛异常，用掉后自动复位。
+         *
+         * <p><b>默认 false，只有 {@code VAuditBatch1} 会打开它。</b>它模拟审计 H-3
+         * 描述的场景：「升级后首次启动、平台早期初始化 / 服务竞态导致读旧键抛异常」。
+         *
+         * <p>为什么是「一次性」而不是「一直抛」：H-3 要证明的是<b>一次瞬时异常</b>
+         * 会不会造成不可逆丢配置。若让它一直抛，后面的 {@code deleteOldKeysIfPresent}
+         * 也会抛，旧键无论如何都删不掉，探针就测不出「修之前键确实被删了」这个对照。
+         */
+        public static boolean throwOnceOnIsValueSet;
+
         final Map<String, String> map = new HashMap<>();
         @Override public void unsetValue(String n) { map.remove(n); }
-        @Override public boolean isValueSet(String n) { return map.containsKey(n); }
+
+        @Override public boolean isValueSet(String n) {
+            if (throwOnceOnIsValueSet) {
+                throwOnceOnIsValueSet = false;
+                throw new IllegalStateException("V0Env.FakeProps: 注入的读旧键失败");
+            }
+            return map.containsKey(n);
+        }
         @Override public String getValue(String n) { return map.get(n); }
         @Override public void setValue(String n, String v) { map.put(n, v); }
         @Override public void setValue(String n, String v, String d) { map.put(n, v); }

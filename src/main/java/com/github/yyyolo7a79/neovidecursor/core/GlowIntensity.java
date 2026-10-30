@@ -56,6 +56,17 @@ public final class GlowIntensity {
      * @return 0 = 完全不画辉光，1 = 满强度
      */
     public static float strengthFor(double offset) {
+        // 【M-4，2026-10-30】非有限偏移按「静止」处理。
+        //
+        // NaN 会让下面两个比较都为 false，于是原样返回 NaN；调用方的判据是
+        // `strength > 0f`，而 `NaN > 0f` 恒为 false —— 辉光被当成「静止」永不亮，
+        // 且没有任何日志。这类「看起来像没开辉光」的问题最难查。
+        //
+        // 语义边界：+Infinity 以前会走到 `s > 1f` 返回 1f（满强度），现在返回 0f。
+        // 这是有意的保守化 —— 非有限偏移本身就是非法输入，误亮比不亮更容易掩盖问题。
+        if (!Double.isFinite(offset)) {
+            return 0f;
+        }
         float s = (float) ((offset - OFFSET_START) / (OFFSET_END - OFFSET_START));
         if (s < 0f) {
             return 0f;

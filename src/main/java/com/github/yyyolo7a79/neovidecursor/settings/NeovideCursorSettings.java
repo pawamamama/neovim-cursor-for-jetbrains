@@ -283,6 +283,10 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         }
 
         boolean changed = false;
+        // 【H-3，2026-10-30】读旧键失败时置位。为什么要单独一个标志而不是在 catch 里直接
+        // return：后面还有「落盘 → 删键」两段共用逻辑，早退判定必须发生在它们之前，
+        // 而 catch 位于更里层的 try 里。
+        boolean readFailed = false;
         PropertiesComponent pc = tryGetPropertiesComponent();
         if (pc != null) {
             try {
@@ -311,11 +315,33 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                             + " 不存在，overlayFadeOut 取默认 " + state.overlayFadeOut);
                 }
             } catch (Throwable t) {
-                // 读旧键失败：不阻塞启动，仍把版本号往前推（旧键按「不存在」处理）
-                LOG.warn("neovide-cursor: 读取旧键失败，按「旧键不存在」处理", t);
+                // 【H-3，2026-10-30 修】原实现只打一行 warn，然后**照常**推进版本号并删旧键 ——
+                // 一次瞬时读异常就让用户「常驻刷新 = 关」永久变回默认 true，且此后分支 B
+                // 只删不读，永远无法恢复。这与同方法 FAILED 分支「绝不半途而废」的承诺相反。
+                // 现在：读不到值 = 没成功 → 标记未完成，下面早退，下次启动重试。
+                readFailed = true;
+                LOG.warn("neovide-cursor: 读取旧键失败，本次迁移未完成"
+                        + "（stateVersion 保持 0、旧键保留、不落盘、下次启动重试）", t);
             }
         } else {
+            // 【为什么这里**不**算「迁移未完成」】（2026-10-30 决策点，别顺手改成 readFailed）
+            // 「服务拿不到」与「读键抛异常」是两件事：
+            //   · 服务拿不到 ⇒ 根本没有旧键可读，检查也检查不了；干净安装走的正是这条路径
+            //     （VerifyPersistence 的 P2b 断言的就是「无 Application → 版本 0」）。
+            //     deleteOldKeysIfPresent 在这条路径上本来也什么都不做（同样拿不到服务）。
+            //   · 若把它也判为失败，任何一次服务竞态都会把迁移永久卡在未完成态，
+            //     而「下次启动重试」永远重试不到一个不存在的服务。
             LOG.info("neovide-cursor: PropertiesComponent 不可用，跳过旧键迁移（按旧键不存在处理）");
+        }
+
+        if (readFailed) {
+            // 与下面的 FAILED 分支同路：没读到值 = 没成功。
+            // 特别是【不能删旧键】—— 删键不可逆，而这次我们连「旧键是否存在」都不知道。
+            // 也不落盘：把一份「旧键还没搬过来」的 state 写下去，等于用默认值覆盖用户配置。
+            state.stateVersion = 0;
+            LOG.info("neovide-cursor: 旧键迁移中止，changed=" + changed
+                    + "，stateVersion=0，未落盘、未删键");
+            return;
         }
 
         state.stateVersion = STATE_VERSION_MIGRATED;
@@ -374,6 +400,13 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
             }
             return ApplicationManager.getApplication().getService(PropertiesComponent.class);
         } catch (Throwable t) {
+            // 【L-5，2026-10-30】原来是 `catch (Throwable) { return null; }` —— 本批唯一一个
+            // 「既不记日志也不走 CursorDiag」的 Throwable。上层把 null 解释成「服务不可用 /
+            // 没有旧键」，与真正异常完全无法区分，而 H-3 的不可逆删键就发生在这之后。
+            //
+            // 为什么不用 CursorDiag.swallowed：它在 ui 包里，settings→ui 的包环（M-8）
+            // 正在待修，不该在这一批加深它。
+            LOG.warn("neovide-cursor: 获取 PropertiesComponent 失败，按「服务不可用」处理", t);
             return null;
         }
     }
@@ -651,6 +684,14 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      * @return 三态结果，见 {@link PersistResult}。
      *         <b>只有 {@link PersistResult#CONFIRMED} 才能删旧键</b> —— 这是
      *         「旧键只在新 state 确认落盘后才删」的机械保证。
+     *
+     *         <p><b>{@code CONFIRMED} 的确切含义（L-6，2026-10-30 补）</b>：
+     *         它只表示 {@code saveSettings()} 返回了且<b>未抛异常</b>，
+     *         <b>不代表磁盘已经被写入</b> —— 平台内部保存失败时不抛异常。
+     *         所以它是「当前能拿到的最强证据」，不是「保证」。
+     *         由此还有一个局限必须写明：若平台静默失败，旧键会被删、新 state 没落盘，
+     *         迁移值两端都没有。更强的证据（删键前把磁盘文件再读回来往返一次）
+     *         不在本批范围内。
      */
     public PersistResult persistQuietly() {
         try {
@@ -683,7 +724,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
                 return PersistResult.FAILED;
             }
             if (app.isDispatchThread()) {
-                // 在 EDT 上：同步刷盘，能确认成功/失败
+                // 在 EDT 上：同步刷盘。注意 saveSettings() 是 void —— 这里能确认的只有
+                // 「没有抛异常」，不代表磁盘真的写进去了（见方法 javadoc 的 L-6 说明）。
                 app.saveSettings();
                 return PersistResult.CONFIRMED;
             }
@@ -727,7 +769,13 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      * 一个 boolean 装不下这两种语义，这正是 R-03 那个 bug 的来源。
      */
     public enum PersistResult {
-        /** 已在本线程确认写入磁盘 —— 唯一允许删旧键的状态。 */
+        /**
+         * 已在本线程确认写入磁盘 —— 唯一允许删旧键的状态。
+         *
+         * <p><b>局限（L-6，2026-10-30）</b>：见 {@link #persistQuietly()} ——
+         * 本状态只证明平台<b>没有抛异常</b>，不证明磁盘真的写入了。若平台静默失败，
+         * 旧键会被删而新 state 未落盘（两端都丢）。更强的证据留给后续批次。
+         */
         CONFIRMED,
         /** 已排队到 EDT 待刷盘，尚未确认 —— 不删旧键，但版本号可前进。 */
         DEFERRED,
