@@ -579,6 +579,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 预览窗（跨行移动） */
     private AnimationPreview crossPreview;
 
+    /**
+     * 预览窗（辉光 / 淡出）—— 新增，服务于标签页「辉光」。
+     *
+     * <p><b>为什么需要第三个预览</b>：用户建这个标签页的唯一理由是
+     * 「调辉光时看不到预览，等于盲调」。辉光层数 / 峰值 / 锐度 / 淡出四项
+     * 全是纯视觉参数，没有预览就只能靠猜。
+     *
+     * <p><b>为什么用 {@link AnimationPreview#inline} 而不是跨行模式</b>：
+     * 辉光与淡出在「打字 → 停顿 → 逐字退格」这个节奏里都看得见 ——
+     * 打字时光标本体带着辉光移动，停顿 800ms 时能看到淡出把辉光熄灭。
+     * 跨行模式（CROSS）只跳一次、节奏慢，淡出反而看不出来。
+     */
+    private AnimationPreview glowPreview;
+
     /** 预览专用配置副本（与 pending 同步，不碰全局 CONFIG） */
     private NeovideConfig previewConfig;
 
@@ -729,6 +743,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return crossPreview;
     }
 
+    /** 辉光预览：懒创建（与另外两个共用同一份 previewConfig，参数由 refreshPreviews 推） */
+    private javax.swing.JComponent glowPreview() {
+        if (previewConfig == null) {
+            previewConfig = new NeovideConfig();
+        }
+        if (glowPreview == null) {
+            glowPreview = AnimationPreview.inline(previewConfig);
+        }
+        return glowPreview;
+    }
+
     /**
      * 把 pending 的动画参数同步进预览配置 —— 预览窗下一帧就会用新参数。
      *
@@ -764,21 +789,33 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 所以「实时」只到这里为止。
      */
     private void syncPreviewCursorSize() {
-        if (inlinePreview != null) {
-            inlinePreview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
-            // RGB 是持久化配置（只在 State 里，NeovideConfig 没这个字段），
-            // 所以必须由面板显式推送 —— 原来只推给了真实编辑器，预览收不到。
-            inlinePreview.setRgbGradient(pending.rgbGradient);
-            // 【0.9.89】彩虹是**另一个字段**，也要推 ——
-            // 否则选「彩虹（动态）」时预览完全不变（用户报「彩虹没有到预览」）。
-            // 判据与 CaretAnimator.resolveRgbWash 一致：颜色匹配到的预设带 rgbWash 标记。
-            inlinePreview.setCursorRgbWash(isRainbowSelected());
+        pushStyleTo(inlinePreview);
+        pushStyleTo(crossPreview);
+        pushStyleTo(glowPreview);
+    }
+
+    /**
+     * 把「光标尺寸 / 渐变 / 彩虹」三项推给一个预览窗。
+     *
+     * <p><b>为什么抽成一个方法</b>：加第三个预览窗时，若沿用原来「每个预览各写一段」
+     * 的写法，同一组三项调用要在三处复制。将来加第四个预览就会漏推其中一项，
+     * 而「漏推」的症状正是本标签页要修的同类问题 —— 预览不跟随、用户盲调。
+     * 现在推送点只有这一处，加预览只需在 {@link #syncPreviewCursorSize()} 里加一行。
+     *
+     * <p>传 {@code null} 直接返回：三个预览都是懒创建，没建过的那个就是 null。
+     */
+    private void pushStyleTo(AnimationPreview preview) {
+        if (preview == null) {
+            return;
         }
-        if (crossPreview != null) {
-            crossPreview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
-            crossPreview.setRgbGradient(pending.rgbGradient);
-            crossPreview.setCursorRgbWash(isRainbowSelected());
-        }
+        preview.setUserCursorSize(pending.cursorWidthPx, pending.cursorHeightRatio);
+        // RGB 是持久化配置（只在 State 里，NeovideConfig 没这个字段），
+        // 所以必须由面板显式推送 —— 原来只推给了真实编辑器，预览收不到。
+        preview.setRgbGradient(pending.rgbGradient);
+        // 【0.9.89】彩虹是**另一个字段**，也要推 ——
+        // 否则选「彩虹（动态）」时预览完全不变（用户报「彩虹没有到预览」）。
+        // 判据与 CaretAnimator.resolveRgbWash 一致：颜色匹配到的预设带 rgbWash 标记。
+        preview.setCursorRgbWash(isRainbowSelected());
     }
 
     /**
@@ -831,11 +868,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         previewConfig.overlayFadeOut = pending.overlayFadeOut;
         previewConfig.cursorDisappearDelay = pending.cursorDisappearDelay;
         previewConfig.cursorFadeOutDuration = pending.cursorFadeOutDuration;
-        if (inlinePreview != null) {
-            inlinePreview.onConfigChanged();
-        }
-        if (crossPreview != null) {
-            crossPreview.onConfigChanged();
+        // 三个预览窗共用同一份 previewConfig，参数已在上面全部写入 ——
+        // 这里只要逐个通知即可。用数组遍历而不是三段 if：
+        // 加第四个预览时只改这一行，不会出现「新预览忘了通知」的漏推。
+        for (AnimationPreview preview : new AnimationPreview[]{inlinePreview, crossPreview, glowPreview}) {
+            if (preview != null) {
+                preview.onConfigChanged();
+            }
         }
     }
 
@@ -946,12 +985,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            // 【0.9.105 拆分】辉光组拆成两半：「辉光颜色」归标签 2，
-            // 「启用辉光 + 峰值 + 层数 + 锐度」留在这里（标签 5）。
-            // 淡出与实验性（拖尾渲染模式）也是「不常调的东西」，同放标签 5。
-            DialogPanel tabSpecial = BuilderKt.panel(p -> {
+            // 【2026-10-30：拆出独立的「辉光」页（标签 5）】
+            //
+            // 用户反馈：「调辉光时看不到预览，等于盲调」。
+            // 原来辉光组 / 淡出组和「实验性」挤在同一个「特殊」页，页内没有预览窗，
+            // 拖动层数 / 峰值 / 锐度 / 淡出四项时看不到任何反馈。
+            //
+            // 现在辉光组 + 淡出组搬到独立标签页，并在**页首**放一个预览窗：
+            // 调这四个参数时，预览窗里的辉光当场变化（参数由 refreshPreviews 推送）。
+            //
+            // 预览窗放在组外而不是组内第一行 —— 与标签 3 / 标签 4 的做法一致：
+            // 它属于整页的「结果反馈」，不属于某一个参数组。
+            DialogPanel tabGlow = BuilderKt.panel(p -> {
+                p.row("", row -> {
+                    row.topGap(TopGap.MEDIUM);
+                    row.cell(glowPreview());
+                    return kotlin.Unit.INSTANCE;
+                });
                 buildGlowGroup(p);
                 buildFadeGroup(p);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 【2026-10-30】「特殊」页现在只剩「实验性（官方不建议使用）」折叠组。
+            // 里面的渲染模式下拉不变，只是它所在的页不再包含辉光 / 淡出。
+            DialogPanel tabSpecial = BuilderKt.panel(p -> {
                 buildExperimentalGroup(p);
                 return kotlin.Unit.INSTANCE;
             });
@@ -967,6 +1025,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             tabs.addTab("颜色", tabColor);
             tabs.addTab("光标行手感", tabCursorLine);
             tabs.addTab("列手感", tabCrossLine);
+            tabs.addTab("辉光", tabGlow);
             tabs.addTab("特殊", tabSpecial);
             tabs.addTab("调试", tabDiag);
 
@@ -986,6 +1045,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             outer.registerIntegratedPanel(tabColor);
             outer.registerIntegratedPanel(tabCursorLine);
             outer.registerIntegratedPanel(tabCrossLine);
+            outer.registerIntegratedPanel(tabGlow);
             outer.registerIntegratedPanel(tabSpecial);
             outer.registerIntegratedPanel(tabDiag);
             return outer;

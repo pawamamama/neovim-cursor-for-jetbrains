@@ -689,16 +689,26 @@ docs/archive/  （整目录）
 | 设置面板 | `ui/settings/NeovideCursorConfigurable.java` | `createPanel()` + 各 `build*Group()` |
 | 预览 | `ui/settings/AnimationPreview.java` | `assignRanks()` / `onConfigChanged()` |
 
-## 面板结构（0.9.105 起：6 个标签页）
+## 面板结构（2026-10-30 起：7 个标签页）
 
 ```
 标签1 总开关    版本行 → 预设行 → 组「总开关」
 标签2 颜色      组「颜色」= 拖尾颜色 / 拖尾不透明度 / 辉光颜色 / 光标渐变
 标签3 光标行手感  组「单行输入输出（打字 / 退格）」+ 组「光标（尺寸 / 颜色效果）」
 标签4 列手感    组「多行缎带（换行 / 跳转）」
-标签5 特殊      组「辉光」+ 组「淡出」+ 折叠组「实验性」
-标签6 调试      折叠组「高级（诊断）」
+标签5 辉光      预览窗 → 组「辉光」+ 组「淡出」
+标签6 特殊      折叠组「实验性（官方不建议使用）」
+标签7 调试      折叠组「高级（诊断）」
 ```
+
+> **为什么「辉光」要独立成页（2026-10-30）**：辉光层数 / 峰值 / 锐度 / 淡出四项
+> 全是纯视觉参数。它们原来和「实验性」挤在同一页，页内没有预览窗 ——
+> 用户调这四项时看不到任何反馈，属于**盲调**。独立成页并在页首放预览窗后，
+> 拖滑块当场能看到辉光变化。
+> 实现上用**第三个 `AnimationPreview` 实例**（`glowPreview`，懒创建），
+> 与标签 3 / 标签 4 的两个预览无关，但共用同一份 `previewConfig`；
+> 参数推送与通知分别收在 `pushStyleTo(...)` 和 `refreshPreviews()` 的遍历里，
+> 加第四个预览只需在这两处各加一行。
 
 **实现方式**：每个标签页是一个**独立 `DialogPanel`**，塞进 `JBTabbedPane`，
 再用 `outer.registerIntegratedPanel(...)` 逐个登记。平台自己的 `apply()` /
@@ -714,8 +724,9 @@ docs/archive/  （整目录）
 > 而 T-5 / T-6 会当场红。**T-8 是补出来的**：把标签2 与标签3 的组件对调、
 > 标题跟着组件走时，其余 7 条全绿（页都在、都登记、都不空），只有 T-8 抓到
 > 「颜色页里全是滑块」。
-> 加第 7 个标签页时：`tabs.addTab` 与 `registerIntegratedPanel` 成对写，
-> 顺序与构成归 `VTabPages` 守。
+> 加第 8 个标签页时：`tabs.addTab` 与 `registerIntegratedPanel` 成对写，
+> 顺序与构成归 `VTabPages` 守（`EXPECTED_TITLES` / `EXPECTED_COMPOSITION`
+> 两张表要同步改，否则 T-2 / T-3 / T-8 当场红 —— 那是**契约变更，不是缺陷**）。
 
 对应构建方法：`buildVersionRow` / `buildPresetRows` / `buildMasterGroup` /
 `buildColorGroup` / `buildInlineGroup` / `buildCursorSizeGroup` / `buildCrossGroup` /

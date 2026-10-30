@@ -10,7 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * V-TAB-PAGES：6 个标签页是否都<b>登记为外层面板的集成面板</b>。
+ * V-TAB-PAGES：7 个标签页是否都<b>登记为外层面板的集成面板</b>。
  *
  * <p><b>这个探针是为一个已实测的静默失效缺口写的（2026-10-29）。</b>
  * 设置面板分标签后，每个标签页是一个独立 {@code DialogPanel}，靠
@@ -28,7 +28,8 @@ import java.util.List;
  * <p><b>为什么必须单独写一条探针</b>：变异测试实证「别的探针抓不到」。
  * 2026-10-29 实测三种变异：
  * <ul>
- *   <li>删掉 {@code registerIntegratedPanel(tabDiag)}（标签6「调试」）→ 全量门禁
+ *   <li>删掉 {@code registerIntegratedPanel(tabDiag)}（当时编号是标签6「调试」；
+ *       2026-10-30 拆出「辉光」页后它为标签7，历史记录不改）→ 全量门禁
  *       <b>0 条红</b>。因为没有任何探针通过面板去改「诊断日志」/「性能诊断」，
  *       那页登记漏掉也不会被任何行为断言撞上；</li>
  *   <li>删掉 {@code registerIntegratedPanel(tabMaster)} → VDefects 1 条 + VerifyPanel 3 条红
@@ -51,7 +52,7 @@ public final class VTabPages {
 
     /** 期望的标签名与顺序（必须与 createPanel() 里 tabs.addTab 的先后一致）。 */
     private static final String[] EXPECTED_TITLES = {
-            "总开关", "颜色", "光标行手感", "列手感", "特殊", "调试"
+            "总开关", "颜色", "光标行手感", "列手感", "辉光", "特殊", "调试"
     };
 
     /**
@@ -72,12 +73,15 @@ public final class VTabPages {
             {1, 1, 0, 2},   // 颜色：拖尾不透明度 + 光标渐变 + 两把色板
             {6, 0, 0, 0},   // 光标行手感
             {2, 0, 0, 0},   // 列手感
-            {5, 2, 1, 0},   // 特殊：辉光 + 淡出 + 拖尾渲染模式
+            {5, 2, 0, 0},   // 辉光：辉光组 3 滑块 + 淡出组 2 滑块 + 2 复选框
+                            //      （页首还有一个预览窗，但它不是标准控件，不进这张表）
+            {0, 0, 1, 0},   // 特殊：只剩拖尾渲染模式下拉
             {0, 2, 0, 0},   // 调试
     };
 
     public static void main(String[] args) {
-        System.out.println("=== V-TAB-PAGES：6 个标签页是否都已登记为集成面板 ===");
+        System.out.println("=== V-TAB-PAGES：" + EXPECTED_TITLES.length
+                + " 个标签页是否都已登记为集成面板 ===");
         V0Env.install();
 
         NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
@@ -114,7 +118,7 @@ public final class VTabPages {
                         .append("」实际「").append(title).append("」 ");
             }
         }
-        check("T-3 标签名与顺序 = 总开关/颜色/光标行手感/列手感/特殊/调试",
+        check("T-3 标签名与顺序 = 总开关/颜色/光标行手感/列手感/辉光/特殊/调试",
                 tabs.getTabCount() == EXPECTED_TITLES.length && wrong.length() == 0,
                 wrong.length() == 0 ? actual.toString() : wrong.toString());
 
