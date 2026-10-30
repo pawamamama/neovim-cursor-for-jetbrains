@@ -31,7 +31,7 @@
 |---|---|---|
 | 上午 1h | 原型验证 TabbedPane | 给出「能 / 不能」的结论 |
 | 上午 1h | 控件指纹工具 + 存基线 | `baseline.txt` 落盘 |
-| 下午 4~6h | 把 9 个 group 分到 6 个标签页 | 6 个标签都能打开、都有控件 |
+| 下午 4~6h | 把 9 个 group 分到 7 个标签页 | 7 个标签都能打开、都有控件 |
 | 傍晚 1h | 更新 `VUi.KEYS` + 跑门禁 | ALL PASS，或不新增红 |
 
 **六个标签页**（对应 `PROJECT-DECISIONS.md` P5）：
@@ -58,7 +58,7 @@ SpringTrail.assignRanks() 末尾 →  按 config.leadingSnap 给 order[2]/order[
 
 | 时段 | 事项 |
 |---|---|
-| 上午 | 用户实机确认三件事：6 个标签能用 / 半边拖尾开关有效 / 彩虹辉光还是白的 |
+| 上午 | 用户实机确认三件事：7 个标签能用 / 半边拖尾开关有效 / 彩虹辉光还是白的 |
 | 下午 | 修实机发现的问题（预留缓冲） |
 | 傍晚 | 文档 + 版本号 + `git tag` + 推送 |
 
@@ -85,7 +85,7 @@ SpringTrail.assignRanks() 末尾 →  按 config.leadingSnap 给 order[2]/order[
 
 - [ ] TabbedPane 原型给出明确结论
 - [ ] `baseline.txt` 已存（14 滑块 key 顺序 + 8 复选框文案 + 4 下拉文案 + 14 组量程）
-- [ ] 6 个标签页都能打开、都能看到控件
+- [ ] 7 个标签页都能打开、都能看到控件
 - [ ] 门禁 `V-PROBES RESULT: ALL PASS`
 - [ ] D0 零 diff
 
