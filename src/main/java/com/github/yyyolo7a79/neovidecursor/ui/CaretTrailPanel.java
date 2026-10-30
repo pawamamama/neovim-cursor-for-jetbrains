@@ -449,6 +449,24 @@ public class CaretTrailPanel extends JComponent {
         this.glowFade = fade < 0f ? 0f : (fade > 1f ? 1f : fade);
     }
 
+    /**
+     * 当前辉光淡出系数（供探针断言）。
+     *
+     * <p><b>为什么需要它</b>：2026-10-29 之前预览窗从不调用 {@link #setGlowFade}，
+     * 于是本字段在预览里恒为初值 1 —— 预览的辉光永不熄灭，而真实编辑器会熄灭。
+     * 这个差异没有任何探针盯着（{@code VPreviewParity} 当时只校验 trailFactors
+     * 与 cursorRgbWash），所以一直没人发现。加了读取口之后，探针才能断言
+     * 「预览也收到了淡出系数」。
+     */
+    public float glowFadeForProbe() {
+        return glowFade;
+    }
+
+    /** 当前辉光外扩半径（与 {@link #getGlowWidth()} 同一个值，命名与 *ForProbe 家族统一）。 */
+    public float glowWidthForProbe() {
+        return glowWidth;
+    }
+
     public CaretTrailPanel(@NotNull NeovideConfig config) {
         this.config = config;
         setOpaque(false);

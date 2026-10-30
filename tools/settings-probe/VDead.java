@@ -14,9 +14,12 @@ import java.util.Map;
 /**
  * V-DEAD —— refresh-auditor（t3）：证明 bindCheckTracked 里的 afterPendingEdited 是<b>不可达死代码</b>。
  *
- * <p>推理：复选框的 setter 只由 DialogPanel 的 applyCallbacks 触发（点击瞬间不写 pending，
- * 见 {@code VReset} 的 R-9）；而 super.apply() 的唯一调用点被 {@code syncingControls = true}
- * 包住，bindCheckTracked 的守卫是 {@code if (!syncingControls)}。
+ * <p>推理：复选框的 <b>{@code MutableProperty.set()} 只由 DialogPanel 的 applyCallbacks 触发</b>
+ * —— 注意 2026-10-29 起「点击瞬间就会写 pending」，但走的是 {@code bindCheck} 里新挂的
+ * ActionListener（它直接调 setter 闭包），<b>不是</b> property 的 set()。
+ * 所以本条推理的前提不变；变化的只是「pending 什么时候变」，见 {@code VReset} 的 R-9。
+ * 而 super.apply() 的唯一调用点被 {@code syncingControls = true} 包住，
+ * bindCheckTracked 的守卫是 {@code if (!syncingControls)}。
  *
  * <p>本探针<b>不靠读代码下结论</b>：把 applyCallbacks 套一层包装，在每条回调被调用的瞬间
  * 采样 {@code syncingForProbe()}。如果每次采样都是 true，那守卫永远为假，包装必为死代码。

@@ -853,3 +853,182 @@ CaretAnimator.refreshTarget → CaretImpl.getOffset
 
 本次修复时用户机器上存的是「暖沙」（`colorPresetBase=4`），不受影响；
 按纪律四-K（只有你一个用户，不为不存在的老用户写迁移代码），没有加迁移逻辑。
+
+---
+
+## BUG-012 开辉光后预览里「辉光很大、像只有一层、拖参数没反应」，关掉设置再打开才好（**已修复，2026-10-29 用户报**）
+
+**用户报**（原话，未改写）：
+
+> 「第一次从个人自定义预设（从平滑派生的）开辉光，动画预览窗口光标辉光很大」
+> 「滑块参数是 8 层看起来是一层在动画预览里面，而且很大，拉动参数没用，
+>   只有关闭设置回来才好」
+
+### 拆成三个可验证的点
+
+| # | 现象 | 实际是什么 |
+|---|---|---|
+| a | 滑块显示 8 层，预览里像 1 层 | **算术结果**，不是分层失效（见下） |
+| b | 辉光「很大」 | 半径公式两边相同，**窗口尺寸**差 10 倍（见下） |
+| c | 拖参数没反应、关掉再打开才好 | **复选框根本不写 `pending`**（真 bug，见下） |
+
+### 根因（三处，按严重度）
+
+**① CRITICAL —— 复选框点击时连 `pending` 都不写。**
+
+`bindCheck` 用的是 DSL 的 `ButtonKt.bindSelected(row.checkBox(""), MutableProperty)`。
+实测（`VPreviewParity` 8/9 条 + `VReset` R-9）：那个 `MutableProperty.set()`
+**只在 `DialogPanel.apply()` 时被调用**，用户点一下复选框时不触发。
+
+于是同一张面板上两种控件两种语义：
+
+```
+滑块   拖动 → ChangeListener → 立刻写 pending            （实时）
+复选框 勾选 → 只改 Swing 状态，pending 纹丝不动           （要等「应用」）
+```
+
+后果正是用户说的：勾「启用辉光」后预览毫无反应（预览读 pending → previewConfig），
+要等点应用甚至关掉设置页再打开。`shadowOn` 联动属性同样不跟，三个辉光滑块该置灰时不置灰。
+
+**② HIGH —— 预览的辉光永不熄灭，且亮度曲线和生产是两条。**
+
+- `AnimationPreview.step()` 原来只做 `panel.setGlowStrength(min(1, maxOffset / 8))`；
+- 生产是 `(offset - 0.5) / 2`（`GlowIntensity.OFFSET_START/END`）——**两条不同曲线**：
+  预览要偏移 8px 才满强度，生产 2.5px 就满了；
+- 预览**从不调用** `panel.setGlowFade(...)`，所以 `glowFade` 恒为初值 1 ——
+  预览辉光永远满强度，真实编辑器里会熄灭；
+- `refreshPreviews()` 的 7 个推送项里也没有 `overlayFadeOut / cursorDisappearDelay /
+  cursorFadeOutDuration`，淡出两个滑块在预览里**从来没有作用**。
+
+**③ MEDIUM —— 0.9.105 分标签把预览与辉光控件拆到了不同页。**
+
+预览在标签 3（光标行手感）/ 4（列手感），辉光控件在标签 5（特殊）。
+**拖辉光滑块时预览窗根本不在屏幕上**，所以「盯着预览拖滑块」这个动作
+在 0.9.105 之后物理上做不到。
+
+### a / b 两个现象是算术，不是 bug
+
+用户机器实测参数：`shadowBlurFactor=0.6`、`glowOpacity=0.3`、`glowLayers` 未落盘（默认 8）、
+`cursorHeightRatio=0.8`。预览窗 520×110、字号上限 28pt、行距 1.5：
+
+```
+lineH     = 28 × 1.5   = 42
+cursorH   = 42 × 0.8   = 33.6
+glowWidth = 0.6 × 33.6 = 20.16 px          ← 半径
+每层步进  = 20.16 / 8  = 2.52 px
+每层 alpha= 1-(1-0.3)^(1/8) = 4.4%  (11/255)
+```
+
+**「像一层」**：8 层铺在 20px 上，每层 2.5px、只有 4.4% 不透明度 ——
+最外几层的累计不透明度是 4/8/12/16%，在 `#1E1F22` 上读不出分层，
+只剩最里那团 ≈30% 的雾。把层数从 8 拖到 12，步进只从 2.52px 变 1.68px ——
+**「拉动参数没用」这一半也是算术**。
+
+**「很大」**：真实编辑器光标高约 25.6px、`glowWidth = 0.6×25.6 = 15.4px`，
+落在约 900px 高的窗口里占 1.7%；预览窗只有 110px 高，同样 20px 半径占 **18%** ——
+差约 10 倍。半径是同一个公式算的，视觉膨胀来自**预览窗太小**，
+再叠加 `shadowBlurFactor` 被选在最柔端 0.6（默认 0.2，是 3 倍）。
+
+### 修法
+
+1. `bindCheck` 显式挂 `addActionListener`：点一下当场写 `pending` + `refreshPreviews()`
+   （与当年修滑块「显式 addChangeListener」同一招，见文件头）。
+   **刻意不调 `refreshPresetDisplay()`** —— 它会带出 `afterPendingEdited()`，
+   副作用是立刻派生「XX 副本」，那属于产品可见的变更，按纪律四-L 不在本次范围。
+2. 新建 `core/GlowIntensity`，把强度曲线与淡出曲线收成**唯一实现**：
+   生产三处（`tickSpring` / `glowStrengthForValue` / `glowFade`）全部改为调用它，
+   预览也调用它，并补上 `panel.setGlowFade(fade)`。
+3. `refreshPreviews()` 补推淡出三件套。
+4. 「辉光锐度」说明补一句：预览窗小，同样的外扩量在预览里会显得更大。
+
+### 证据（改之前红、改之后绿）
+
+| 阶段 | VPreviewParity |
+|---|---|
+| 只在 property 的 `set()` 里加 `refreshPreviews()`（错误修法） | **FAIL** 8「勾选态 false→true，pending.useShadow=**false**，previewConfig.useShadow=**false**」 |
+| 改为显式 `addActionListener` | **PASS** 12 / FAIL 0 |
+
+第一次失败本身就是变异证据：它证明了「DSL 的 `set()` 不响应点击」这一判断，
+也证明了探针抓得住——如果只按第一版改法提交，用户侧的 bug 一点没好。
+
+### 契约变更（不是缺陷）
+
+- `VReset` **R-9**：原断言「点击复选框【不】写 pending」→ 反转为「【就】写」。
+  那条断言记录的正是本 bug 的成因，方向必须跟着改，断言本身保留。
+- `VReset.findShadowCheckbox`：去掉一行「先把 pending 顶成 true」——
+  点击当场写 pending 之后，那一行会让「控制态」与「pending」分离，
+  初始 value 恰为 true 时永远找不到复选框。
+- `VPreviewParity` 新增 7 条（6~12）：复选框双向推送、淡出三件套到达预览、
+  强度曲线边界、淡出曲线边界。
+
+### 没解决的部分（明确记录）
+
+- **`AnimationPreview.step()` 里那几行「读 offset → 调 GlowIntensity → 写回面板」
+  没有探针覆盖**（它的时间源是 `System.nanoTime()`，没有可注入时钟，
+  断言淡出会引入 flaky）。曲线本身已被 11/12 两条钉死，
+  `setGlowFade` 的读口有 `glowFadeForProbe()`，但「preview 真的周期性调它」只能靠代码审查。
+- 分标签导致的「看不到预览」只是**文案缓解**，没改布局（改布局会动 `VUi.KEYS` 下标契约）。
+
+---
+
+## BUG-013 「我配的自定义单行斜度丢了，之前不是 100」（**不是 bug：预设常量覆盖，已修注释与文档，2026-10-29 用户报**）
+
+**用户报**：
+
+> 「可能丢了我配置的自定义单行斜度字段了，之前不是 100」（截图显示斜度 = 100%）
+
+### 判定：（ii）逻辑重置 —— 且是**设计行为**，不是数据丢失
+
+`slopeTicks` 完全属于**预设域**：
+
+- 字段定义走 6 参工厂 → `inPreset=true`、`runtimeSwitch=false`（`SettingsField:539-541`）；
+- 出现在自定义预设快照里（快照字符串第一个键就是 `slopeTicks=`）；
+- `restoreSkipping()` 不跳过它（`SettingsField:742-769`）；
+- **切内置预设直接写它**：`applyAnimPresetFields` → `s.slopeTicks = p.slopeTicksValue()`；
+- 匹配判据也含它：`matchAnimPreset` → `s.slopeTicks == p.slopeTicksValue()`。
+
+三个内置预设的常量（`CursorPresets.ANIM_PRESETS`，最后一参）：
+
+```
+基础 = 0        缎带 = 0        纯平滑输入 = 100
+```
+
+用户当前配置：`animPresetBase = 2`（= 纯平滑输入）、无 `animCustomName`。
+把当前 State 与该预设逐字段比对，**13 个预设字段全中**：
+
+| 字段 | 当前 State | 纯平滑输入 |
+|---|---|---|
+| slopeTicks | 100 | 100 |
+| shadowBlurFactor | 0.6 | 60（=0.60） |
+| glowOpacity | 0.3 | 30（=0.30） |
+| useShadow | false | false |
+| glowLayers | 8（未落盘=默认） | 8 |
+| stretchRatioK | 2.0 | 2.0 |
+
+**所以 100 不是「丢失后变成的值」，而是这个预设声明的值。**
+
+### 排除「数据丢失」的证据
+
+- 三份安装备份（`_config-backup/personal-state-*.json`，版本 0.9.105 / 0.9.106 / 0.9.107，
+  覆盖 10-29 全天）：`slopeTicks` **全部 = 100**，`dropped` 全为空数组；
+- `build/install.ps1:95` 是 `$dropFields = @()` —— 丢弃名单为空，全量还原，
+  `slopeTicks` 不在任何幽灵名单里（`grep slopeTicks build/install.ps1` 零命中）；
+- `loadState` 的迁移只把遗留值 **82** 归到 0，其余 0–100 原样保留。
+
+最早的一份备份也已经是 100，所以「之前是别的值」在磁盘上找不到任何凭据。
+
+### 真正该修的是「会误导人的注释」（陷阱 12 同型）
+
+两处注释写着「三个内置预设都是 82」，而实际常量早在 0.9.87 就改成了 0/0/100：
+
+- `CursorPresets.slopeTicksValue()` 的 javadoc；
+- `applyAnimPresetFields` 上方的说明。
+
+照着旧注释排查，只会往「数据丢失」的方向找 —— 这正是本次浪费时间的直接原因。
+两处已改正，并写明「切纯平滑输入 → 斜度变 100」是设计。
+
+### 现有的守门（不需要新增探针）
+
+`VSlopePreset` 第 5/6 条早已把这件事锁成契约：
+「只有一个内置预设带斜度（纯平滑输入）」+「切预设真的写 slopeTicks（基础→0、纯平滑→100）」。
+换句话说，**用户报的这个现象在门禁里本来就是绿的一条断言** —— 它是设计，不是回归。

@@ -121,8 +121,18 @@ public final class VReset {
             check("R-8 点击复选框【不】触发任何一轮 super.reset()（无回环）",
                     resetTotal == 0 && maxDepth <= 1,
                     "resetTotal=" + resetTotal + " maxDepth=" + maxDepth);
-            check("R-9 点击复选框【不】在点击瞬间写 pending（写回发生在 super.apply()）",
-                    !wroteOnClick, "点击后 pending.useShadow=" + conf.pendingForProbe().useShadow);
+            // 【2026-10-29 契约变更：断言方向反转，断言没有删】
+            //
+            // 原来断言「点击【不】写 pending」—— 那是当时的实测行为：
+            // DSL 的 ButtonKt.bindSelected 只在 super.apply() 时回写，
+            // 于是复选框要等「应用 / 确定」才生效，而同一张面板上的滑块是实时的。
+            // 这个「两种控件两种语义」正是用户报的那个 bug：
+            // 勾选「启用辉光」后动画预览毫无反应，只有关掉设置页再打开才好。
+            //
+            // 修法：bindCheck 里显式挂 ActionListener（与当年修滑块同一招），
+            // 点一下当场写 pending 并刷新预览。所以断言方向反转。
+            check("R-9 点击复选框【就】在点击瞬间写 pending（2026-10-29 起与滑块同语义）",
+                    wroteOnClick, "点击后 pending.useShadow=" + conf.pendingForProbe().useShadow);
 
             // 3b) F-06 的核心：自定义预设上关辉光，快照跟不跟
             conf.reset();
@@ -254,11 +264,18 @@ public final class VReset {
         return "无 " + key;
     }
 
-    /** 用「点击 + apply 后 pending.useShadow 翻转」定位「启用辉光」。 */
+    /**
+     * 用「点击 + apply 后 pending.useShadow 翻转」定位「启用辉光」。
+     *
+     * <p><b>2026-10-29 去掉了一行 {@code pendingForProbe().useShadow = true}</b>：
+     * 原来它靠「先把 pending 顶成 true，再点击，看 apply 后有没有被控件顶回 false」来判定。
+     * 而复选框现在点击当场就写 pending（见 R-9 的说明），那一行会让「控制态」与
+     * 「pending 值」分离 —— 初始 value 恰好是 true 时，点击前后读到的都是 true，
+     * 等于**永远找不到**这个复选框。改成直接读点击前后的真实值，两种语义下都成立。
+     */
     private static int findShadowCheckbox(NeovideCursorConfigurable conf, List<JCheckBox> boxes) {
         for (int i = 0; i < boxes.size(); i++) {
             conf.reset();
-            conf.pendingForProbe().useShadow = true;
             boolean before = conf.pendingForProbe().useShadow;
             boxes.get(i).doClick();
             conf.apply();

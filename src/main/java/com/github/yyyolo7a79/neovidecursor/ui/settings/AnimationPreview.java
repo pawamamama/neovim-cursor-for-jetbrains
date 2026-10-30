@@ -1,5 +1,6 @@
 package com.github.yyyolo7a79.neovidecursor.ui.settings;
 
+import com.github.yyyolo7a79.neovidecursor.core.GlowIntensity;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.github.yyyolo7a79.neovidecursor.ui.CaretTrailPanel;
@@ -161,6 +162,22 @@ public final class AnimationPreview extends JComponent {
     private double centerY;
     private boolean placed;
     private boolean glowSized;
+
+    // ==================== 辉光淡出状态（2026-10-29）====================
+    //
+    // 语义与 CaretAnimator.lastAnimatingNanos / lastGlowStrength 逐字相同。
+    //
+    // 【为什么补这两个字段】在此之前预览只做一件事：
+    //     panel.setGlowStrength(min(1, maxOffset / 8));
+    // 既没有淡出（从不调 setGlowFade），强度曲线也和生产的 (offset-0.5)/2 不同。
+    // 结果：预览里辉光永不熄灭、且亮度随偏移变化的节奏与真实编辑器不一致 ——
+    // 用户拖滑块看到的观感，回车后并不成立。这正是陷阱 6（预览与生产必须同源）。
+
+    /** 辉光最后一次可见的时刻（纳秒）；0 = 从未亮过 */
+    private long lastGlowVisibleNanos = 0L;
+
+    /** 辉光最后一次可见时的强度（0~1），与 {@link #lastGlowVisibleNanos} 配套 */
+    private float lastGlowStrength = 0f;
 
     /** 字体来源（诊断用：独立窗口里能看出取到的是哪个） */
     private String fontSource = "(未取)";
@@ -734,7 +751,29 @@ public final class AnimationPreview extends JComponent {
             c.update(cursorW, cursorH, centerX, centerY, dt, false);
             maxOffset = Math.max(maxOffset, c.getOffsetMagnitude());
         }
-        panel.setGlowStrength((float) Math.min(1.0, maxOffset / 8.0));
+
+        // ==================== 辉光：强度 + 淡出都走唯一实现 ====================
+        //
+        // 【2026-10-29 修两个分家点】
+        //   ① 强度曲线：原来是 min(1, maxOffset / 8)，而生产是 (offset - 0.5) / 2。
+        //      两条不同的曲线 —— 预览要偏移 8px 才满强度，生产 2.5px 就满了。
+        //      用户拖滑块看到的是预览的曲线，回车后看到的却是另一条。
+        //   ② 淡出：原来从不调 panel.setGlowFade()，于是 CaretTrailPanel.glowFade
+        //      在预览里恒为初值 1 —— 预览的辉光永不熄灭，真实编辑器会熄灭。
+        //
+        // 现在两件事都调 GlowIntensity（与 CaretAnimator 同一份算法）。
+        long now = System.nanoTime();
+        float strength = GlowIntensity.strengthFor(maxOffset);
+        if (strength > 0f) {
+            // 和 CaretAnimator 一样：只在「辉光可见」时推进计时起点。
+            // 否则停手瞬间强度归零，淡出计时的起点就变成「已经没光可淡」了。
+            lastGlowVisibleNanos = now;
+            lastGlowStrength = strength;
+        }
+        float fade = GlowIntensity.fade(config.overlayFadeOut, lastGlowVisibleNanos, now,
+                config.cursorDisappearDelay, config.cursorFadeOutDuration);
+        panel.setGlowStrength(strength > 0f ? strength : lastGlowStrength * fade);
+        panel.setGlowFade(fade);
         repaint();
     }
 

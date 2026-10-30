@@ -158,7 +158,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private static final String W_SHADOW_BLUR =
             "数值越小光晕越散（像雾），越大越收紧（贴近光标边缘）。"
-            + "<b>调到最散会明显增加重绘开销</b>，慢机器可能掉帧。默认 73 比较适中。";
+            + "<b>调到最散会明显增加重绘开销</b>，慢机器可能掉帧。默认 73 比较适中。"
+            // 【2026-10-29 补】用户报「预览里辉光很大，和编辑器里不一样」。
+            // 查证结论：半径公式两边同一个（shadowBlurFactor × 光标较长边），
+            // 真正的差别是**窗口尺寸**——预览窗只有 110px 高，20px 的光晕占去近两成；
+            // 编辑器窗口近千像素，同一半径只占个位数百分比。不是 bug，但要说明。
+            + "<br/>预览窗很小，<b>同样的外扩量在预览里会显得比编辑器里大得多</b>，"
+            + "判断实际观感请以编辑器为准。";
 
     /**
      * 拉伸强度的说明。
@@ -815,6 +821,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         previewConfig.glowLayers = pending.glowLayers;
         previewConfig.glowOpacity = pending.glowOpacity;
         previewConfig.shadowBlurFactor = pending.shadowBlurFactor;
+        // 【2026-10-29 补三项】淡出三件套原来<b>从未</b>推给预览。
+        //
+        // 后果是一条完整的预览/生产分家：CaretAnimator 一直按这三项算淡出
+        // （停止后先保持 cursorDisappearDelay，再线性熄灭 cursorFadeOutDuration），
+        // 而预览窗既拿不到参数，也从不调 CaretTrailPanel.setGlowFade() ——
+        // 于是预览的辉光永远满强度、永不熄灭。用户拖「淡出」两个滑块时，
+        // 预览毫无反应，回车后编辑器里却真的有淡出。
+        previewConfig.overlayFadeOut = pending.overlayFadeOut;
+        previewConfig.cursorDisappearDelay = pending.cursorDisappearDelay;
+        previewConfig.cursorFadeOutDuration = pending.cursorFadeOutDuration;
         if (inlinePreview != null) {
             inlinePreview.onConfigChanged();
         }
@@ -2767,8 +2783,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         s.cursorDisappearDelay = p.cursorDisappearDelay();
         s.cursorFadeOutDuration = p.cursorFadeOutDuration();
         // 【0.9.80 斜度进预设域】用户要求「这个参数进预设，改它会生成副本」。
-        // 三个内置预设都是 82（= 对齐上游 trailFactors），所以切预设时
-        // 斜度会回落到 82 —— 这正是「预设决定斜度」的语义。
+        // 所以切内置预设时斜度会被**预设常量**覆盖，三个值分别是：
+        //   基础 = 0、缎带 = 0、纯平滑输入 = 100
+        // （权威定义在 CursorPresets.ANIM_PRESETS 每行最后一个参数）。
+        //
+        // 【2026-10-29 修正错误注释】原文写「三个内置预设都是 82…斜度会回落到 82」——
+        // 那是 0.9.80 的旧值。0.9.87 起语义改成「只有纯平滑输入倾斜」，
+        // 三个常量早已是 0/0/100。这条过期注释会直接误导排查：
+        // 用户报「我配的斜度丢了，之前不是 100」，正确答案就是
+        // 「你站在纯平滑输入上，它的斜度常量就是 100」。
         s.slopeTicks = p.slopeTicksValue();
 
         // 【0.9.73 修正：输入平滑不参与预设】
@@ -3236,16 +3259,65 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /**
      * 复选框（不带行内文字：DSL 的行首文字与行内控件是两列，
      * 契约 §2.4 要求「左侧是字段名、右侧是控件」）。
+     *
+     * <h2>为什么这里要挂显式 ActionListener（2026-10-29）</h2>
+     *
+     * <p>实测（{@code VPreviewParity} 的 8/9 两条）：DSL 的
+     * {@code ButtonKt.bindSelected} 给出的 {@code MutableProperty.set()}
+     * <b>只在 {@code DialogPanel.apply()} 时被调用</b>，用户点一下复选框时它<b>不</b>触发。
+     * 也就是说：
+     *
+     * <pre>
+     *   滑块   用户拖动 → ChangeListener → 立刻写 pending            （实时）
+     *   复选框 用户勾选 → 只改 Swing 状态，pending 纹丝不动           （要等应用）
+     * </pre>
+     *
+     * <p>同一张面板里两种控件两种语义，后果用户可见：
+     * <ul>
+     *   <li>勾「启用辉光」后预览毫无反应（预览读 pending → previewConfig）；</li>
+     *   <li>要等点「应用 / 确定」甚至关掉设置页再打开才生效
+     *       —— 用户原话「只有关闭设置回来才好」；</li>
+     *   <li>{@code shadowOn} 联动属性也不会跟着变，三个辉光滑块该置灰时不置灰。</li>
+     * </ul>
+     *
+     * <p><b>修法与当年修滑块完全一致</b>：不信 DSL 的隐式绑定，显式挂监听器
+     * （见文件头「修法 1：显式 {@code slider.addChangeListener}」）。
+     * 这里挂 {@code addActionListener} —— {@code JCheckBox} 的选中态变化通过
+     * ActionEvent 上报；程序化 {@code setSelected()} <b>不会</b>触发它，
+     * 这正是守门探针必须用 {@code doClick(0)} 而不是 {@code setSelected} 的原因。
+     *
+     * <p><b>为什么同时写 pending 和刷新预览</b>：pending 是「用户当前看到的值」，
+     * 滑块就是这么做的。否则勾选后 {@code isModified()} 与「当前预设」下拉的
+     * 判据都还停在旧值上。
+     *
+     * <p><b>为什么不调 {@link #refreshPresetDisplay()}（滑块走的那一路）</b>：
+     * 它会把 {@code afterPendingEdited()} 带进来，副作用是立刻派生一个「XX 副本」。
+     * 那是产品可见的行为变更（下拉里凭空多一项），按纪律四-L 先问用户。
+     * 现在这样：pending 与预览实时正确，预设派生时机与修改前完全一致
+     * （{@code apply()} 末尾的 afterPendingEdited() 仍会补快照）。
      */
-    private static Cell<JBCheckBox> bindCheck(Row row,
-                                              Function0<Boolean> getter,
-                                              final java.util.function.Consumer<Boolean> setter) {
-        return ButtonKt.bindSelected(row.checkBox(""), new MutableProperty<Boolean>() {
-            @Override public Boolean get() { return getter.invoke(); }
-            @Override public void set(Boolean v) {
-                setter.accept(v);
-            }
-        });
+    private Cell<JBCheckBox> bindCheck(Row row,
+                                       Function0<Boolean> getter,
+                                       final java.util.function.Consumer<Boolean> setter) {
+        Cell<JBCheckBox> cell = ButtonKt.bindSelected(row.checkBox(""),
+                new MutableProperty<Boolean>() {
+                    @Override public Boolean get() { return getter.invoke(); }
+                    @Override public void set(Boolean v) {
+                        // 这条路径只在 apply() 时走到 —— 保留，它是平台官方的回写通道。
+                        setter.accept(v);
+                    }
+                });
+        JBCheckBox box = cell.getComponent();
+        if (box != null) {
+            box.addActionListener(e -> {
+                if (syncingControls) {
+                    return;             // 程序化回灌（reset / 切预设）：不是用户编辑
+                }
+                setter.accept(box.isSelected());
+                refreshPreviews();
+            });
+        }
+        return cell;
     }
 
     // 0.9.9 / Phase 2 第 2 步：纯函数已抽到 {@link SettingsUiUtil}

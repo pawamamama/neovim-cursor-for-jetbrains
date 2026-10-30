@@ -1,6 +1,7 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.core.AfterimageTrail;
+import com.github.yyyolo7a79.neovidecursor.core.GlowIntensity;
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
 import com.intellij.openapi.Disposable;
@@ -198,19 +199,14 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private static final double RECOVERY_STEP_CAP_SECONDS = 0.5;
 
-    /**
-     * 辉光淡入淡出的偏移量区间（像素）。
-     *
-     * <p>辉光强度由四角相对目标的最大偏移量（即拖尾展开程度）驱动：
-     * 偏移 ≤ {@link #GLOW_FADE_START} 视为静止，不画光晕；
-     * 偏移 ≥ {@link #GLOW_FADE_END} 为满强度。
-     *
-     * <p>区间只有 2px 宽，因为这两个状态本来就离得很近：静止时偏移为 0，
-     * 而任何真实移动的偏移至少是一个字符宽（约 8px）或一行高（约 32px）。
-     * 窄区间既保证移动时光晕"完全没被动过"，又让停下时的熄灭不突兀。
-     */
-    private static final double GLOW_FADE_START = 0.5;
-    private static final double GLOW_FADE_END = 2.5;
+    // 辉光强度区间（像素：0.5 → 0，2.5 → 1）的常量与曲线说明已搬进
+    // {@code com.github.yyyolo7a79.neovidecursor.core.GlowIntensity}。
+    //
+    // 【2026-10-29 为什么要搬】原来这里是两个私有常量 GLOW_FADE_START/END，
+    // 加上 6 行 clamp；而设置页预览窗（AnimationPreview）另有一套
+    // {@code min(1, maxOffset/8)} 的独立曲线 —— 同一语义两份实现，正是纪律四-G
+    // 的形态（陷阱 6：预览与生产必须同源）。现在唯一实现在 GlowIntensity，
+    // 生产与预览都调它，任何曲线改动只有一个落点。
 
     /**
      * IME 组合中间态最多连续跳过的帧数（F1-c 的冻结上界）。
@@ -2417,14 +2413,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         // 辉光只在拖尾展开时点亮 —— 静止的光标顶着一圈光晕并不好看，
-        // 那是"运动中"才该有的效果。强度由最大偏移量映射，边界见 GLOW_FADE_*。
-        float glowStrength = (float) ((maxOffset - GLOW_FADE_START)
-                / (GLOW_FADE_END - GLOW_FADE_START));
-        if (glowStrength < 0f) {
-            glowStrength = 0f;
-        } else if (glowStrength > 1f) {
-            glowStrength = 1f;
-        }
+        // 那是"运动中"才该有的效果。曲线与边界见 GlowIntensity（唯一实现）。
+        float glowStrength = GlowIntensity.strengthFor(maxOffset);
 
         // 【F2 / 批次2】辉光淡出（方案 B：只淡辉光，光标本体始终不透明）。
         //
@@ -2567,26 +2557,11 @@ public class CaretAnimator implements Disposable, CaretListener {
      * <p>开关 {@code config.overlayFadeOut} 关闭时恒返回 1f，行为与 0.9.1 一致。
      */
     private float glowFade(long now) {
-        if (!config.overlayFadeOut) {
-            return 1f;                              // 开关关闭：不淡出，等价 0.9.1
-        }
-        if (lastAnimatingNanos == 0L) {
-            // 尚未出现过可见辉光：没有可淡的东西。
-            // 注意：这里返回 0f（契约 §3.3 原文），因为调用方只在 glowStrength>0 时
-            // 才用 fade 参与乘法；glowStrength==0 时有效强度由 lastGlowStrength(0) 决定，
-            // 行为与返回 1f 完全等价（0 × 1 = 0 × 0）。
-            return 0f;
-        }
-        double sinceStop = (now - lastAnimatingNanos) / 1_000_000_000.0
-                - config.cursorDisappearDelay / 1000.0;
-        if (sinceStop <= 0) {
-            return 1f;                              // 停止后 delay 内：保持满强度
-        }
-        double fade = config.cursorFadeOutDuration;
-        if (fade <= 0 || sinceStop >= fade) {
-            return 0f;                              // 淡出完毕
-        }
-        return (float) (1.0 - sinceStop / fade);
+        // 曲线本身不在这里写 —— 唯一实现在 GlowIntensity，与设置页预览窗共用。
+        // 之前这里是它的一份私有副本，而预览窗根本没有淡出（从不调 setGlowFade），
+        // 于是「预览里辉光永不熄灭、真实编辑器里会熄灭」这组差异没有任何守门。
+        return GlowIntensity.fade(config.overlayFadeOut, lastAnimatingNanos, now,
+                config.cursorDisappearDelay, config.cursorFadeOutDuration);
     }
 
     /**
@@ -3010,14 +2985,10 @@ public class CaretAnimator implements Disposable, CaretListener {
         if (fading) {
             return effectiveGlow;
         }
-        float s = (float) ((offset - GLOW_FADE_START) / (GLOW_FADE_END - GLOW_FADE_START));
-        if (s < 0f) {
-            return 0f;
-        }
-        if (s > 1f) {
-            return 1f;
-        }
-        return s;
+        // 曲线本身不在这里写 —— 唯一实现在 GlowIntensity，与预览窗共用。
+        // 这里只保留 fading 这一条本类特有的短路：淡出进行中时用「最后亮度 × fade」，
+        // 而不是重新按偏移量算（否则停手瞬间会从 0 重新开始，淡出永远看不见）。
+        return GlowIntensity.strengthFor(offset);
     }
 
 }
