@@ -87,6 +87,7 @@ final class RenderScheduler {
         if (thread == null) {
             Thread t = new Thread(RenderScheduler::loop, THREAD_NAME);
             t.setDaemon(true);
+            installUncaughtHandler(t);
             thread = t;
             t.start();
         } else {
@@ -117,12 +118,77 @@ final class RenderScheduler {
     static void wakeUp(CaretAnimator animator) {
         animator.nextDueNanos = System.nanoTime();
         Thread t = thread;
-        if (t != null) {
+        boolean spawned = false;
+        if (t == null) {
+            // 【U-H-3】调度线程因「连续失败」或「未捕获异常」已经置 null 并退出。
+            //
+            // 原来这里只 interrupt 一个 null —— 等于「全体动画停摆，且没有任何自愈入口」：
+            // 重建入口只有 register()，而它只在「打开一个新编辑器」时被调用。
+            // 用户打字、点鼠标、切标签页全都救不回来。
+            //
+            // 现在在 register()/loop() 用的同一把类锁内就地重建，防止两条线程被同时创建；
+            // 并且限定「集合非空」—— 集合空时不该留一条空转线程（退出条件仍是 ANIMATORS.isEmpty()）。
+            // 死锁分析：锁内只做判空、new Thread、start()，不获取其他监视器，无嵌套 → 无环。
+            //
+            // 【覆盖边界，如实记录】这是「无锁读到 null」之后的补救。若旧线程恰好在本行读之后、
+            // 进入锁之前置 null 并返回，本次唤醒既没重建也没兜住 —— 动画会停到**下一次**光标
+            // 事件为止。窗口只有几条指令，且进入该路径的前提是「调度线程已连坏 3 轮」或
+            // 未捕获异常（现实里几乎只有 EDT 关闭 / OOM 才可能）。闭环的最终保证由下一次事件提供。
+            synchronized (RenderScheduler.class) {
+                if (thread == null && !ANIMATORS.isEmpty()) {
+                    Thread nt = new Thread(RenderScheduler::loop, THREAD_NAME);
+                    nt.setDaemon(true);
+                    installUncaughtHandler(nt);
+                    thread = nt;
+                    nt.start();
+                    spawned = true;
+                }
+                t = thread;
+            }
+        }
+        // 【L-1】刚新建的线程不需要 interrupt：它的 nextDueNanos 已被置为「现在」，
+        // 第一轮循环会自己投递。反过来 interrupt 会给它留一个黏性中断标志，
+        // 让第一轮的 1ms 退避立刻抛 InterruptedException（无害，但没有理由）。
+        if (t != null && !spawned) {
             t.interrupt();
         }
     }
 
+    /**
+     * 给调度线程装未捕获异常处理器（U-H-4）。
+     *
+     * <p>{@link #loop()} 的循环体与 catch 体都已各自自保护，这里兜的是「两者都漏了」的第三扇门：
+     * 线程在 run 边界抛出时 JVM 会先调本处理器。不处理的话线程死亡而 {@code thread} 仍非 null，
+     * 此后每次 {@code register()} 都去 interrupt 一个死线程 —— 全体永久停摆，
+     * 连「打开新编辑器」这个唯一恢复入口都失效。
+     *
+     * <p>处理器自身必须绝对不抛：若它在内部再抛，JVM 只会打印到 stderr，
+     * 而 {@code thread} 已经置 null（置空动作在日志之前），恢复入口仍然有效。
+     */
+    private static void installUncaughtHandler(Thread t) {
+        t.setUncaughtExceptionHandler((th, ex) -> {
+            synchronized (RenderScheduler.class) {
+                if (thread == th) {
+                    thread = null;
+                }
+            }
+            try {
+                LOG.warn("neovide-cursor: 调度线程未捕获异常，已置空；下一次 wakeUp/register 将重建", ex);
+            } catch (Throwable ignored) {
+                // 日志子系统本身不可用：thread 已置空，恢复入口有效，放弃记录。
+            }
+        });
+    }
+
     private static void loop() {
+        // 【H-1 / U-H-3 配套】「连续失败」是**这一条线程**的状态，不能是 static。
+        //
+        // 原来是 static 字段，于是重建出来的新线程会继承上一代的计数：
+        // T1 连坏 3 轮退出 → T2 由 wakeUp/register 建出来 → T2 只要遇到一次偶发异常
+        // 就立刻 `>= 3` 再退出 —— 「自愈」后的线程只剩一条命。而类锁的 monitor
+        // release/acquire 保证 T2 一定能读到 3，不是靠可见性侥幸能躲的。
+        // 顺带：日志会报「连续 4 次」（其实是 T1 的 3 次 + T2 的 1 次），把排查方向带偏。
+        int consecutiveFailures = 0;
         while (true) {
             // 【退出条件】已经没有 animator 了：退出并把 thread 置回 null，下次 register 重建。
             // 判空与 thread=null 必须与 register 共用同一把锁：否则会出现
@@ -211,16 +277,7 @@ final class RenderScheduler {
                 consecutiveFailures = 0;
             } catch (Throwable t) {
                 consecutiveFailures++;
-                LOG.warn("neovide-cursor: 调度线程本轮异常（连续 " + consecutiveFailures + " 次）", t);
-                if (consecutiveFailures >= 3) {
-                    // 连续失败说明这个线程状态已不可靠：置 null 让下次 register 重建。
-                    synchronized (RenderScheduler.class) {
-                        if (thread == Thread.currentThread()) {
-                            thread = null;
-                        }
-                    }
-                    LOG.warn("neovide-cursor: 调度线程连续失败 " + consecutiveFailures
-                            + " 次，已置空以便下次 register 重建");
+                if (handleLoopFailure(t, consecutiveFailures)) {
                     return;
                 }
                 // 短暂退避，避免异常时疯狂自旋占满 CPU。
@@ -232,13 +289,61 @@ final class RenderScheduler {
         }
     }
 
-    /** 连续异常次数（成功一轮即归零）。连续 3 次视为线程不可靠，置空自愈。 */
-    private static int consecutiveFailures;
+    /**
+     * 处理调度线程一轮失败：记日志 + 判定是否该退出（U-H-3 / U-H-4）。
+     *
+     * <p>从 {@link #loop()} 里抽出来，一是让循环体回到可读长度（本批把它从约 90 行推到 135 行），
+     * 二是把「日志失败也不能打断状态判定」这条约束收在一个地方，避免以后有人再往里加代码时漏掉。
+     *
+     * @param t                   本轮异常
+     * @param consecutiveFailures 本线程连续失败次数（调用方负责递增）
+     * @return true 表示线程已判定不可靠并置空，调用方应退出循环
+     */
+    private static boolean handleLoopFailure(Throwable t, int consecutiveFailures) {
+        // 【U-H-4】「处理异常的代码自己抛出」是同一事故的第二扇门：日志子系统
+        // shutdown / LoggingFactory 被摘时 LOG.warn 可能抛，异常穿出 run 边界
+        // → 线程死亡，而 thread 仍非 null（下面的 ≥3 分支根本到不了）→
+        // 此后每次 register() 都去 interrupt 一个死线程，全体永久停摆。
+        // 所以日志与会话状态判定分离：日志失败也必须走得到下面的分支。
+        try {
+            LOG.warn("neovide-cursor: 调度线程本轮异常（连续 " + consecutiveFailures + " 次）", t);
+        } catch (Throwable ignored) {
+            // 日志子系统本身不可用：放弃记录，但继续走状态判定。
+        }
+        if (consecutiveFailures < 3) {
+            return false;
+        }
+        // 【U-H-3】退出前把每个现存 animator 的到期时间置为「现在」：
+        // 重建后的第一轮遍历会立刻投递它们，而不是白等一个空闲周期（最长 600ms）。
+        // （只置到期时间不会自己产生 tick —— 真正的恢复入口是 wakeUp()/register()
+        //   里的线程重建，见 wakeUp 的注释。）
+        for (CaretAnimator a : ANIMATORS) {
+            a.nextDueNanos = System.nanoTime();
+        }
+        // 连续失败说明这个线程状态已不可靠：置 null，交给 wakeUp()/register() 重建。
+        synchronized (RenderScheduler.class) {
+            if (thread == Thread.currentThread()) {
+                thread = null;
+            }
+        }
+        try {
+            LOG.warn("neovide-cursor: 调度线程连续失败 " + consecutiveFailures
+                    + " 次，已置空；下一次 wakeUp/register 将重建");
+        } catch (Throwable ignored) {
+            // 同上：日志失败不能改变「已经置空」这个事实。
+        }
+        return true;
+    }
+
+    // 连续异常计数已改为 loop() 的局部变量（H-1）：它是线程级状态，
+    // static 会让重建出来的新线程继承上一代的失败次数。
 
     /**
      * 对本轮所有已到期的 animator <b>逐个</b>投递 —— 每个 animator 一次 {@code invokeLater}。
      *
-     * @return 本轮是否至少投递了一个任务（用于区分"已到期"与"到期但任务都在途"）
+     * @return 本轮是否至少有一次投递<b>尝试</b>（用于区分"已到期"与"到期但任务都在途"）。
+     *         U-M-5 起：`invokeLater` 抛出的那一次也计入「尝试过」—— 它的失败由 catch 内部
+     *         回滚该 animator 自己的两个标志，不影响本轮其它 animator 的投递结论。
      */
     private static boolean dispatchDue() {
         long threshold = System.nanoTime() + DUE_TOLERANCE_NANOS;
@@ -262,7 +367,6 @@ final class RenderScheduler {
                 continue;
             }
             animator.lastDispatchedDueNanos = due;
-            posted = true;
             // 【EDT 任务粒度红线】这个 Runnable 体内只服务这一个 animator：
             // 不含 for / forEach，也不会去 tick 第二个 animator。
             //
@@ -282,12 +386,35 @@ final class RenderScheduler {
             // 只在异常路径生效，正常路径零变化。
             try {
                 SwingUtilities.invokeLater(animator::runTick);
+                // 【M-2】成功投递一次即归零，与 refreshTarget / tick 的「连续失败」语义一致。
+                animator.invokeLaterFailureCount = 0;
+                // 【U-M-5 · MEDIUM-1】posted 只在**投递成功**时置位。
+                //
+                // 它同时是 loop() 的退避开关：`if (!dispatchDue()) Thread.sleep(BUSY_RETRY_MS)`。
+                // 若把它当成「尝试过」（无论成败都 true），当 invokeLater **持续**抛时：
+                //   · posted 恒 true → 跳过唯一的 1ms 退避；
+                //   · 该 animator 的 nextDueNanos 早已过期（scheduleNextDue 写的是过去时刻）；
+                //   · 于是下一轮立刻重投 → 再抛 → 100% CPU 紧循环；
+                //   · 而异常在本 catch 里被吃掉，consecutiveFailures 不增 → 连 U-H-3 的自愈都到不了。
+                // 语义取「本轮至少有一个**成功**投递」：某个 animator 失败不影响其它
+                // animator 已投递的结论（U-M-5 的原意），但一个都没成功时 loop 照常退避。
+                posted = true;
             } catch (Throwable t) {
                 animator.framePending.set(false);
                 animator.lastDispatchedDueNanos = Long.MIN_VALUE;
-                posted = false;
-                LOG.warn("neovide-cursor: invokeLater failed, rolled back dispatch flags "
-                        + "(animator=" + System.identityHashCode(animator) + ")", t);
+                // 【U-M-5】不回滚 posted：它此刻只会被**其它** animator 的成功投递置位，
+                // 本 animator 的失败不该改写本轮的整体结论。
+                // warn 洪水由本处按 animator 计数限流（原来每次都打，单编辑器约 125~144 行/秒，
+                // 多编辑器线性放大；刷新失败时它会重试，见上一条注释的退避说明）。
+                animator.invokeLaterFailureCount++;
+                if (CaretAnimator.shouldLogFailure(animator.invokeLaterFailureCount)) {
+                    try {
+                        LOG.warn("neovide-cursor: invokeLater failed, rolled back dispatch flags "
+                                + "(animator=" + System.identityHashCode(animator) + ")", t);
+                    } catch (Throwable ignored) {
+                        // 日志失败不能连累调度循环（同 U-H-4 原则）
+                    }
+                }
             }
         }
         return posted;

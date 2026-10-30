@@ -63,7 +63,21 @@ import java.util.ArrayList;
  *   <li><b>R-9</b> caret 事件入口（caretAdded / caretRemoved / traceCaretEvent）零违规；</li>
  *   <li><b>R-10</b> <b>自证</b>：直接调用未被包装的实现体时，桩必须判红 ——
  *       否则前面全绿毫无意义（探针空转）。</li>
+ *   <li><b>R-11</b> 诊断采样帧（{@code diagFrame == true}）的整条 tick 链路零违规
+ *       （U-H-2：{@code tickSpring} 里 {@code getAllCarets()} 曾未包 read action）；
+ *       <b>R-11b</b> 且该帧确实到达了 {@code frameSummary} 的读取点（不是空转）；</li>
+ *   <li><b>R-12</b> {@code dispose()} 摘 caret 监听器零违规
+ *       （U-M-19：与注册侧口径必须一致）；</li>
+ *   <li><b>R-13</b> {@code caretAdded} 只读一次 {@code getAllCarets}
+ *       （U-M-9：一次取值、两处用）。</li>
  * </ul>
+ *
+ * <h2>2026-10-30 补漏（第 2 批审计 U-H-2 / U-M-19）</h2>
+ *
+ * <p>本探针原先给 {@code getAllCarets} / {@code removeCaretListener} 都挂了 guard，
+ * 但<b>只驱动 refreshTarget 系</b>，从不调 {@code runTick()} / {@code dispose()} ——
+ * 两条真实缺口因此在 1035 PASS 下静默存在。R-11..R-13 补的就是这个驱动面。
+ * 与「假通过」的区别：桩没变，变的是<b>真的把生产路径跑起来</b>。
  */
 public final class VReadAction {
 
@@ -81,6 +95,19 @@ public final class VReadAction {
     private static int caretGetOffsetCalls = 0;
     private static int modelGetOffsetCalls = 0;
 
+    /**
+     * {@code getAllCarets()} 的调用次数 —— 供两条新契约使用：
+     * <ul>
+     *   <li><b>R-11b</b>：证明诊断采样帧的 tick 链路<b>确实走到了</b> {@code frameSummary}
+     *       的参数求值处，而不是因为别处的早退而"碰巧没读"（四-G 假通过 A：
+     *       探针没覆盖到目标路径却全绿）；</li>
+     *   <li><b>R-13</b>：锁住 U-M-9 的新契约「一次取值、两处用」——原来
+     *       {@code caretAdded} 调两次 {@code getAllCarets()}，两次返回值必然相同
+     *       （都在事件之后读），白付一次整表复制 + 排序（java-reviewer javap 实证内部 {@code List.sort}）。</li>
+     * </ul>
+     */
+    private static int getAllCaretsCalls = 0;
+
     /** 当前光标视觉位置：改它就能触发慢路径。 */
     private static VisualPosition vp = new VisualPosition(9, 4);
     /** 行 0 的行顶 y（桩的视觉行号 → 像素映射基准）。 */
@@ -92,6 +119,8 @@ public final class VReadAction {
     private static CaretAnimator animator;
     private static Method refreshTarget;
     private static Method refreshTargetInReadAction;
+    /** 调度线程投递到 EDT 的单帧任务入口（包私有）——R-11 用它驱动整条 tick 链。 */
+    private static Method runTick;
 
     /**
      * 平台 252 的判据：编辑器读取必须持有读锁。
@@ -110,6 +139,11 @@ public final class VReadAction {
     }
 
     public static void main(String[] args) throws Exception {
+        // 【MEDIUM-4】R-11 依赖「frameSeq == 15 命中采样」，而采样周期来自系统属性
+        // `neovide.cursor.diag.sample`（CursorDiag 的 static final，类初始化时读）。
+        // 若外层 JVM 带了这个 -D，探针写死的 14→15 就不再命中，R-11b 会报出
+        // 与真正原因无关的"期望相差 1"。这里在类初始化之前钉死周期。
+        System.setProperty("neovide.cursor.diag.sample", "15");
         V0Env.install();
 
         System.out.println("=== V-READACTION：编辑器读取必须在 read action 内（平台 252） ===");
@@ -243,6 +277,88 @@ public final class VReadAction {
         // 自证产生的违规不计入最终结论
         violations = 0;
 
+        // ================= R-13 / R-11 / R-11b / R-12：tick 链与 dispose =================
+        //
+        // 【为什么原来全绿却漏掉 U-H-2 / U-M-19】本探针给 getAllCarets 与
+        // removeCaretListener 都挂了 guard，但驱动的只有 refreshTarget 系 ——
+        // 从不调 runTick() / dispose()。于是两道真实缺口在 1035 PASS 下静默存在
+        // （陷阱 4 假通过：探针不驱动被测路径）。
+        //
+        // 先把 animator 从调度器摘掉：构造期 register() 起的共享调度线程会并发投递
+        // runTick，干扰下面按「单次调用」统计的计数（四-G-2 并发假红）。
+        detachFromScheduler();
+
+        // ---------- R-13：caretAdded 只读一次 getAllCarets（U-M-9 新契约） ----------
+        getAllCaretsCalls = 0;
+        animator.caretAdded(null);
+        check("R-13 caretAdded 只读一次 getAllCarets（一次取值两处用）",
+                getAllCaretsCalls == 1,
+                "getAllCarets=" + getAllCaretsCalls + " 次（期望 1；2 次 = U-M-9 未修）");
+
+        // ---------- R-11 / R-11b：诊断采样帧的 tick 链（U-H-2） ----------
+        //
+        // 用两帧做差分（M-1，否则 R-11b 会假通过）：
+        //   ① 参考帧：frameSeq 置 0 → 慢路径 ++ 成 1 → shouldSample(1) 为假 → 诊断块不执行；
+        //   ② 采样帧：frameSeq 置 14 → 慢路径 ++ 成 15 → 15 % 15 == 0 → 诊断块执行。
+        //
+        // 为什么不能只断言「getAllCarets > 0」：refreshTarget 的慢路径自己就会调
+        // getAllCarets（CaretAnimator 的慢路径实现），诊断块一次不执行也满足 > 0 ——
+        // 那正是本探针文件头引用的「四-G 假通过 A」。差分才能证明诊断块真的执行了。
+        V0Env.svc.getState().diagLogging = true;
+
+        // ① 参考帧（不命中采样）
+        setField(animator, "frameSeq", 0L);
+        vp = new VisualPosition(12, 1);
+        getAllCaretsCalls = 0;
+        try {
+            runTick.invoke(animator);
+        } catch (Throwable ignored) {
+            // 参考帧不走诊断块，RED 阶段也不该抛
+        }
+        int baselineCalls = getAllCaretsCalls;
+
+        // ② 采样帧（命中采样）
+        setField(animator, "frameSeq", 14L);
+        vp = new VisualPosition(13, 2);
+        getAllCaretsCalls = 0;
+        int vBeforeTick = violations;
+        int callsBeforeTick = V0Env.readActionCalls;
+        String tickError = null;
+        try {
+            runTick.invoke(animator);
+        } catch (Throwable t) {
+            Throwable cause = (t instanceof java.lang.reflect.InvocationTargetException
+                    && t.getCause() != null) ? t.getCause() : t;
+            tickError = cause.getClass().getSimpleName() + ": " + cause.getMessage();
+        }
+        int sampledCalls = getAllCaretsCalls;
+        check("R-11 诊断采样帧的 tick 链路零违规（U-H-2）",
+                tickError == null && violations == vBeforeTick,
+                tickError != null
+                        ? "tick 被桩判红：" + tickError
+                        : "违规=" + (violations - vBeforeTick) + "  readAction="
+                                + (V0Env.readActionCalls - callsBeforeTick));
+        check("R-11b 采样帧比不采样帧多读一次 getAllCarets（证明诊断块真的执行了）",
+                sampledCalls == baselineCalls + 1,
+                "不采样帧=" + baselineCalls + " 次，采样帧=" + sampledCalls + " 次（期望相差 1）"
+                        + (tickError != null ? "；采样帧异常=" + tickError : ""));
+        V0Env.svc.getState().diagLogging = false;
+
+        // ---------- R-12：dispose() 摘监听器（U-M-19） ----------
+        // dispose 会真的把 animator 拆掉，必须放最后。
+        int vBeforeDispose = violations;
+        String disposeError = null;
+        try {
+            animator.dispose();
+        } catch (Throwable t) {
+            disposeError = t.getClass().getSimpleName() + ": " + t.getMessage();
+        }
+        check("R-12 dispose() 摘 caret 监听器零违规（U-M-19）",
+                disposeError == null && violations == vBeforeDispose,
+                disposeError != null
+                        ? "dispose 抛出：" + disposeError
+                        : "违规=" + (violations - vBeforeDispose));
+
         finish();
     }
 
@@ -320,6 +436,7 @@ public final class VReadAction {
                             return primaryCaret;
                         case "getAllCarets":
                             guard("CaretModel.getAllCarets");
+                            getAllCaretsCalls++;
                             return carets;
                         case "addCaretListener":
                             guard("CaretModel.addCaretListener");
@@ -332,7 +449,20 @@ public final class VReadAction {
                     }
                 });
 
-        JComponent content = new JComponent() { };
+        // 【R-11 的前提，加强而非放宽】{@code CaretAnimator.tick()} 里有
+        // `if (!content.isShowing()) { … return; }` —— 真实编辑器不可见时确实该早退。
+        // （不写行号：本项目的行号引用已经漂过多次，方法名足够定位。）
+        // 但离线探针里的 JComponent 永远 isShowing()==false，于是 tick 永远走不到
+        // tickSpring 的 frameSummary，R-11 会变成「目标路径一次没执行还报绿」
+        // 的空转（四-G 假通过 A 的原样复刻）。这里显式声明"可见"，
+        // 让 tick 走完整个绘制链。该 override 只影响 tick 路径：现有 R-1..R-10
+        // 都不读 isShowing()，判据不变。
+        JComponent content = new JComponent() {
+            @Override
+            public boolean isShowing() {
+                return true;
+            }
+        };
         content.setSize(900, 700);
 
         Document doc = (Document) Proxy.newProxyInstance(
@@ -442,6 +572,8 @@ public final class VReadAction {
         refreshTargetInReadAction =
                 CaretAnimator.class.getDeclaredMethod("refreshTargetInReadAction");
         refreshTargetInReadAction.setAccessible(true);
+        runTick = CaretAnimator.class.getDeclaredMethod("runTick");
+        runTick.setAccessible(true);
     }
 
     private static SelectionModel selectionModel() {
@@ -463,6 +595,39 @@ public final class VReadAction {
                             return defaultValue(m.getReturnType());
                     }
                 });
+    }
+
+    /**
+     * 把 animator 从共享调度器摘掉，并**真正排空**调度线程与 EDT 队列，
+     * 消除并发投递对按次计数的干扰（MEDIUM-4）。
+     *
+     * <p>只从集合移除是不够的：R-9 的 {@code caretAdded} 已经把 {@code nextDueNanos}
+     * 置为「现在」，调度线程可能正在投递一次的途中。而 {@code V0Env} 只桩了
+     * {@code Application.invokeLater}，桩不到 {@code SwingUtilities} 的静态方法 ——
+     * 所以那次任务会真的进 EDT，在 R-13 / R-11 的计数窗口里改 {@code frameSeq}
+     * 与 {@code getAllCaretsCalls}。
+     */
+    private static void detachFromScheduler() throws Exception {
+        Class<?> rs = Class.forName("com.github.yyyolo7a79.neovidecursor.ui.RenderScheduler");
+        Method unreg = rs.getDeclaredMethod("unregister", CaretAnimator.class);
+        unreg.setAccessible(true);
+        unreg.invoke(null, animator);
+        // 等调度线程真正退出：unregister 已 interrupt，loop 醒来会看到集合空并 return。
+        Field tf = rs.getDeclaredField("thread");
+        tf.setAccessible(true);
+        Object t = tf.get(null);
+        if (t instanceof Thread th) {
+            th.join(1000);
+        }
+        // 排空 EDT：此前那次唤醒投递的 runTick 若还在队列里，会污染下面的计数。
+        javax.swing.SwingUtilities.invokeAndWait(() -> { });
+    }
+
+    /** 反射设置实例字段（用于把 frameSeq 推到诊断采样边界）。 */
+    private static void setField(Object target, String name, Object value) throws Exception {
+        Field f = target.getClass().getDeclaredField(name);
+        f.setAccessible(true);
+        f.set(target, value);
     }
 
     private static void forceTrailInitialized() throws Exception {

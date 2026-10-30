@@ -949,6 +949,25 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
         try {
             tick();
+            // 【M-2】成功一次就打平：计数反映「当前是否还坏着」，不是终身累计。
+            // 与 refreshFailureCount 同一语义（四-J 判据 2）——否则偶发 tick 异常
+            // 在第 2..1000 次会被限流静默掉，排查者看到「零日志」会以为没异常。
+            tickFailureCount = 0;
+        } catch (Throwable t) {
+            // 【U-M-25】原来这里只有 finally 没有 catch：tick 链上任何一步持续抛，
+            // 异常就每帧冲进 IDE 错误记录（125~144 次/秒），而插件自己一行不记 ——
+            // 与 refreshTarget 的待遇不对等（它有计数 + 限流）。
+            // 节流判据与 refreshTarget 共用 shouldLogFailure（纪律四-J 判据 2：
+            // 同一语义只许有一处实现）。
+            tickFailureCount++;
+            if (shouldLogFailure(tickFailureCount)) {
+                try {
+                    LOG.warn("neovide-cursor: tick 抛异常（累计 " + tickFailureCount
+                            + " 次）；若是确定性异常拖尾会永久冻结", t);
+                } catch (Throwable ignored) {
+                    // 日志子系统不可用时不能反过来连累调度（同 RenderScheduler 的 catch 体）
+                }
+            }
         } finally {
             scheduleNextDue();
         }
@@ -1089,16 +1108,21 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void caretAdded(@NotNull CaretEvent event) {
         forceResync = true;
         wakeUp();
-        // 【平台 252】getAllCarets() 是编辑器读取，包进 read action。
+        // 【平台 252 + U-M-9】一次取值、两处用。
         //
-        // 仍然调用两次（与改造前一致）：CursorDiag 的日志参数语义是
-        // 「变化前数量 = 现在数量 - 1」与「变化后数量」，改成一次取值会悄悄改掉
-        // 这条诊断契约；调用次数在这里不敏感（只在 caret 事件里发生，不在每帧热路径）。
-        int[] counts = readEditor(() -> new int[]{
-                editor.getCaretModel().getAllCarets().size(),
-                editor.getCaretModel().getAllCarets().size()
-        });
-        CursorDiag.caretCountChanged(counts[0] - 1, counts[1], "added");
+        // 原实现调了两次 getAllCarets()，而两次都在事件之后读 —— 返回值必然相同，
+        // 白付一次整表复制 + 排序（平台实现内部 List.sort，java-reviewer javap 实证）。
+        // 「变化前数量 = 现在数量 - 1」这个语义不需要两次读取：用同一个读数减 1 即可。
+        //
+        // 外面这层 try 是必需的：caretAdded 跑在平台 CaretListener 多播器里，
+        // 编辑器销毁瞬间 getCaretModel() 抛出会穿出多播器，可能连带中断后续监听器
+        // 与该次编辑操作（同文件的 traceCaretEvent 早就这么做了）。
+        try {
+            int caretCount = readEditor(() -> editor.getCaretModel().getAllCarets().size());
+            CursorDiag.caretCountChanged(caretCount - 1, caretCount, "added");
+        } catch (Throwable t) {
+            swallowedQuietly("caretAdded", t);
+        }
         traceCaretEvent("added");
     }
 
@@ -1112,12 +1136,13 @@ public class CaretAnimator implements Disposable, CaretListener {
     public void caretRemoved(@NotNull CaretEvent event) {
         forceResync = true;
         wakeUp();
-        // 【平台 252】同 caretAdded：读取进 read action，仍保持两次 getAllCarets() 调用。
-        int[] counts = readEditor(() -> new int[]{
-                editor.getCaretModel().getAllCarets().size(),
-                editor.getCaretModel().getAllCarets().size()
-        });
-        CursorDiag.caretCountChanged(counts[0] + 1, counts[1], "removed/merged");
+        // 【平台 252 + U-M-9】同 caretAdded：一次取值、两处用（「变化前 = 现在 + 1」）。
+        try {
+            int caretCount = readEditor(() -> editor.getCaretModel().getAllCarets().size());
+            CursorDiag.caretCountChanged(caretCount + 1, caretCount, "removed/merged");
+        } catch (Throwable t) {
+            swallowedQuietly("caretRemoved", t);
+        }
         traceCaretEvent("removed");
     }
 
@@ -1557,7 +1582,8 @@ public class CaretAnimator implements Disposable, CaretListener {
      *   <li><b>开销</b>：平台侧只是 ThreadLocal 深度 +1/-1（纳秒级），
      *       相对每帧 8ms 预算可忽略；嵌套调用由平台自己去重。</li>
      *   <li><b>不要在 read action 里做写操作</b>（改文档、改 PSI、改编辑器状态）——
-     *       本方法只用于读取，注册监听器属于平台允许在 read action 内完成的操作。</li>
+     *       本方法只用于读取；<b>注册 / 注销监听器</b>属于平台允许在 read action 内完成的操作
+     *       （U-M-19 起注销也走这里，与注册对称）。</li>
      * </ul>
      */
     private static <T> T readEditor(@NotNull ThrowableComputable<T, RuntimeException> body) {
@@ -1587,6 +1613,14 @@ public class CaretAnimator implements Disposable, CaretListener {
      * @return true 表示位置确实发生了变化
      */
     private boolean refreshTargetInReadAction() {
+        // 【MEDIUM-2】「这一次没抛异常」就打平连续失败计数。
+        //
+        // 原来只在方法末尾（慢路径走到底）归零，但快速路径 / IME skip / 无拖尾
+        // 这三条早退分支同样是**正常成功帧**。一次偶发异常后只要后续都是快速路径，
+        // count 就卡在 1；下一次真异常变成 2 → 被 `% 1000 == 1` 判据静默掉 ——
+        // 正是 U-M-4 要消灭的「只见第一行」换了个位置复发。
+        // 用 finally 统一处理，避免四处手写漏一处。
+        boolean success = false;
         try {
             // 【跟随点：有选区时用选区活动端（lead），否则用 caret 本身】
             //
@@ -1671,6 +1705,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                 // 数量变化一定伴随 caret 事件，事件会先置 forceResync，
                 // 下一帧就走不到这里。
                 CursorDiag.tickPathTrace(traceId, "fast");
+                success = true;
                 return false;
             }
 
@@ -1775,6 +1810,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     CursorDiag.imeSkipPicked(imeSkipFrames, p.x, caretOffset,
                             editor.offsetToXY(caretOffset).x);
                     CursorDiag.tickPathTrace(traceId, "ime-skip");
+                    success = true;
                     return false;
                 }
             }
@@ -2163,6 +2199,7 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             if (activeTrails.isEmpty()) {
                 logSlowRefresh(startedNanos, false);
+                success = true;
                 return false;
             }
 
@@ -2196,10 +2233,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
 
             logSlowRefresh(startedNanos, changed);
-            // 成功一次就把「连续失败」打平 —— 计数反映的是当前是否还坏着，
-            // 而不是历史累计（否则一次偶发异常之后日志会一直限流）。
-            refreshFailureCount = 0;
-            refreshFrameGap = 0;
+            success = true;
             return changed;
 
         } catch (Throwable t) {
@@ -2217,23 +2251,87 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 现在：首次异常打 warn，之后按 1000 帧限流打一次（避免刷爆日志）。
             // 同时计数，供诊断日志与探针观察。
             refreshFailureCount++;
-            if (refreshFailureCount == 1 || refreshFrameGap >= FAILURE_LOG_EVERY) {
-                refreshFrameGap = 0;
+            // 【U-M-4】原来这里的判据是 `refreshFailureCount == 1 || refreshFrameGap >= FAILURE_LOG_EVERY`，
+            // 而 refreshFrameGap 全仓没有一处 +1 —— 恒为 0，`>= 1000` 恒假。
+            // 于是「每 1000 次再报一次」的意图从未生效，确定性异常时只看得见第一行。
+            // 现在改成按失败计数取模，判据抽成 shouldLogFailure（runTick 的 catch 共用）。
+            if (shouldLogFailure(refreshFailureCount)) {
                 LOG.warn("neovide-cursor: refreshTarget 抛异常（累计 "
                         + refreshFailureCount + " 次）；若是确定性异常拖尾会永久冻结",
                         t);
             }
             return false;
+        } finally {
+            // 任何一次「没抛异常」的返回都算成功 —— 包括快速路径 / IME skip / 无拖尾
+            // 这三条早退分支（它们原来都不归零，见方法开头的 MEDIUM-2 说明）。
+            if (success) {
+                refreshFailureCount = 0;
+            }
+        }
+    }
+
+    /**
+     * 失败日志节流判据：首次必打，之后每 {@link #FAILURE_LOG_EVERY} 次再打一次。
+     *
+     * <p><b>为什么单独成一个方法</b>（而不是在两处 catch 里各写一遍取模）：
+     * <ul>
+     *   <li>纪律四-J 判据 2「同一语义存在于两处 → 先统一」——{@code refreshTarget} 与
+     *       {@code runTick} 两处失败限流必须同节奏，否则排查时无法用「日志间隔」推断失败率；</li>
+     *   <li>探针能直接调用生产判据做行为断言（{@code VReviewFixes} 的 A-1），
+     *       而不是去源码里搜 token —— 后者正是 U-M-4 之所以能长期躲过门禁的原因。</li>
+     * </ul>
+     *
+     * <p>为什么是 {@code % N == 1} 而不是 {@code % N == 0}：第 1 次由单独的 {@code == 1}
+     * 命中，取模分支要从 1001 起才与首次同节奏；写成 {@code == 0} 会让第 1000 次
+     * （与首发相隔 999 次）提前触发，间隔不一致。
+     *
+     * @param failureCount 累计失败次数（从 1 开始）
+     */
+    static boolean shouldLogFailure(long failureCount) {
+        return failureCount == 1 || failureCount % FAILURE_LOG_EVERY == 1;
+    }
+
+    /**
+     * 把异常交给诊断通道记录，但**绝不让诊断通道自己再抛**。
+     *
+     * <p><b>为什么需要这一层</b>（L-5）：{@code CursorDiag.swallowed} → {@code emit}，
+     * 而 {@code emit} 里的 {@code LOG.info(...)} 不设防（整条链只有「开文件」那一步有 try）；
+     * {@code PrintWriter} 自身会吞 {@code IOException}，但日志工厂在 IDE shutdown /
+     * 被摘掉时 {@code LOG.info} 会抛。而本方法的调用点全在平台回调
+     * （{@code CaretListener} 多播器）与 catch 块里 —— 在那里再抛一次，
+     * 就等于把「恢复路径」变成了新的异常源，正是这批 try 要堵的那条路。
+     *
+     * <p>与 {@code RenderScheduler} 的「catch 体必须自己也不抛」是同一条原则。
+     *
+     * @param where 调用点标识（诊断文件里用于定位）
+     */
+    private static void swallowedQuietly(String where, Throwable t) {
+        try {
+            CursorDiag.swallowed(where, t);
+        } catch (Throwable ignored) {
+            // 诊断通道自身不可用：不能反过来连累调用方。
         }
     }
 
     /** refreshTarget 连续失败次数（诊断用；任何一次成功都会归零） */
     private long refreshFailureCount;
 
-    /** 距上次失败日志的帧数，用于限流 */
-    private int refreshFrameGap;
+    /** tick 连续失败次数（U-M-25；tick 成功一次即归零，与 {@link #refreshFailureCount} 同语义） */
+    private long tickFailureCount;
 
-    /** 失败日志限流间隔（帧） */
+    /**
+     * {@link RenderScheduler#dispatchDue()} 对该 animator 投递失败（invokeLater 抛）的次数。
+     *
+     * <p><b>U-M-5</b>：原来那里每次都无条件 {@code LOG.warn}，B 反复抛时约 1000 行/秒进 idea.log。
+     * 计数放在 animator 身上而不是调度器的 Map 里：后者会随编辑器开合无界增长
+     * （see U-M-13 同类事故）。
+     *
+     * <p><b>成功投递一次即归零</b>（M-2）—— 与 {@link #refreshFailureCount} / {@link #tickFailureCount}
+     * 的「连续失败」语义一致。否则偶发失败会在第 2..1000 次被静默掉。
+     */
+    long invokeLaterFailureCount;
+
+    /** 失败日志限流间隔（次） */
     private static final int FAILURE_LOG_EVERY = 1000;
 
     /**
@@ -2538,8 +2636,16 @@ public class CaretAnimator implements Disposable, CaretListener {
             double spread = (diagTotal > 1 && diagMaxX > diagMinX)
                     ? (diagMaxX - diagMinX) : -1;
             // 块选区时中心 x 应当一致（同一列），spread 接近 0
+            //
+            // 【平台 252 · U-H-2】getAllCarets() 是编辑器读取，必须与 refreshTarget
+            // 走同一个包装。不能因为「tick 由 invokeLater 投递到 EDT」就省略 ——
+            // 在 EDT 上 ≠ 持有读锁，252 类平台会在 getAllCarets() 内部排序时抛
+            // "Read access is allowed from inside read-action only"，
+            // 而 runTick 当时只有 finally 没有 catch → 异常穿出 → 丢一帧 + 每秒约 8 条堆栈。
+            // 本行只在「诊断开启 且 命中采样帧」时执行，正常路径不进这个分支。
+            int caretCount = readEditor(() -> editor.getCaretModel().getAllCarets().size());
             CursorDiag.frameSummary(System.identityHashCode(this), frameSeq,
-                    editor.getCaretModel().getAllCarets().size(), diagTotal,
+                    caretCount, diagTotal,
                     false, anyAnimating, spread, measuredFps);
         }
 
@@ -2722,8 +2828,10 @@ public class CaretAnimator implements Disposable, CaretListener {
         } catch (Throwable t) {
             // 【0.9.88】这里原来叫 ignored，但它是「改了设置却没生效」的头号可疑点 ——
             // 四项全局设置读不到时会静默退回默认值，用户看到的是「我调了宽度它自己变回去」。
-            // 接进 CursorDiag.swallowed：诊断开启时留一行 [error]，关着就是零成本。
-            CursorDiag.swallowed("syncGlobalSettings", t);
+            // 接进诊断通道：诊断开启时留一行 [error]，关着就是零成本。
+            // 用 swallowedQuietly 而不是裸调 CursorDiag.swallowed —— 本 catch 后面还要
+            // 重置四项默认值，诊断通道自己抛会把这四行跳过。
+            swallowedQuietly("syncGlobalSettings", t);
             multiCursorNoGlow = false;
             cursorWidthPx = 2;
             cursorHeightRatio = 1.0f;
@@ -2750,7 +2858,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         } catch (Throwable t) {
             // 【0.9.88】这里也接进 swallowed：取预设失败会让「彩虹」静默变成双拼/纯色，
             // 用户看到的是「选了彩虹但颜色不对」，而日志里一个字都没有。
-            CursorDiag.swallowed("resolveRgbWash", t);
+            swallowedQuietly("resolveRgbWash", t);
             return false;
         }
     }
@@ -2862,9 +2970,19 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
 
         try {
-            editor.getCaretModel().removeCaretListener(this);
-        } catch (Throwable ignored) {
-            // 编辑器可能已关闭
+            // 【平台 252 · U-M-19】与注册侧（见构造器里 addCaretListener 那段）同一口径：
+            // getCaretModel() 本身是编辑器读取，注销动作也要放进同一个 read action。
+            // 原来这里裸调：252 类平台关闭编辑器时 getCaretModel() 抛断言 → 被下面的
+            // catch 吞掉 → CaretListener 永久挂在正在销毁的 CaretModel 上，
+            // animator / panel 连带不可回收，且全程无痕（"漏摘"不是"报错"）。
+            readEditor(() -> {
+                editor.getCaretModel().removeCaretListener(this);
+                return null;
+            });
+        } catch (Throwable t) {
+            // 【L-6】不再空吞：U-M-19 的问题正是「漏摘不留痕」。
+            // 走与 caret 事件同一个安静通道（诊断关闭时零成本）。
+            swallowedQuietly("dispose.removeCaretListener", t);
         }
         // 平台没有 removeListener，只能 dispose 注册时给的生命期句柄（见字段注释）
         try {
