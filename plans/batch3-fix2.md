@@ -276,7 +276,7 @@ $ pwsh ... build-v-probes.ps1 -Repo D:/deepseekwork/neovim-cursor-pr   # exit 0
 > 今天两份实现的排序完全相同，所以任何行为断言在改前都只能绿。它的红由变异制造 ——
 > 这正是陷阱 3 的验真方式（改坏生产 → 守门必须红），M-7 / M-8 两条都验证了。
 
-### 5.3 变异清单（8 条，全部按预期变红）
+### 5.3 变异清单（9 条，全部按预期变红）
 
 ```
 M-1 删 previewConfig = null                        → D-1b FAIL
