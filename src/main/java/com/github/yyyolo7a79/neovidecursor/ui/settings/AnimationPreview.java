@@ -799,13 +799,40 @@ public final class AnimationPreview extends JComponent {
      * <p>现在改为与生产完全一致的「稳定排序 + 索引 tiebreak」。
      */
     private int[] assignRanks(double cx, double cy) {
-        double[] al = new double[4];
-        for (int i = 0; i < 4; i++) {
+        double[] al = new double[corners.length];
+        for (int i = 0; i < corners.length; i++) {
             al[i] = corners[i].calculateDirectionAlignment(cursorW, cursorH, cx, cy);
         }
-        // 稳定插入排序：只有严格大于才后移，并列保持原始顺序（索引 tiebreak）
-        int[] order = {0, 1, 2, 3};
-        for (int i = 1; i < 4; i++) {
+        return ranksForAlignment(al);
+    }
+
+    /**
+     * 四角对齐度 → 每个角的 rank（0 = 最靠后，拿最长时长）。
+     *
+     * <p><b>为什么拆成 static 纯函数（2026-10-31 / 第 3 批审查 P-M-8）</b>：
+     * 这份排序与生产 {@code SpringTrail.assignRanks()} 是<b>两份独立实现</b>，
+     * 0.9.77 已经因为「改了生产、忘了预览」出过一次事（生产变斜、预览仍是矩形）。
+     * 本轮白名单不允许动 {@code ui/SpringTrail.java}，不能把算法抽到 core 共用，
+     * 所以至少要把「排序」这一步暴露出来，让守门探针 {@code VPreviewRank}
+     * 能喂<b>同一份对齐度</b>给两边、逐角比对 rank。
+     *
+     * <p>抽出来之后 {@link #assignRanks} 只剩「量对齐度」这一句 —— 它本来就没有第二份实现
+     * （{@code TrailCorner.calculateDirectionAlignment} 是生产的），于是
+     * 「预览与生产分家」的全部风险都收进了这一个函数，探针盯住它就够。
+     *
+     * <p><b>稳定插入排序：只有严格大于才后移</b>，并列保持原始顺序（索引 tiebreak）。
+     * 改成 {@code >=} 会让同侧上下角的拆法反向 —— {@code VPreviewRank} 会当场红。
+     *
+     * @param al 四角对齐度（长度 = 角点数，顺序与 {@code corners} 一致）
+     * @return {@code r[i]} = 第 i 个角的 rank
+     */
+    public static int[] ranksForAlignment(double[] al) {
+        final int n = al.length;
+        int[] order = new int[n];
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
+        }
+        for (int i = 1; i < n; i++) {
             int key = order[i];
             int j = i - 1;
             while (j >= 0 && al[order[j]] > al[key]) {
@@ -814,8 +841,8 @@ public final class AnimationPreview extends JComponent {
             }
             order[j + 1] = key;
         }
-        int[] r = new int[4];
-        for (int k = 0; k < 4; k++) {
+        int[] r = new int[n];
+        for (int k = 0; k < n; k++) {
             r[order[k]] = k;
         }
         return r;

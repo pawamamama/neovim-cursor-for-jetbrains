@@ -195,7 +195,16 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # T-5 enableSearch 覆写已摘除（P-M-2）。
         # P-H-1（提示改三参）由 VHints 的 oracle 变更守门，不在本探针里重复。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VBatch3Fixes')
+        'VBatch3Fixes',
+        # 【2026-10-31】第 3 批审查「收尾第一批」5 条 MEDIUM 的守门：
+        #   P-M-11 dispose 释放 8 个引用（预览 ×3 + previewConfig + 2 个非 DSL 控件 + 2 个恢复按钮）/
+        #   P-M-5 预设数值快照越界必须夹回，且结果 == loadState 对同一脏值的处理 /
+        #   P-M-6 颜色快照非法 HEX 不得写进 State / P-M-3 坏颜色快照不得静默。
+        # VPreviewRank 单独守 P-M-8（预览的 rank 排序是生产算法的复制品）：
+        # 它要反射驱动 SpringTrail 取生产的真 rank，与「喂同一份对齐度」的预览结果逐角比对。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VBatch3Medium',
+        'VPreviewRank')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

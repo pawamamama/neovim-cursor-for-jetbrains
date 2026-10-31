@@ -114,6 +114,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 预设快照损坏时的标题（P-H-3）。 */
     private static final String PRESET_BROKEN_TITLE = "无法应用预设";
 
+    /**
+     * 预设快照里有越界数值、已被夹回合法区间时的标题（P-M-5）。
+     *
+     * <p>与 {@link #PRESET_BROKEN_TITLE} 分开：那一条是「这份预设不能用，什么都没改」，
+     * 这一条是「用上了，但有几个值替你收回了合法范围」—— 两种结论不能共用一个标题。
+     */
+    private static final String PRESET_CLAMPED_TITLE = "预设里有越界参数";
+
     // ==================== 警告文案（契约 §2.2 / §7.3 / §9.4，逐字，不得改动）====================
 
     private static final String W_ALWAYS_HIGH_FPS =
@@ -1697,7 +1705,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 // 否则「停止重绘」会在用户不知情时被重置（那是 T3-2 修过的回归）。
                 paintDiagCheck = row.checkBox("").getComponent();
                 paintDiagCheck.setSelected(paintDiag);
-                paintDiagCheck.addItemListener(e -> paintDiag = paintDiagCheck.isSelected());
+                // 【捕获局部变量，不读字段】（2026-10-31）disposeUIResources() 现在会把
+                // paintDiagCheck 置 null（P-M-11）。监听器若解引用字段，理论上存在一条
+                // 「dispose 之后仍收到 ItemEvent」的 NPE 路径。控件自己就在事件源里，
+                // 用 e.getSource() 语义完全等价，且与 trailModeCombo 的写法一致。
+                paintDiagCheck.addItemListener(e ->
+                        paintDiag = ((javax.swing.AbstractButton) e.getSource()).isSelected());
                 row.rowComment(W_PAINT_DIAG, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
@@ -2121,6 +2134,25 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 }
                 return;
             }
+            // 【P-M-5，2026-10-31】快照里的数值必须过一遍量程。
+            // 上面刚做的 restoreSkipping 走的是 SettingsField.decode，它只拒 NaN/Inf
+            // 与解析失败，**不 clamp**；真正的 clamp 只在下次启动的 loadState 里发生。
+            // 于是手改/旧版写下的 glowLayers=99 会：进 pending → 应用 → 落盘 99，
+            // 同一会话里滑块显示 12、输入框显示 99（syncAllControlsFromPending 写的是 exact），
+            // 重启后 loadState 悄悄改回 12 —— 用户看到「值自己变了」。
+            // 这里补上第二条入口的同一套规则：越界就夹回，并留日志 + 提示。
+            java.util.List<String> clamped = clampPresetNumerics(pending);
+            if (!clamped.isEmpty()) {
+                // 【自愈：把夹回值写回这一条自定义预设】（2026-10-31 审查实测）
+                // 不回写的话，用户在这个坏预设上**每点一次下拉就弹一次模态警告**，
+                // 直到他手动拖一次滑块（那才会触发 afterPendingEdited 把快照重写）。
+                // 「站在自定义预设上编辑 → 快照实时保存」本来就是这条路径的既定语义
+                // （见 afterPendingEdited 分支 A），而夹回正是一次由用户操作引起的编辑。
+                // 三参 put 会保留父引用，不会把「我是谁的孩子」改掉。
+                pending.customAnimPresets = CustomPresets.put(
+                        pending.customAnimPresets, e.name, SettingsField.snapshot(pending));
+            }
+            reportClampedNumerics(e.name, clamped);
             pending.animCustomName = e.name;
         }
         syncAllControlsFromPending();
@@ -2165,13 +2197,29 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return;
             }
             CustomPresets.Entry e = entries.get(ci);
-            String[] hex = CursorPresets.parseColorSnapshot(e.snapshot);
-            if (hex == null) {
-                refreshPresetDisplay();          // 坏快照 → 当作选中失败，不写半套颜色
+            // 【P-M-6 / P-M-3，2026-10-31】颜色快照走的是**另一份**编解码实现
+            // （CursorPresets.parseColorSnapshot），它只判「两个键都在」，不校验 HEX；
+            // 而动画快照那条路（SettingsField.decode 的 HEX 分支）有 isValidHexColor。
+            // 同一类数据两条入口、一条设防一条不设防 —— 这里补上，且复用的就是那个函数。
+            //
+            // 失败时**不写半套颜色**，并按 P-H-3 已经建立好的范式处置：
+            // 提示用户 + 抑制派生 + 把下拉拉回真实状态（否则「点了没反应」也算静默）。
+            String colorError = applyColorSnapshot(pending, e);
+            if (colorError != null) {
+                LOG.warn("neovide-cursor: 颜色预设「" + e.name + "」" + colorError
+                        + "，本次切换已取消");
+                showUserNotice(PRESET_BROKEN_TITLE,
+                        "颜色预设「" + e.name + "」" + colorError
+                                + "，本次切换已取消，当前颜色保持不变。", false);
+                boolean prevSuppress = suppressDerive;
+                suppressDerive = true;
+                try {
+                    refreshPresetDisplay();
+                } finally {
+                    suppressDerive = prevSuppress;
+                }
                 return;
             }
-            pending.tailColor = hex[0];
-            pending.shadowColor = hex[1];
             pending.colorCustomName = e.name;
         }
         // 【0.9.88 删除：不再写 rgbGradient】
@@ -2607,6 +2655,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                                     + "恢复未执行，当前设置保持不变。", false);
                     return;
                 }
+                // 【P-M-5，2026-10-31】与 onAnimPresetPicked 的自定义分支同一条判据：
+                // 恢复出来的数值同样要过量程（restoreSkipping 只做类型校验，不 clamp）。
+                reportClampedNumerics(base.custom.name, clampPresetNumerics(pending));
             }
 
             // 【不动 animCustomName、不动 customAnimPresets】
@@ -2644,12 +2695,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 pending.shadowColor = p.shadowColor();
                 pending.colorPresetBase = b.builtinIdx;
             } else {
-                String[] hex = CursorPresets.parseColorSnapshot(b.custom.snapshot);
-                if (hex == null) {
+                // 【P-M-3 / P-M-6，2026-10-31】与 onColorPresetPicked 的自定义分支同一条判据。
+                // 原来这里 `hex == null` 只 `return` —— 连刷新都没有，用户点了「恢复默认值」
+                // 看到的是「什么都没发生」，且没有任何说明。
+                String colorError = applyColorSnapshot(pending, b.custom);
+                if (colorError != null) {
+                    LOG.warn("neovide-cursor: 颜色预设「" + b.custom.name + "」" + colorError
+                            + "，恢复未执行");
+                    showUserNotice(PRESET_BROKEN_TITLE,
+                            "颜色预设「" + b.custom.name + "」" + colorError
+                                    + "，恢复未执行，当前颜色保持不变。", false);
                     return;
                 }
-                pending.tailColor = hex[0];
-                pending.shadowColor = hex[1];
             }
             // 【0.9.88：不写 rgbGradient】与 onColorPresetPicked 一致，
             // 彩虹靠 resolveRgbWash() 反推，不占用用户的光标渐变开关。
@@ -2657,6 +2714,169 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         } finally {
             suppressDerive = prev;
         }
+    }
+
+    // ==================== 快照校验（P-M-5 / P-M-6 / P-M-3，2026-10-31）====================
+
+    /**
+     * 把 {@code s} 里越界的数值字段夹回面板量程。
+     *
+     * <p><b>这是 P-M-5 在「面板路径」的唯一实现。</b>另有一条入口 —— Tools 菜单的
+     * {@code ui/CursorPresetApplier.applyCustomAnimPreset()} —— 不在本轮白名单内，
+     * <b>仍带同一缺陷</b>（已登记在 `plans/batch3-fix2.md` §七「已知未修」）。
+     * 不要把这句读成「全项目已修完」。
+     *
+     * <h2>它解决的是什么</h2>
+     *
+     * <p>同一个字段有两条入口：启动时的 {@code loadState()}（有 clamp）与
+     * 预设还原的 {@code SettingsField.decode()}（<b>只做类型校验，不 clamp</b>）。
+     * 一条设防一条不设防，于是手改/旧版写下的 {@code glowLayers=99} 会一路进 State、
+     * 进 CONFIG、落盘；直到下次启动才被 loadState 悄悄改回 12 —— 用户看到「值自己变了」。
+     *
+     * <h2>为什么量程取自 {@link #SPECS} 而不是另写一张表</h2>
+     *
+     * <p>{@code SPECS} 就是面板构建滑块时用的那张表：它已经携带了每个数值字段的
+     * 合法刻度区间（{@code min/max}）与「原始值 ↔ 刻度」的双向换算
+     * （{@code readTick/writeTick}）。再写一张量程表就是「同一语义存在于两处」，
+     * 正是纪律四-J 第 2 条要消灭的形态。
+     *
+     * <p>两张表的量程**逐项一致**（`plans/batch3-fix2.md` §0.2 有对照表），
+     * 所以「面板夹回的值」与「loadState 夹回的值」是一样的；{@code VBatch3Medium} 的 N-1
+     * 直接拿 {@code loadState} 当 oracle 验这一点，不抄任何数字。
+     *
+     * <h2>为什么用「原始值 vs 端点原始值」比较，而不是直接比刻度</h2>
+     *
+     * <p>有两处会骗人：
+     * <ul>
+     *   <li>{@code shadowBlurFactor} 的刻度是<b>反的</b>（锐度 0 = 最柔 0.60，
+     *       锐度 100 = 最锐 0.05），且 {@code sharpnessOf} 自己就把输入夹进了 0..100 ——
+     *       只比刻度的话，一个 1e9 的外扩幅度会「看起来合法」而永远不被修正。</li>
+     *   <li>{@code animationLength} 等字段的刻度是「秒 × 100」，浮点往返会有末位差。
+     *       拿原始值比端点，比较的是同一批换算结果，没有第二套舍入。</li>
+     * </ul>
+     *
+     * <h2>为什么是 clamp 而不是「整条预设拒绝」</h2>
+     *
+     * <p>条目名就叫「快照不 clamp」，而 {@code loadState} 的语义也是 clamp 到合法区间。
+     * 整条拒绝会让一份「只有一个字段越界」的老预设<b>全部失效</b>，那是用户可感知的
+     * 行为变化。clamp 之后「应用的值 == 重启后读回的值」，用户再也看不到「值自己变了」。
+     *
+     * @return 被夹过的字段名（按 {@code SPECS} 顺序；空列表 = 全都合法）
+     */
+    private static java.util.List<String> clampPresetNumerics(NeovideCursorSettings.State s) {
+        java.util.List<String> clamped = new java.util.ArrayList<>();
+        for (SliderSpec sp : SPECS) {
+            SettingsField f = SettingsField.byKey(sp.key);
+            if (f == null || !(f.readState(s) instanceof Number)) {
+                continue;                       // 理论上不会发生：SPECS 与 FIELDS 同源
+            }
+            // 【必须跳过运行环境开关】（2026-10-31 审查）`cursorWidthPx` / `cursorHeightRatio`
+            // 也在 SPECS 里（它们有滑块），但它们是**设备级**开关，预设还原根本无权改
+            // （restoreSkipping 整段跳过，见 SettingsField.runtimeSwitch 的注释）。
+            // 不跳过的话，一份值越界的 pending 会在「切一次动画预设」时被悄悄改写这些字段 ——
+            // 与「预设不得改设备开关」这条不变量正好相反。
+            if (f.runtimeSwitch) {
+                continue;
+            }
+            double raw = ((Number) f.readState(s)).doubleValue();
+            double rawAtMin = rawAtTick(sp, f, sp.min);
+            double rawAtMax = rawAtTick(sp, f, sp.max);
+            if (Double.isNaN(raw) || Double.isNaN(rawAtMin) || Double.isNaN(rawAtMax)) {
+                // 读不出端点就不夹：猜一个区间去改用户的值，比不改更糟。
+                continue;
+            }
+            double lo = Math.min(rawAtMin, rawAtMax);
+            double hi = Math.max(rawAtMin, rawAtMax);
+            if (raw >= lo && raw <= hi) {
+                continue;                       // 合法：一位都不动（观感零变化）
+            }
+            // 越界方向决定夹到哪一端 —— 端点原始值可能是反序的（锐度就是这样）。
+            boolean minIsLow = rawAtMin <= rawAtMax;
+            int targetTick = (raw < lo)
+                    ? (minIsLow ? sp.min : sp.max)
+                    : (minIsLow ? sp.max : sp.min);
+            sp.writeTick.accept(s, targetTick);
+            clamped.add(sp.key);
+        }
+        return clamped;
+    }
+
+    /** 把刻度 {@code tick} 写进一个临时 State 再读回原始值 —— 只为拿端点，不改 {@code s}。 */
+    private static double rawAtTick(SliderSpec sp, SettingsField f, int tick) {
+        NeovideCursorSettings.State probe = new NeovideCursorSettings.State();
+        sp.writeTick.accept(probe, tick);
+        Object v = f.readState(probe);
+        return v instanceof Number ? ((Number) v).doubleValue() : Double.NaN;
+    }
+
+    /**
+     * 把「夹回」这件事告诉用户与日志（P-M-5）。
+     *
+     * <p><b>为什么不能只夹不报</b>：夹回本质上是「用户存的值被改了」。静默改值正是
+     * 这条缺陷的原始症状（重启后值自己变了）。夹回当场提示，用户至少知道
+     * 「这份预设里有坏值，我替你收到了合法范围」。
+     *
+     * <p>没有越界时<b>不提示、不打日志</b> —— 绝大多数还原都不该多出一个对话框。
+     */
+    private void reportClampedNumerics(String presetName, java.util.List<String> clamped) {
+        if (clamped.isEmpty()) {
+            return;
+        }
+        // 日志里写**字段 key**（排查时唯一能对上代码的东西）；
+        // 用户看的提示里**不写 key** —— 那是英文标识符，纪律四-M 要求界面文案用中文，
+        // 而给每个 key 配一份中文名就是又一张要手工同步的表（本项目的经典病根）。
+        // 提示只报「几个参数」，细节留给 idea.log。
+        LOG.warn("neovide-cursor: 预设「" + presetName + "」里有越界数值，已夹回合法区间："
+                + String.join("、", clamped));
+        showUserNotice(PRESET_CLAMPED_TITLE,
+                "预设「" + presetName + "」里有 " + clamped.size()
+                        + " 个参数超出正常范围，已按合法区间应用（具体字段见 idea.log）。",
+                false);
+    }
+
+    /**
+     * 把自定义颜色预设的快照写进 {@code s}。
+     *
+     * <p><b>这是 P-M-6 / P-M-3 在「面板路径」的唯一判据。</b>Tools 菜单的
+     * {@code ui/CursorPresetApplier.applyCustomColorPreset()} 同样不在本轮白名单内，
+     * <b>仍只判 {@code hex == null}、不校验 HEX</b>（已登记在 `plans/batch3-fix2.md` §七）。
+     *
+     * <h2>为什么要单独一个函数</h2>
+     *
+     * <p>颜色快照有<b>两条</b>入口（下拉选中、恢复默认值），原来各写一遍
+     * {@code parseColorSnapshot} + 两个赋值，于是「坏快照怎么办」也有两份答案：
+     * 一条只刷新，另一条连刷新都没有，两条都不出声。
+     *
+     * <h2>校验口径从哪来</h2>
+     *
+     * <p>直接调 {@link SettingsField#isValidHexColor(String)} —— 就是动画快照那条路径
+     * （{@code SettingsField.decode} 的 HEX 分支）用的同一个函数，0.9.74 专为
+     * 「坏颜色流进绘制层变黑」加的那一个。这里不新写任何规则。
+     * 它接受 {@code #RRGGBB} 与 {@code #AARRGGBB}，所以 9 位 RGBA 仍然合法
+     * （本轮只挡「根本不是颜色」的串，不收紧口径）。
+     *
+     * @return {@code null} = 已成功写入；否则是给用户看的失败原因
+     */
+    private static String applyColorSnapshot(NeovideCursorSettings.State s,
+                                             CustomPresets.Entry e) {
+        String[] hex = CursorPresets.parseColorSnapshot(e.snapshot);
+        if (hex == null) {
+            return "的内容已损坏（缺少颜色字段）";
+        }
+        // 【必须 trim 后再写】isValidHexColor 内部会 trim（它判的是「trim 后是否合法」），
+        // 而绘制层的 NeovideColors.parse **不 trim** —— 直接把原串写进 State 的话，
+        // 快照里一个 ` #123456`（前导空格）会：校验通过 → 落盘 → 绘制时认不出来 → 光标变黑。
+        // 动画快照那条路径（SettingsField.decode 的 HEX 分支）本来就是「trim 后再赋值」，
+        // 这里对齐同一口径。
+        String tail = hex[0].trim();
+        String shadow = hex[1].trim();
+        if (!SettingsField.isValidHexColor(tail) || !SettingsField.isValidHexColor(shadow)) {
+            return "的颜色格式非法（不是 #RRGGBB / #AARRGGBB）";
+        }
+        // 两个都合法才写 —— 「不写半套颜色」是这条路径从 0.9.x 起就有的承诺。
+        s.tailColor = tail;
+        s.shadowColor = shadow;
+        return null;
     }
 
     /** 当前颜色预设的「恢复默认值」目标（与 {@link #currentAnimBase()} 同构）。 */
@@ -3504,6 +3724,35 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         colorPresetCombo = null;
         singleMoveHint = null;
         crossMoveHint = null;
+        // ==================== 2026-10-31 / P-M-11：预览与 5 个非 DSL 控件 ====================
+        //
+        // 【为什么必须补这 8 个 null】
+        // 上面已经逐个释放了颜色面板 / 下拉 / 按钮，判据是「已脱离组件树的对象不得被继续强引用」。
+        // 同一个判据完全适用于下面 8 个字段，只是当初没做到底：
+        //
+        //   inlinePreview / crossPreview / glowPreview —— 每个 AnimationPreview 各持
+        //       一整棵 Swing 组件树（面板 + 四个 TrailCorner + 两个 Timer）。不置 null，
+        //       它们被 Configurable 强引用到应用退出。
+        //   previewConfig —— **最关键的一个**：refreshPreviews() 的守卫就是
+        //       `if (previewConfig == null) return;`。不置 null，dispose 之后任何一个
+        //       排队到达的事件（ColorPanel 回调、延迟 repaint）仍会走进 refreshPreviews，
+        //       把参数写进 previewConfig，再对三个已 dispose 的预览逐个
+        //       onConfigChanged() + repaint()。组件不会炸（Swing 对不可见组件的 repaint
+        //       会早退），但这正是「已释放对象仍在被写」——release 没做完。
+        //   trailModeCombo / paintDiagCheck / animRestoreBtn / colorRestoreBtn ——
+        //       都是非 DSL 绑定、由本类手工同步的控件，与上面已释放的那批同类。
+        //
+        // 【为什么是 8 个而不是更多】判据是「非 DSL 绑定 + 本类强引用 + dispose 后仍可达」。
+        // bindings / animPresetItems / colorPresetItems 已经 clear()，session 已经 close()，
+        // 它们不是「被漏掉的引用」，是「已清空的容器」，不在这 8 个之内。
+        inlinePreview = null;
+        crossPreview = null;
+        glowPreview = null;
+        previewConfig = null;
+        trailModeCombo = null;
+        paintDiagCheck = null;
+        animRestoreBtn = null;
+        colorRestoreBtn = null;
         bindings.clear();
         animPresetItems.clear();
         colorPresetItems.clear();
@@ -3999,5 +4248,47 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 探针/调试用：模拟用户在下拉里选了某个颜色预设。 */
     public void pickColorPresetForProbe(int index) {
         colorPresetCombo.setSelectedIndex(index);
+    }
+
+    /**
+     * 探针用：直接调用 {@link #refreshPreviews()}。
+     *
+     * <p><b>为什么需要它</b>：dispose 之后必须验证「刷新预览」这条路真的被
+     * {@code previewConfig == null} 挡住了。走 {@code refreshPresetDisplayForProbe()}
+     * 验证不了 —— 它第一句就判两个下拉是否为 null，dispose 之后直接早退，
+     * {@code refreshPreviews()} 一次都不会被调到（那会变成一条名不副实的断言）。
+     */
+    public void refreshPreviewsForProbe() {
+        refreshPreviews();
+    }
+
+    /**
+     * 探针用：{@code disposeUIResources()} 该释放的 8 个引用当前是否为 null。
+     *
+     * <p>顺序固定（与 {@link #disposeUIResources()} 里的释放顺序一致）：
+     * <pre>
+     *   [0] inlinePreview     [1] crossPreview      [2] glowPreview
+     *   [3] previewConfig     [4] trailModeCombo    [5] paintDiagCheck
+     *   [6] animRestoreBtn    [7] colorRestoreBtn
+     * </pre>
+     *
+     * <p><b>为什么是 8 个</b>：3 个预览各持一棵完整组件树；{@code previewConfig} 是
+     * {@code refreshPreviews()} 的<b>唯一门槛</b>（不置 null，dispose 之后的排队事件
+     * 仍会把参数写进去、并对已脱离组件树的预览 repaint）；剩下 4 个是同样的
+     * 「非 DSL 绑定、却一直被强引用」的控件引用。
+     *
+     * @return 长度 8 的布尔数组，{@code true} = 该引用已是 null
+     */
+    public boolean[] disposeNullFlagsForProbe() {
+        return new boolean[]{
+                inlinePreview == null,
+                crossPreview == null,
+                glowPreview == null,
+                previewConfig == null,
+                trailModeCombo == null,
+                paintDiagCheck == null,
+                animRestoreBtn == null,
+                colorRestoreBtn == null,
+        };
     }
 }
