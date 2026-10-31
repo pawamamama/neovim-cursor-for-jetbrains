@@ -41,7 +41,7 @@
 | 发版 | [RELEASE-SAFETY.md](RELEASE-SAFETY.md) | 162 | 0.9.70，未核对 |
 | 接手这个项目 | [SKILL-neovide-cursor-plugin-handoff.md](SKILL-neovide-cursor-plugin-handoff.md) | 165 | 0.9.98 |
 | 离线编译打包插件（通用技巧） | [SKILL-jetbrains-plugin-offline-build.md](SKILL-jetbrains-plugin-offline-build.md) | 148 | 未核对 |
-| 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 1034 | 2026-10-29（补 BUG-012 辉光预览 / BUG-013 斜度=100） |
+| 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 1139 | 2026-10-30（补 BUG-014 预设派生丢 3 字段 / BUG-015 拉伸方向待核实） |
 | **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 266 | 0.9.92，未核对 |
 | 代码审计记录 | [CODE-AUDIT-0.9.87.md](CODE-AUDIT-0.9.87.md) | 722 | 0.9.87（描述当时） |
 | **设置系统重构分步方案** | [../plans/settings-refactor.md](../plans/settings-refactor.md) | 830 | 0.9.80 实测结论 |

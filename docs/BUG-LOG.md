@@ -1032,3 +1032,108 @@ glowWidth = 0.6 × 33.6 = 20.16 px          ← 半径
 `VSlopePreset` 第 5/6 条早已把这件事锁成契约：
 「只有一个内置预设带斜度（纯平滑输入）」+「切预设真的写 slopeTicks（基础→0、纯平滑→100）」。
 换句话说，**用户报的这个现象在门禁里本来就是绿的一条断言** —— 它是设计，不是回归。
+
+---
+
+## BUG-014 切到「个人自定义」预设后辉光是开的（**待核实，低优先级，2026-10-30 用户报**）
+
+**用户报**：「我调到个人自定义的那个预设 — 没有辉光的，现在是辉光开启的，还原脚本有问题」
+
+**用户判断**：`build/install.ps1` 的配置还原把辉光状态弄丢了。
+
+**实测证据（2026-10-30 19:45，0.9.107 安装后）**：
+
+1. 两个自定义预设的快照里，**`useShadow=1`（开辉光）**：
+   - `个人自定义`：`useShadow=1`，`glowOpacity=0.3`，`glowLayers=12`
+   - `基础调试1`：`useShadow=1`，`glowOpacity=0.55`，`glowLayers=12`
+
+   原文（`NeovideCursorSettings.xml` 的 `customAnimPresets`）：
+   ```
+   个人自定义␟slopeTicks=100;…;useShadow=1;glowOpacity=0.3;glowLayers=12;…
+   基础调试1␟b0␝slopeTicks=0;…;useShadow=1;glowOpacity=0.55;glowLayers=12;…
+   ```
+
+2. 安装前的备份 `_config-backup/personal-state-20261030-194430.json` 的键里**没有** `useShadow`：
+   ```
+   stateVersion targetFps tailColor shadowColor glowLayers shadowBlurFactor
+   customAnimPresets animCustomName colorPresetBase
+   ```
+
+3. `build/install.ps1:81` 的策略是「**不在丢弃名单里的一律备份并还原**」（全量，不是白名单）。
+   DryRun 只列出 9 个字段，是因为 **XML 里本来就只有这 9 个键**，不是脚本漏备份。
+
+4. 为什么 XML 里没有 `useShadow`：IntelliJ 的 `XmlSerializer` **不写默认值**。
+   `useShadow` 的默认值是 `true`（见 `VDefaultFreeze.GOLDEN`），从未偏离过 →
+   一直不落盘 → 安装前后运行时取到的都是 `true`。
+
+**用户 2026-10-30 补充的关键事实**：「那个是纯平滑派生来的，本来没开启辉光，
+现在默认开启的，而且辉光数值对不上疑似用的初始数值，但是能改说明不是严重 bug。」
+
+**由此定位到真正的差异（同一天核实）**：这个自定义预设派生自内置「纯平滑输入」。
+两者逐字段对比，13 个预设域字段里 **10 个继承正确，3 个对不上**：
+
+| 字段 | 纯平滑输入（内置常量） | 个人自定义（快照里存的） |
+|---|---|---|
+| `useShadow` | **false** | **true** ✗ |
+| `overlayFadeOut` | **false** | **true** ✗ |
+| `glowLayers` | **8** | **12** ✗ |
+| `slopeTicks` | 100 | 100 ✓ |
+| `glowOpacity` | 0.30 | 0.3 ✓ |
+| `shadowBlurFactor` | 0.60 | 0.6 ✓ |
+| `stretchRatioK` | 2.0 | 2.0 ✓ |
+| `trailSize` / `animationLength` / `shortAnimationLength` / `tailOpacity` / `cursorDisappearDelay` / `cursorFadeOutDuration` | — | 全部吻合 ✓ |
+
+**已排除的方向**：
+
+- 不是「这三个字段不在预设域」——`applyAnimPresetFields` 明确写了它们：
+  `ui/settings/NeovideCursorConfigurable.java:2818-2820`（`writeAnimValues` 的第 4 项是
+  `p.glowLayers()`）、`:2821`（`s.useShadow`）、`:2822`（`s.overlayFadeOut`）。
+- 不是「还原脚本把值改坏了」——见上面四条证据；而且安装前后的 `useShadow`
+  都是「不落盘 → 运行时取默认 true」，中间没有发生过 false → true 的转换。
+
+**根因方向（未定位，但已收窄）**：问题出在「派生那一刻 `pending` 里这三个字段是什么」，
+不在字段域本身。最可疑的是 `NeovideCursorConfigurable.afterPendingEdited()` 的 A 分支
+（`:2256-2266`）：**站在自定义预设上时，任何一次编辑都会把 `snapshot(pending)` 整份写回快照**。
+于是只要 `pending` 被任何路径（面板回灌、`reset()`、配置同步）改回默认值，
+用户再随手拖一个滑块，这个「污染值」就被**永久固化**进快照。
+
+这正好解释了用户说的「能改说明不是严重 bug」——手动改回来即可，
+但改回来之后**不会再自动恢复**，因为快照已经被那次编辑写死了。
+
+**优先级**：低（用户 2026-10-30 明确「先不弄」）。
+
+**真要查时的第一步**：在 `afterPendingEdited()` 的 A 分支前后各打一行诊断，
+记录 `pending` 的 `useShadow` / `overlayFadeOut` / `glowLayers`，
+复现路径是「点纯平滑输入 → 派生副本 → 改任意一个预设域滑块」。
+看这三个值在哪一步变成了 true / true / 12。
+
+---
+
+## BUG-015 拉伸是从两边均匀，还是按输入/删除的方向？（**待核实，2026-10-30 用户提出**）
+
+**用户问**：「拉伸是从两边均匀拉伸还是按照输入删除的方向」
+
+**已知的代码事实**（`CLAUDE.md` §4.1 / `deriveTrailFactors`）：
+
+- 四个角各挂一个阻尼弹簧，按「运动方向与角点的夹角」排名 rank 0..3；
+- rank 0 = 最靠后（拿最长时长、最慢到位），rank 3 = 最靠前（最短时长、最快到位）；
+- 于是前缘紧跟、后缘拖沓 —— 拖尾落在**运动方向的反面**；
+- `slope=0` 时同侧两角系数相等（`[0.86, 0.86, 0.32, 0.32]`）→ 只拉伸不倾斜，
+  视觉上像「两边对称地扩」；
+- `slope=100` 时是四档梯度（`[1.00, 0.72, 0.42, 0.22]`）→ 平行四边形，方向感明显。
+
+**要核实的问题**：用户当前 `slopeTicks=100`，实际观感究竟是
+「跟着输入/删除方向拖」，还是「左右两边对称地扩」。
+如果是后者，说明 rank 分配或 `applySlopeOverlay` 没有按预期生效。
+
+**判定方法**（离线可做，不必实机）：
+写一条探针 —— 光标 2×32，单行右移一字符，`jump()` 后推进 N 帧，
+分别量「左边缘两角的 x 差」与「右边缘两角的 x 差」，
+与 `docs/NEXT-STEPS.md` §四-B 的基线（左 2.11 / 右 4.06）对照。
+两者若接近相等，就是「对称拉伸」；若右明显大于左，就是「按方向」。
+
+**注意**：§四-B 那张表是在「四角全不锁」的基线下测的。
+如果之后实现 `leadingSnap`（锁前缘两角），前缘会精确变成 0.00 ——
+届时本条要给新的基线，不能沿用旧数字。
+
+**优先级**：待核实（未排期）。
