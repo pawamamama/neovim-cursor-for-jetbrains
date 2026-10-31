@@ -19,7 +19,7 @@
 | 版本 | **v0.9.104**（IDEA 2026.1 与 PyCharm 2025.2 都已装；读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
 | dist 最新 jar | `dist/neovide-cursor-0.9.104.jar`（2026-10-29） |
 | git tag | 停在 **v0.9.83**（0.9.84~0.9.104 缺 21 个，版本未发布） |
-| 探针文件 | **110 个 `V*.java`**（全部 .java 125 个，2026-10-31 实测） |
+| 探针文件 | **111 个 `V*.java`**（全部 .java 126 个，2026-10-31 实测） |
 | 探针基线 | **ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针，见 §7.1 第 1 项 |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
 | PhysicsParity | PASS |
