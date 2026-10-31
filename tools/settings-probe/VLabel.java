@@ -23,6 +23,14 @@ public final class VLabel {
         System.out.println("=== V-LABEL：面板显示的前缘时长 vs 渲染实际使用的前缘时长 ===");
         V0Env.install();
 
+        // 【2026-10-31 / 第 3 批审查 P-H-1：契约变更（与运行期对齐），非缺陷】
+        // 面板提示已改成三参 deriveTrailFactors(k, smooth, slopeTicks)。
+        // 本探针的 L-2/L-3/L-4 断言的是「rank3 比 rank2 短」——这个差别只由斜度产生；
+        // 默认 slopeTicks = 0（纯矩形）时 rank2 与 rank3 相等，那三条断言的前提就不存在了。
+        // 所以把场景固定成「完全斜」（slopeTicks = 100，= 对齐上游的原值），
+        // 断言本身一字不改：它仍在验证「面板报的是 rank2，而不是更短的 rank3」。
+        V0Env.svc.getState().slopeTicks = 100;
+
         NeovideCursorConfigurable conf = new NeovideCursorConfigurable();
         VUi ui = VUi.build(conf);
         conf.reset();
@@ -49,9 +57,11 @@ public final class VLabel {
         // 【口径修正 + 期望反转】
         // 本轮已把面板改为：① 用双参版（含 typingSmoothness）② 前缘报 f[2]（横向真实档）。
         // 所以正确断言是「面板 == 按 f[2] 算的值」，而不是原来的「面板 == 按 f[3] 算的值」。
+        // 【契约变更（与运行期对齐），非缺陷】三参版：运行期 syncStateToConfig() 就是它。
         float[] f = NeovideCursorSettings
                 .deriveTrailFactors(conf.pendingForProbe().stretchRatioK,
-                        conf.pendingForProbe().typingSmoothness);
+                        conf.pendingForProbe().typingSmoothness,
+                        conf.pendingForProbe().slopeTicks);
         double shortLen = conf.pendingForProbe().shortAnimationLength;
         long panelLeadByF3 = Math.round(shortLen * 1000 * f[3]);
         long panelLeadByF2 = Math.round(shortLen * 1000 * f[2]);

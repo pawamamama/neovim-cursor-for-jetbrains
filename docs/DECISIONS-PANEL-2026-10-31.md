@@ -235,3 +235,49 @@ AC-002       ui/settings/AnimationPreview.java 零改动（预览窗 520×110 �
 - `VPreviewSizeLive.java:8` 注释仍写旧组名（不在本轮白名单，只登记）
 - `VRegr2` R-5 / R-6（`typingSmoothness` 不进预设匹配、不派生副本）—— 真功能缺口，informational
 - 全部改动未提交（按任务书阶段 5，停在工作区等实机确认）
+
+---
+
+## 十、第 3 批审查的四条决策（2026-10-31 用户拍板）
+
+> 来源：`docs/HANDOFF-BATCH3-AUDIT-2026-10-31.md` §五 的四问；施工计划
+> `plans/batch3-fix.md`；守门探针 `tools/settings-probe/VBatch3Fixes.java`（T-1 ~ T-5）。
+
+| # | 问题 | 用户选择 | 落地 |
+|---|---|---|---|
+| 1 | 落盘失败怎么告诉用户（P-C-1） | **A：弹错误框，面板照常关闭** | `apply()` 接住 `PersistResult`；`FAILED` 时不推进 baseline、弹错误框；文案写「已应用…未能写入磁盘…重启后会恢复上一次成功保存的值」 |
+| 2 | 锐度换算不可逆怎么修（P-H-2） | **A：改换算步长，让 0.2f 落在整数网格上** | `SettingsUiUtil` 改成以默认值（73 ↔ 0.20）为锚点的两段线性；**不碰** `State` 默认值与 `ANIM_PRESETS` 常量 |
+| 3 | 插件自带的设置搜索（P-M-2） | **去掉** | 移除 `enableSearch` 覆写，平台自己的设置搜索接管（`SettingsSearchIndex` 保留但零引用） |
+| 4 | 复选框改动要不要派生副本（P-M-10） | **也生成副本** | `bindCheck` 的 ActionListener 改走 `refreshPresetDisplay()`（与滑块同一条链路）；两个抑制标志保留，程序化回灌不派生 |
+
+### 10.1 连带的契约变更（不是用户决策，但必须记）
+
+- **P-H-1**：两条派生提示从两参 `deriveTrailFactors(k, smooth)` 改成三参
+  `(k, smooth, slopeTicks)`，与运行期 `syncStateToConfig()` 同源。
+  默认参数下面板由「后缘 110 / 前缘 46 ms」纠正为真实的 **95 / 35 ms**。
+- 因此四个探针的 **oracle**（不是断言）同步对齐，均已注明
+  「契约变更（与运行期对齐），非缺陷」：`VHints`（任务书点名）、
+  `VLabel`（并把场景固定在 `slopeTicks = 100`，否则 rank2/rank3 无差）、
+  `VPreset9`（P-9a/P-9b）、`VVerify`（打印型，无断言）。
+- 新增守门探针 `VBatch3Fixes`（T-1 ~ T-5，21 条断言），每条配变异测试（8 条变异全部变红）；
+  证据见 `plans/batch3-fix.md` 与本轮交付报告。
+
+### 10.2 本轮不修、只登记
+
+- **同一类「落盘失败被吞」调用点**（不在本轮白名单）：
+  `CursorPresetApplier:73 / 138 / 200 / 228`、`NeovideCaretManager:348`。
+  它们与 `apply()` 同病：`persistQuietly()` 的返回值被丢弃，失败时用户零感知。
+  修法应复用本轮的两道处理（接住结果 + 可见提示），但需要先确认这些路径
+  「失败后要不要回滚内存态」的语义，单独一轮做。
+- **`SettingsSearchIndex.java`**：断开 `enableSearch` 后已零引用。
+  删除它需要连带检查历史文档与探针清单，登记为「后续可删」，
+  本轮按「不删独立类」处理。
+- **`PersistResult.DEFERRED`（非 EDT 路径）**：仍然推进 baseline 且无提示。
+  现实中几乎不可达（面板 apply 在 EDT），本轮未改；若将来有程序化 apply，
+  应和 FAILED 一样给用户一个「排队中」的信号。
+- **`ProbeFacade` 未登记本轮新增的两个 `*ForProbe()`**（`lastUserNoticeForProbe` /
+  `userNoticeCountForProbe`）：`ProbeFacade.java` 不在本轮白名单，
+  `VFacadeEquiv` 也不校验完整性；记在这里，下次动门面时一并补。
+- **`ProbeSettingsV2` / `Probe4Bugs` 等不在 `$mains` 的旧探针**本轮未跑。
+  它们对「非网格 blur 值」的既有断言在旧映射下同样不成立（不是本轮引入），
+  但不能据此声称「全部断言不变」—— 只对门禁内的 106 个 `V*.java` 成立。

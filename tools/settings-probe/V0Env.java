@@ -54,6 +54,17 @@ public final class V0Env {
     public static int throwOnPropertiesLookup;
 
     /**
+     * 探针注入：{@code true} 时 {@code Application.saveSettings()} 抛异常。
+     *
+     * <p><b>默认 false，只有 {@code VBatch3Fixes} 会设它。</b>用来构造
+     * {@code NeovideCursorSettings.persistQuietly()} 返回 {@code FAILED} 的真实路径
+     * （它把 {@code saveSettings()} 的异常 catch 成 FAILED）—— 不这样做，
+     * 「落盘失败时 baseline 不推进」这条修复就<b>永远走不到</b>，
+     * 探针只能测到一个恒绿的影子（陷阱 4 的「假通过」）。
+     */
+    public static volatile boolean throwOnSaveSettings;
+
+    /**
      * 探针注入：{@code Application.isDispatchThread()} 的返回值。
      *
      * <p><b>默认 true（= 现状）。</b>生产代码里这个调用等价于
@@ -134,6 +145,12 @@ public final class V0Env {
                         case "isReadAccessAllowed":
                             return inReadAction();
                         case "saveSettings":
+                            if (throwOnSaveSettings) {
+                                // 模拟「平台刷盘抛异常」—— persistQuietly 会把它 catch 成 FAILED。
+                                // 必须在异常发生前不产生任何副作用，否则探针测的就不是「失败」了。
+                                throw new IllegalStateException(
+                                        "V0Env: 注入的 saveSettings 失败（探针构造落盘失败）");
+                            }
                             return null;
                         case "invokeLater":
                             invokeLaterCalls++;

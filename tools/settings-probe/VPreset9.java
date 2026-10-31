@@ -475,10 +475,18 @@ public final class VPreset9 {
         String panelText = conf.stretchTextForProbe(s.stretchRatioK);
         System.out.println("  真面板输出: " + panelText);
 
-        float[] real2 = NeovideCursorSettings.deriveTrailFactors(s.stretchRatioK, s.typingSmoothness);
-        double realTrailing = s.shortAnimationLength * 1000.0 * real2[0];
+        // 【契约变更（与运行期对齐），非缺陷 —— 2026-10-31 / 第 3 批审查 P-H-1】
+        // 运行期 syncStateToConfig() 用的是三参版 (k, smooth, slopeTicks)；面板提示也已
+        // 改成三参。这里原来用两参版当「真实运行期」，那在 slopeTicks = 0（默认）时
+        // 算的是另一条公式 —— oracle 必须与运行期同源，断言文字未改。
+        // 【审查 LOW-8】oracle 只读一处：k / smooth / slope / short 全部取面板的 pending，
+        // 不再混用局部 `s`（两者当前同值，但混源迟早对不上）。
+        NeovideCursorSettings.State pv = conf.pendingForProbe();
+        float[] real2 = NeovideCursorSettings.deriveTrailFactors(
+                pv.stretchRatioK, pv.typingSmoothness, pv.slopeTicks);
+        double realTrailing = pv.shortAnimationLength * 1000.0 * real2[0];
         // 横向前缘必须用 rank2（VRank 实测：纯横向移动四角 rank 恒为 {0,2}）
-        double realLeading2 = s.shortAnimationLength * 1000.0 * real2[2];
+        double realLeading2 = pv.shortAnimationLength * 1000.0 * real2[2];
         double realRatio2 = real2[0] / real2[2];
 
         System.out.printf("  真实运行期: 后缘 %.1f ms / 横向前缘 %.1f ms / 梯度 %.3f×%n",

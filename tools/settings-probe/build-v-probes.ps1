@@ -186,7 +186,16 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 能行为化的都行为化了（填充值 / EDT 真值表 / 辉光半径），
         # 分配与注释类用结构判据，逐条配变异测试。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VAuditBatch2Round5')
+        'VAuditBatch2Round5',
+        # 【2026-10-31】第 3 批审查修复（1 CRITICAL + 3 HIGH + 2 条用户决策）的守门探针：
+        # T-1 落盘失败时 baseline 不推进且有可见提示（P-C-1）/
+        # T-2 锐度换算与出厂默认值互逆（P-H-2）/
+        # T-3 坏快照不写 animCustomName、部分缺失仍兼容（P-H-3）/
+        # T-4 复选框改值也派生副本、程序化回灌不派生（P-M-10）/
+        # T-5 enableSearch 覆写已摘除（P-M-2）。
+        # P-H-1（提示改三参）由 VHints 的 oracle 变更守门，不在本探针里重复。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VBatch3Fixes')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

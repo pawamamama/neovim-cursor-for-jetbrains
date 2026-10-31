@@ -7,6 +7,7 @@ import com.github.yyyolo7a79.neovidecursor.settings.SettingsField;
 import com.github.yyyolo7a79.neovidecursor.settings.CustomPresets;
 import com.github.yyyolo7a79.neovidecursor.ui.CursorPresetApplier;
 import com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.observable.properties.GraphProperty;
 import com.intellij.openapi.observable.properties.PropertyGraph;
 import com.intellij.openapi.options.BoundConfigurable;
@@ -41,7 +42,6 @@ import javax.swing.JSlider;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.Color;
-import java.awt.Rectangle;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.util.ArrayList;
@@ -93,6 +93,26 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     /** 页面名称。**同时**写在 plugin.xml 的 displayName 里（平台取名字时不必实例化本类）。 */
     public static final String DISPLAY_NAME = "Neovide Cursor";
+
+    private static final Logger LOG = Logger.getInstance(NeovideCursorConfigurable.class);
+
+    /**
+     * 落盘失败时的标题与正文（P-C-1）。
+     *
+     * <p><b>措辞的红线</b>：不能写「已保存」。产生侧
+     * {@code NeovideCursorSettings.persistQuietly()} 的注释已经写明：
+     * 只有 {@code CONFIRMED} 才勉强算「平台没抛异常」，而 {@code FAILED} 是<b>明确的</b>
+     * 「没写成」。所以这里写「已应用」（内存里生效了）+「未能写入磁盘」+「重启后会恢复」，
+     * 让用户知道「现在能用，但别指望它活过重启」。
+     */
+    private static final String PERSIST_FAILED_TITLE = "设置未能写入磁盘";
+
+    private static final String PERSIST_FAILED_MESSAGE =
+            "本次设置已应用到当前会话，但未能写入磁盘。"
+            + "重启 IDE 后会恢复为上一次成功保存的值。";
+
+    /** 预设快照损坏时的标题（P-H-3）。 */
+    private static final String PRESET_BROKEN_TITLE = "无法应用预设";
 
     // ==================== 警告文案（契约 §2.2 / §7.3 / §9.4，逐字，不得改动）====================
 
@@ -574,6 +594,36 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 让 {@code isModified()} 恒为真（VDefects 的 V11-3c 当场抓到）。
      */
     private boolean suppressDerive;
+
+    // ==================== 用户可见提示（第 3 批审查 P-C-1 / P-H-3）====================
+
+    /**
+     * 最近一次「必须让用户知道」的提示（标题：正文）。
+     *
+     * <p><b>为什么要单独留一份记录</b>：这两类提示（落盘失败、预设快照损坏）都是
+     * 「用户以为操作成功了，其实没有」的场景，光写日志用户看不到。弹框是给用户看的，
+     * 而记录是给探针与日志用的 —— headless 探针里没有屏幕，无法断言「弹框长什么样」，
+     * 但可以断言「面板确实决定要告诉用户，且文案说清了后果」。
+     */
+    private String lastUserNotice;
+
+    /** 累计提示次数（探针据此判断「这一次确实新增了一条」，而不是陈年记录）。 */
+    private int userNoticeCount;
+
+    /**
+     * 最近一次 {@code apply()} 的持久化是否失败（P-C-1）。
+     *
+     * <p><b>为什么需要它（审查 H-1，2026-10-31）</b>：平台的
+     * {@code ConfigurableEditor.apply()} 先用 {@code isModified()} 当闸门，
+     * 只有为真才会真正调用本页的 {@code apply()}。而我们的 A3 在落盘<b>之前</b>
+     * 已经把 pending 写进了活 state —— 于是 {@code isModified()} 的
+     * 「pending vs state」判据在 FAILED 之后会变成 false，平台<u>不会再调</u>
+     * 我们的 apply，用户连重试的机会都没有。
+     *
+     * <p>置真之后 {@link #isModified()} 直接返回 true：应用/确定按钮保持可用，
+     * 再点一次就会真的重新写盘。成功落盘或 {@link #reset()}（重新装载配置）时清零。
+     */
+    private boolean persistFailed;
 
     // 非 DSL 绑定控件：DialogPanel 不追踪它们，必须在 reset/apply/isModified 里手工同步
     /** 预览窗（行内输入删除）—— 参数变化时同步配置 */
@@ -2044,7 +2094,33 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 两条路径语义必须一致，否则「菜单切预设安全、面板切预设危险」。
             // 【runtimeSwitch 重构】跳过清单已搬进字段自身（f.runtimeSwitch），
             // 调用方不再传数组，两条路径也不可能再各自维护一份。
-            SettingsField.restoreSkipping(pending, e.snapshot);
+            int applied = SettingsField.restoreSkipping(pending, e.snapshot);
+            // 【P-H-3，2026-10-31 第 3 批审查】applied == 0 = 这条快照一个字段都解不出来
+            // （整条损坏）。此时若照写 animCustomName，下拉会显示「已切换到 X」，
+            // 而实际一个参数都没变 —— 显示层撒谎。
+            // 参照实现是 CursorPresetApplier:120-145（Tools 菜单那条路径早就这样处理），
+            // 两条路径语义必须一致。
+            //
+            // 【不要顺手把 0 < applied < total 也判成失败】那是文档化的向后兼容：
+            // 旧版本存的预设天然缺新字段，缺键保持当前值是对的。只有「一个都解不出」
+            // 才说明数据坏了。
+            if (applied == 0) {
+                showUserNotice(PRESET_BROKEN_TITLE,
+                        "预设「" + e.name + "」的内容已损坏（没有可应用的参数），"
+                                + "本次切换已取消，当前设置保持不变。", false);
+                // 【必须抑制派生（审查 M-1）】refreshPresetDisplay() 第一件事是
+                // afterPendingEdited()。如果此刻 pending 已经偏离基准（例如用户先改了
+                // 参数、原预设又被删），它会派生出一个「X 副本」——
+                // 与上面刚说的「当前设置保持不变」自相矛盾。这里只是把下拉拉回真实状态。
+                boolean prevSuppress = suppressDerive;
+                suppressDerive = true;
+                try {
+                    refreshPresetDisplay();
+                } finally {
+                    suppressDerive = prevSuppress;
+                }
+                return;
+            }
             pending.animCustomName = e.name;
         }
         syncAllControlsFromPending();
@@ -2522,7 +2598,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             } else {
                 // 目标是另一个自定义预设 → 写它**当前**的快照（继承语义，用户 2026-10-29 拍板）。
                 // 用 restoreSkipping：快照里的设备开关不该被恢复动作改写。
-                SettingsField.restoreSkipping(pending, base.custom.snapshot);
+                int applied = SettingsField.restoreSkipping(pending, base.custom.snapshot);
+                // 【P-H-3 同一缺陷的第二处】整条快照损坏时「恢复」其实什么都没做，
+                // 但按钮与下拉仍然显示一切正常 —— 必须告诉用户，并保持原值不动。
+                if (applied == 0) {
+                    showUserNotice(PRESET_BROKEN_TITLE,
+                            "预设「" + base.custom.name + "」的内容已损坏（没有可应用的参数），"
+                                    + "恢复未执行，当前设置保持不变。", false);
+                    return;
+                }
             }
 
             // 【不动 animCustomName、不动 customAnimPresets】
@@ -2996,9 +3080,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private void refreshDerivedHints() {
         if (singleMoveHint != null) {
-            // 双参版（含 typingSmoothness）+ rank2（横向实际用到的档），理由见 stretchText
+            // 【P-H-1，2026-10-31 第 3 批审查】必须用【三参版】
+            //
+            // 运行期 NeovideCursorSettings.syncStateToConfig() 调的是
+            // deriveTrailFactors(k, smooth, slopeTicks)。原来这里只传两参，而两参版
+            // 等价于「沿用 k 推导的默认梯度」；默认 slopeTicks = 0 反而是【纯矩形】：
+            //   slope=0  → [0.86, 0.86, 0.32, 0.32]（真实）
+            //   两参版    → [1.00, 0.72, 0.42, 0.22]（面板自称）
+            // 默认参数下面板写「后缘 110 ms / 前缘 46 ms」，真实是 95 / 35 ms ——
+            // 同一页的预览早就在用三参，于是「预览」与「数字」互相矛盾。
+            // rank2 口径不变：横向打字实际用到的档，理由见 stretchText。
             float[] f = NeovideCursorSettings
-                    .deriveTrailFactors(pending.stretchRatioK, pending.typingSmoothness);
+                    .deriveTrailFactors(pending.stretchRatioK, pending.typingSmoothness,
+                            pending.slopeTicks);
             long trailing = Math.round(pending.shortAnimationLength * 1000f * f[0]);
             long leading = Math.round(pending.shortAnimationLength * 1000f * f[2]);
             // 【0.9.72：把 smooth 对系数的影响写出来】
@@ -3078,8 +3172,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 而且前缘必须报 rank2（横向打字实际用到的档）：
         // 第三轮 VRank 实测，纯横向/纵向移动时四角 rank 恒为 {0,2}，rank3 不出现。
         // 报 f[3] 会把前缘时长低报约 1.9 倍。
+        //
+        // 【P-H-1，2026-10-31 第 3 批审查】再补第三参 slopeTicks —— 运行期就是三参版。
+        // 少传 slope 时，默认值 0（纯矩形）被漏掉，面板会报出另一条梯度的数字
+        // （默认参数下后缘 110/前缘 46 vs 真实 95/35）。两处提示必须同源。
         float[] f = NeovideCursorSettings
-                .deriveTrailFactors(k, pending.typingSmoothness);
+                .deriveTrailFactors(k, pending.typingSmoothness, pending.slopeTicks);
         long trailingMs = Math.round(pending.shortAnimationLength * 1000f * f[0]);
         long leadingMs = Math.round(pending.shortAnimationLength * 1000f * f[2]);
         float ratio = f[2] > 0f ? f[0] / f[2] : 0f;
@@ -3100,6 +3198,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     @Override
     public void reset() {
+        // 【P-C-1】重新装载配置 = 接受当前内存态为新基准，清掉落盘失败标记，
+        // 否则 isModified() 会永远为真（用户改不动、关不掉）。
+        persistFailed = false;
         // 打开/重开会话：pending 与 baseline 同源取当前 state（EditSession 保证同源）
         session.openAt(currentState());
         syncSessionViews();
@@ -3218,8 +3319,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
 
 
-        // A4：落盘
-        svc.persistQuietly();
+        // A4：落盘（P-C-1：三态结果必须接住，不能丢）
+        //
+        // 【2026-10-31 第 3 批审查 P-C-1，CRITICAL】原来这行是 `svc.persistQuietly();`，
+        // 返回值被丢弃。产生侧（NeovideCursorSettings.persistQuietly）明确区分
+        // CONFIRMED / DEFERRED / FAILED，消费侧却当它不存在 —— 磁盘只读、
+        // 序列化自检失败、saveSettings() 抛异常时，面板照常「应用成功」并关闭，
+        // 重启后全部回滚，全程零提示。
+        NeovideCursorSettings.PersistResult persisted = svc.persistQuietly();
 
         // A5：唯一生效入口（写字段 → 调 setter → 刷新三类缓存）
         NeovideCaretManager.applyConfig();
@@ -3229,6 +3336,33 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         if (NeovideCaretManager.isPaintDisabled() != paintDiag) {
             NeovideCaretManager.setPaintDisabled(paintDiag);
         }
+
+        // 【P-C-1】落盘失败：不推进 baseline，并明确告诉用户「现在能用，但活不过重启」。
+        //
+        // 【为什么必须不推进 baseline】
+        // baseline 是「已经保存成功的那一版」的比较基准。若在 FAILED 后照样前移，
+        // 之后任何一次 apply 的逐字段判据（pending vs baseline）都会认为这些字段
+        // 「没改过」，即使平台再次调用 apply 也不会重新写它们 —— 重试链路就断了。
+        //
+        // 【为什么还要 persistentFailed 标志（审查 H-1）】
+        // 光不前移 baseline 不够：平台先看 isModified()，而 A3 已把 pending 写进
+        // 活 state，「pending vs state」判据此时为 false。于是平台根本不会再调 apply()。
+        // 置标志后 isModified() 保持 true，应用/确定按钮可用，重试才真的存在。
+        //
+        // 【不要在这里顺手回滚内存态】target 已经写进 service 且 applyConfig() 已生效，
+        // 回滚需要另一套「上一次成功值」的快照；用户拍板的是「不阻止关闭、给提示」，
+        // 不是「失败即撤销」。所以内存里继续可用，只是活不过重启 —— 文案正是这么写的。
+        //
+        // 【为什么 return 而不是继续走 A6–A8】
+        // A6 会把 baseline 前移、A8 会把控件回灌成 target 值。两者都在宣称
+        // 「这一版已经落地」，与事实相反。保持 pending / baseline / 控件原样，
+        // 用户重试或关闭面板都由他自己决定（用户 2026-10-31 拍板：不阻止关闭）。
+        if (persisted == NeovideCursorSettings.PersistResult.FAILED) {
+            persistFailed = true;
+            showUserNotice(PERSIST_FAILED_TITLE, PERSIST_FAILED_MESSAGE, true);
+            return;
+        }
+        persistFailed = false;
 
         // A6+A7：pending 与 baseline 【同源前移】到 target。
         //
@@ -3293,6 +3427,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     @Override
     public boolean isModified() {
+        // 【P-C-1 / 审查 H-1】落盘失败过 → 必须保持「有未保存改动」。
+        //
+        // 平台的 ConfigurableEditor.apply() 先检查 isModified()，为假就传 null、
+        // 根本不调本页的 apply()。而失败时 A3 已经把 pending 写进活 state，
+        // 下面两条判据都会是 false —— 不补这一条，用户点「应用」重试时平台会直接跳过，
+        // 「不推进 baseline 以便重试」就成了空话。成功落盘 / reset() 会清零。
+        if (persistFailed) {
+            return true;
+        }
         NeovideCursorSettings.State cur = currentState();
         return super.isModified()
                 || colorPanelModified(cur)
@@ -3368,34 +3511,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         syncSessionViews();
     }
 
-    // ==================== 搜索定位 ====================
+    // ==================== 搜索定位（已摘除，2026-10-31 / P-M-2）====================
 
-    /**
-     * 设置页搜索：按关键字把焦点与滚动定位到对应字段。
-     *
-     * <p>0.9.9 / Phase 2 第 1 步：关键字映射已抽到 {@link SettingsSearchIndex}
-     * （纯静态、零状态耦合）。这里只保留「拿到标签之后怎么滚动」这一段 ——
-     * 它需要 Swing 组件树，属于面板自己的职责。
-     */
-    @Override
-    public Runnable enableSearch(String option) {
-        if (option == null || option.trim().isEmpty()) {
-            return null;
-        }
-        final JLabel target = SettingsSearchIndex.targetFor(bindings,
-                option.trim().toLowerCase(Locale.ROOT));
-        if (target == null) {
-            return null;
-        }
-        return () -> {
-            target.requestFocusInWindow();
-            JComponent parent = (JComponent) target.getParent();
-            if (parent != null) {
-                Rectangle r = target.getBounds();
-                parent.scrollRectToVisible(r);
-            }
-        };
-    }
+    // 这里原来覆写 SearchableConfigurable#enableSearch(String)，用一张手写关键字表
+    // （SettingsSearchIndex）把焦点滚到对应字段。用户 2026-10-31 拍板「平时不用，去掉」，
+    // 理由是那张表维护成本高、覆盖面还窄（多数项点了没反应，且「常驻/高帧」曾映射到
+    // 辉光层数）。移除覆写后，接口的 default 实现返回 null，**平台自己的设置搜索接管**
+    // —— 它索引的是面板上的真实文案与控件，不需要我们再维护一份映射。
+    //
+    // SettingsSearchIndex.java 暂时保留：它是零状态的独立类，断开注册后已是零引用。
+    // 删除它要连带检查探针与历史文档，属于独立清理
+    // （已登记 docs/DECISIONS-PANEL-2026-10-31.md §10.2），不在本轮白名单的最小改动里做。
 
     // ==================== 小工具 ====================
 
@@ -3433,11 +3559,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 滑块就是这么做的。否则勾选后 {@code isModified()} 与「当前预设」下拉的
      * 判据都还停在旧值上。
      *
-     * <p><b>为什么不调 {@link #refreshPresetDisplay()}（滑块走的那一路）</b>：
-     * 它会把 {@code afterPendingEdited()} 带进来，副作用是立刻派生一个「XX 副本」。
-     * 那是产品可见的行为变更（下拉里凭空多一项），按纪律四-L 先问用户。
-     * 现在这样：pending 与预览实时正确，预设派生时机与修改前完全一致
-     * （{@code apply()} 末尾的 afterPendingEdited() 仍会补快照）。
+     * <p><b>为什么现在调 {@link #refreshPresetDisplay()}（滑块走的那一路）</b>：
+     * 这里原来只调 {@code refreshPreviews()}，理由是「刷新预设显示会立刻派生副本，
+     * 属于产品可见变更，先问用户」。用户 2026-10-31 明确拍板「复选框也生成副本」
+     * （第 3 批审查 P-M-10）—— 同一张面板里，拖滑块会派生、勾复选框不派生，
+     * 是两种语义，改动无处可存。现在两条路径共用同一条落脚链路：
+     * {@code refreshPresetDisplay() → afterPendingEdited() → 派生/更新快照 → 重算下拉}。
+     *
+     * <p><b>怎么保证程序化回灌不派生</b>：{@code reset()} / 切预设 / {@code apply()}
+     * 后的回填全程 {@code syncingControls = true}，本监听器第一行就 return；
+     * {@code syncAllControlsFromPending()} 另有 {@code suppressDerive} 兜底。
+     * 所以「装载历史配置凭空多出副本」不会复发，也不会无限派生。
      */
     private Cell<JBCheckBox> bindCheck(Row row,
                                        Function0<Boolean> getter,
@@ -3457,7 +3589,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     return;             // 程序化回灌（reset / 切预设）：不是用户编辑
                 }
                 setter.accept(box.isSelected());
-                refreshPreviews();
+                // 【P-M-10，2026-10-31 第 3 批审查：复选框也要有落脚点】
+                //
+                // 原来这里只调 refreshPreviews()：拖滑块会派生「X 副本」（滑块的
+                // ChangeListener → refreshPresetDisplay → afterPendingEdited），
+                // 而勾/取消一个预设域内的复选框（useShadow / overlayFadeOut）不会 ——
+                // 同一类操作两种行为，改动无处可存。
+                //
+                // 改成与滑块同一条链路：refreshPresetDisplay() 内部先调
+                // afterPendingEdited()（派生/更新快照），再重算两个下拉的显示态。
+                //
+                // 【两个抑制标志仍然有效】程序化回灌（reset / 切预设 / apply 后的回填）
+                // 全程 syncingControls = true，本监听器第一行就 return；
+                // syncAllControlsFromPending 另有 suppressDerive 兜底。所以不会出现
+                //「装载历史配置凭空派生副本」，也不会无限派生。
+                refreshPresetDisplay();
             });
         }
         return cell;
@@ -3478,9 +3624,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p>**不参与渲染**：真正写进 CONFIG 的仍然是 {@code shadowBlurFactor}（外扩幅度），
      * 而它是 {@code NeovideConfig} 的既有常量，本轮一个字节都没动。
      *
-     * <p>映射：{@code blur = 0.05 + (100 - sharp) × 0.0055} ⇒
-     * 0 = 外扩 0.60（最柔，原版 JS 的夸张光雾）、100 = 外扩 0.05（最锐）。
-     * 往返误差由 {@link #sharpnessOf(float)} 的四舍五入吸收（同一 blur 读回同一锐度）。
+     * <p>映射（2026-10-31 / P-H-2 起）：<b>以出厂默认值为锚点的两段线性</b> ——
+     * 0 = 外扩 0.60（最柔，原版 JS 的夸张光雾）、<b>73 = 外扩 0.20（= 默认值）</b>、
+     * 100 = 外扩 0.05（最锐）。原实现是一条直线，但 0.2 不落在它的网格上，
+     * 导致「点一下输入框再移开」就把 pending 写脏。完整推导见
+     * {@link SettingsUiUtil} 的类注释，守门探针是 {@code VBatch3Fixes} 的 T-2。
      */
     public static float blurOfSharpness(int sharp) {
         return SettingsUiUtil.blurOfSharpness(sharp);
@@ -3594,6 +3742,67 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
     }
 
+    // ==================== 用户可见提示 ====================
+
+    /**
+     * 把一条「用户必须知道」的消息记下来并弹给用户。
+     *
+     * <p><b>为什么要先判 headless</b>：离线探针（以及平台的 {@code buildSearchableOptions}
+     * 之类无界面环境）里 {@code GraphicsEnvironment.isHeadless()} 为真，Swing 造对话框会抛
+     * {@code HeadlessException}。那里没有用户可看，「记录」就是这次提示的全部意义；
+     * 而真实 IDE 永远不是 headless，行为就是弹框。
+     *
+     * <p><b>为什么外层还要 try/catch</b>：提示框失败不能反过来把「落盘失败」这条更重要的
+     * 信息吞掉（那正是 P-C-1 要修的病根）。弹框失败时至少留下日志与记录。
+     *
+     * @param title   对话框标题
+     * @param message 正文（必须写清后果，不写「已保存」这类会误导的词）
+     * @param error   {@code true} 用错误图标，{@code false} 用警告图标
+     */
+    private void showUserNotice(String title, String message, boolean error) {
+        lastUserNotice = title + "：" + message;
+        userNoticeCount++;
+        if (isHeadlessEnvironment()) {
+            LOG.info("neovide-cursor: [无界面环境] " + lastUserNotice);
+            return;
+        }
+        try {
+            // 【必须带 owner（审查 M-3）】无主模态框在设置窗内会被遮挡，
+            // 或被平台拒绝嵌套模态 —— 然后被下面的 catch 降级成一条日志，
+            // 用户零感知，正好回到 P-C-1 要消灭的病根。
+            // createComponent() 是平台缓存的同一个 DialogPanel，不会重建 UI。
+            JComponent owner = createComponent();
+            if (error) {
+                Messages.showErrorDialog(owner, message, title);
+            } else {
+                Messages.showWarningDialog(owner, message, title);
+            }
+        } catch (Throwable t) {
+            LOG.warn("neovide-cursor: 提示框显示失败（提示已记录）：" + lastUserNotice, t);
+        }
+    }
+
+    /**
+     * 是否无界面（审查 M-4）。
+     *
+     * <p>两个判据取或：AWT 的 {@code java.awt.headless}（离线探针/桌面无显示）与平台的
+     * {@code Application.isHeadlessEnvironment()}（{@code buildSearchableOptions}、
+     * {@code @HeadlessTest}、远程开发等场景）。后者不保证同步设置 AWT 标志，
+     * 只看 AWT 会漏判 —— 漏判的后果是去弹一个必然失败的模态框。
+     */
+    private static boolean isHeadlessEnvironment() {
+        if (java.awt.GraphicsEnvironment.isHeadless()) {
+            return true;
+        }
+        try {
+            com.intellij.openapi.application.Application app =
+                    com.intellij.openapi.application.ApplicationManager.getApplication();
+            return app != null && app.isHeadlessEnvironment();
+        } catch (Throwable t) {
+            return false;   // 判不出来就按「有界面」处理，由上面的 try/catch 兜底
+        }
+    }
+
     // ==================== 供探针读取的观测量 ====================
 
     /** 探针/调试用：当前预览副本（只读语义，不要改它）。 */
@@ -3609,6 +3818,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 探针/调试用：{@code syncingControls} 抑制标志的当前值。 */
     public boolean syncingForProbe() {
         return syncingControls;
+    }
+
+    /** 探针用：最近一次「必须让用户知道」的提示（标题：正文）；{@code null} = 还没有过。 */
+    public String lastUserNoticeForProbe() {
+        return lastUserNotice;
+    }
+
+    /** 探针用：累计提示次数（用来判断「这一次确实新增了一条」）。 */
+    public int userNoticeCountForProbe() {
+        return userNoticeCount;
     }
 
     /**

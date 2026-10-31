@@ -20,7 +20,10 @@ public final class VVerify {
         String txt = conf.stretchTextForProbe(8.0f);
         System.out.println("  面板 stretchText = " + txt);
 
-        float[] f2 = NeovideCursorSettings.deriveTrailFactors(8.0f, 0.0f);
+        // 【契约变更（与运行期对齐），非缺陷 —— 2026-10-31 / 第 3 批审查 P-H-1】
+        // 运行期 syncStateToConfig() 一直是三参版；这里只是打印口径与它对齐。
+        float[] f2 = NeovideCursorSettings.deriveTrailFactors(8.0f, 0.0f,
+                p.slopeTicks);
         long realFront = Math.round(0.14f * 1000f * f2[2]);
         System.out.printf("  真实横向前缘(rank2) = %d ms, 后缘 = %d ms, 梯度 = %.2fx%n",
                 realFront, Math.round(0.14f*1000f*f2[0]), f2[0]/f2[2]);

@@ -53,8 +53,17 @@ public final class VHints {
 
         // 【口径修正 rank3 → rank2】VRank 实测：纯横向/纵向移动时四角 rank 恒为 {0,2}，
         // rank3 根本不出现。面板提示必须报横向前缘（rank2），否则低报约 1.9 倍。
-        // 同时必须用【双参版】deriveTrailFactors(k, smooth) —— 运行期就是它。
-        float[] f = NeovideCursorSettings.deriveTrailFactors(4.5f, 0f);
+        //
+        // 【契约变更（与运行期对齐），非缺陷 —— 2026-10-31 / 第 3 批审查 P-H-1】
+        // 这里原来用【双参版】deriveTrailFactors(k, smooth) 当 oracle。但运行期
+        // NeovideCursorSettings.syncStateToConfig() 一直用的是【三参版】
+        // (k, smooth, slopeTicks)，而默认 slopeTicks = 0 与「不传 slope」结果不同：
+        //   slope=0  → [0.86, 0.86, 0.32, 0.32]（纯矩形，运行期真实值）
+        //   两参版    → [1.00, 0.72, 0.42, 0.22]（旧默认梯度）
+        // 面板已按 P-H-1 改成三参；本 oracle 必须跟着改，否则它校验的是一条
+        // 生产代码根本不走的口径。断言期望值仍由生产派生函数算出，没有写死数字。
+        float[] f = NeovideCursorSettings.deriveTrailFactors(4.5f, 0f,
+                conf.pendingForProbe().slopeTicks);
         long trailMs = Math.round(0.11f * 1000f * f[0]);
         long leadMs = Math.round(0.11f * 1000f * f[2]);
         check("H-2 单行提示含自算的后缘毫秒数（" + trailMs + "）",
