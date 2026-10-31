@@ -225,6 +225,15 @@ final class SpringTrail {
     }
 
     /**
+     * {@link #assignRanks()} 的对齐度暂存数组（复用，避免每次调用分配数组）。
+     *
+     * <p>长度取 {@link #CORNER_RELATIVE} 的角点数（当前 4）。这里<b>不</b>写死 4、
+     * 而是从同一张表取：将来角点表若增删，长度自动跟随，不会出现「表改了 5 个、
+     * 数组还是 4 个 → assignRanks 越界」。（2026-10-31 审查指出原写法写死 4。）
+     */
+    private final double[] alignmentScratch = new double[CORNER_RELATIVE.length];
+
+    /**
      * 按「运动方向对齐度」给四个角点名次。
      *
      * <p>与原 JS 版一致按对齐度<b>升序</b>：rank 0 是最靠后的角，
@@ -232,8 +241,13 @@ final class SpringTrail {
      * 于是前缘紧跟、后缘拖沓，矩形被拉长成拖尾形状。
      */
     private void assignRanks() {
-        double[] alignment = new double[corners.length];
-        for (int i = 0; i < corners.length; i++) {
+        // 【U-L-1】对齐度也用成员数组复用 —— 同一个函数里原来有两套策略：
+        // idxScratch 特意复用并配了十几行说明，alignment 却每次 new。
+        // 量级确实微不足道（打字约 10 次/秒），但「同一函数两套做法」本身就是
+        // 下一个改动者的陷阱：没人知道该跟哪一套。统一成复用。
+        final int n = corners.length;
+        double[] alignment = alignmentScratch;
+        for (int i = 0; i < n; i++) {
             alignment[i] = corners[i].calculateDirectionAlignment(width, height, centerX, centerY);
         }
 
@@ -266,7 +280,6 @@ final class SpringTrail {
         // 【为什么 tiebreak 用索引而不是别的】四家上游都用索引，
         // 它保证「同样的输入永远得到同样的 rank」（确定性），
         // 且 tiebreak 方向恒定 → 斜度方向稳定（不会这帧往左斜下帧往右斜）。
-        final int n = corners.length;
         Integer[] order = idxScratch;
         if (order == null || order.length != n) {
             order = new Integer[n];

@@ -42,7 +42,12 @@ import java.util.Locale;
  */
 public class TrailParityTest {
 
-    /** 四角相对位置（左上 → 右上 → 右下 → 左下，与 CaretAnimator.CORNER_RELATIVE 一致） */
+    /**
+     * 四角相对位置（左上 → 右上 → 右下 → 左下，与 SpringTrail.CORNER_RELATIVE 一致）。
+     *
+     * <p>【2026-10-31】原来这里写的是 {@code CaretAnimator.CORNER_RELATIVE} —— 那张表
+     * 零读者、已删除（U-L-2），角点顺序的唯一权威在 {@code SpringTrail}。
+     */
     static final double[][] REL = {
             {-0.5, -0.5}, {0.5, -0.5}, {0.5, 0.5}, {-0.5, 0.5},
     };

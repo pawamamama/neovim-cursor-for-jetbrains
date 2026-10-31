@@ -179,7 +179,14 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 记账先于副作用、诊断文件写盘失败静默、EDT 假设被 javap 否证却无防御。
         # 正常路径全对，只能精确注入失败才测得出来。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VAuditBatch2Round2to4')
+        'VAuditBatch2Round2to4',
+        # 【2026-10-31】审计第 2 批「第 5 轮」（G 热路径微分配 8 条 / H 死代码与注释 6 条）。
+        # 这一批的共同点是「改了但画面一模一样」—— 没有观感可测，只能把
+        # 「分配发生在哪一行」「注释说的是不是真的」变成可断言的事实。
+        # 能行为化的都行为化了（填充值 / EDT 真值表 / 辉光半径），
+        # 分配与注释类用结构判据，逐条配变异测试。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VAuditBatch2Round5')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

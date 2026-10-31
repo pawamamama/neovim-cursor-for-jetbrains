@@ -19,11 +19,11 @@
 | 版本 | **v0.9.104**（IDEA 2026.1 与 PyCharm 2025.2 都已装；读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
 | dist 最新 jar | `dist/neovide-cursor-0.9.104.jar`（2026-10-29） |
 | git tag | 停在 **v0.9.83**（0.9.84~0.9.104 缺 21 个，版本未发布） |
-| 探针文件 | **104 个 `V*.java`**（全部 .java 119 个，2026-10-30 实测） |
+| 探针文件 | **105 个 `V*.java`**（全部 .java 120 个，2026-10-31 实测） |
 | 探针基线 | **ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针，见 §7.1 第 1 项 |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
 | PhysicsParity | PASS |
-| 生产代码 | **17,990 行 / 36 文件**（2026-10-30 实测，`find … -exec cat {} + \| wc -l`） |
+| 生产代码 | **19,449 行 / 36 文件**（2026-10-31 实测，`find … -exec cat {} + \| wc -l`） |
 | 探针代码 | **27,675 行 / 118 文件**（同上口径；本行与本节标题的数字过去各抄一版、互相矛盾，已统一） |
 | 构建 | javac + 手写 plugin.xml；Gradle 也完整入库（两条路径并存） |
 
@@ -287,6 +287,8 @@ TR（前缘单角）   2.11     7.43    11.58
 | 6 | 预览窗「节奏：慢 / 正常 / 快」三档 | `AnimationPreview` | 加下拉会让 `VAddSetting:115` 的 `combos == 4`、`VerifyPanel:108` 变红——契约变更，按 §7.0 B 表改常数 |
 | 7 | 设置页打赏入口 | `PluginInfoBar` | 约束：**发布之后**再做；图片打进 jar，不联网加载 |
 | 8 | `targetFps=144` 的端到端帧率验证 | 诊断日志 `activeFps` / `real fps` | 工具已具备（本轮新增 `[tick]`），但未正式跑一次留档 |
+| 9 | **U-M-21：运行时「禁用插件」的收尾钩子** | `plugin.xml`（`DynamicPluginListener` 或插件级 Disposable） | **待办，不放开**。已经做的是 `Disposer.register(Application, ::shutdownCleanup)`（覆盖 IDE 关闭 / Application dispose），**不覆盖运行时禁用插件**。要覆盖必须改 `plugin.xml` —— **需要用户批准才能动**。用户 2026-10-31 决定：先算待办，本轮不改。 |
+| 10 | **第 3 批审查（`ui/settings/` 全部）** | `ui/CaretAnimator` 之外的面板与预览 | 前置条件**已满足**：第 2 批唯一「正常使用必触发」的 U-H-1 于 2026-10-31 用 javap 核实为**误报**（`visualPositionToXY` 返回内容坐标、不含滚动偏移，见 `plans/audit-fix-batch2-round5.md` §二），**用户当日已认可撤销**。第 3 批可以开始；但仍要在它的任务书里写明「第 2 批修复未提交、先看工作区」。 |
 
 #### 7.1.1 六个探针的根因与修法（2026-10-28 存档，供日后复查）
 

@@ -2,6 +2,7 @@ package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.intellij.openapi.application.Application;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Editor;
@@ -45,8 +46,78 @@ public class NeovideCaretManager implements EditorFactoryListener {
     /** 每个编辑器对应一个动画控制器 */
     private static final Map<Editor, CaretAnimator> ANIMATORS = new ConcurrentHashMap<>();
 
-    /** 全局配置（后续可接入 Settings 持久化） */
-    private static final NeovideConfig CONFIG = new NeovideConfig();
+    /**
+     * 全局配置（运行期唯一快照；持久化真相在 {@link NeovideCursorSettings#State}）。
+     *
+     * <h3>U-M-1：为什么是 {@code volatile}，以及它<b>不</b>保证什么</h3>
+     *
+     * <p>{@code volatile} 保证的是<b>引用本身</b>的可见性：本进程内任何线程读到
+     * {@code CONFIG} 时，看到的至少是这个对象完整构造发布之后的状态。
+     *
+     * <p><b>它不保证字段级可见性</b>：{@code NeovideConfig} 的字段是普通 public 字段
+     * （{@code core/NeovideConfig.java} 受 D0 门禁保护，不能加 volatile）。
+     * 所以本类的线程契约必须写死：
+     *
+     * <pre>
+     *   对 CONFIG 字段的<b>写</b>，正常路径全部在 EDT（applyConfigOnEdt 的 S1，
+     *   以及单点 setter —— 后者现在入口处有 assertEdtContract 守卫）。
+     *
+     *   【唯一例外，刻意保留】applyConfig() 的「非 EDT 分支」会在调用方线程上
+     *   先跑一次 syncStateToConfig()，再 invokeLater。这是为了让「调用完立刻读
+     *   CONFIG」的调用方看到新值（语义要求，不是疏忽）。代价：那一瞬间 EDT 的
+     *   tick 可能读到新旧混合的字段，最多影响一帧；随后 EDT 上的 S1 会全量重写并
+     *   走 S2..S8 修正缓存。2026-10-31 审查复核指出本条曾写成「写只发生在一处：
+     *   EDT」—— 与代码不符，已按实际行为改正。
+     *
+     *   对 CONFIG 字段的<b>读</b>，生产侧同样全部在 EDT（CaretAnimator / 面板 / 绘制）。
+     *   调度线程只读它自己的 4 个 volatile / Atomic 字段，从不读 CONFIG（2026-10-30 审计
+     *   两视角独立穷举确认）。
+     * </pre>
+     *
+     * <p>「整体替换引用」这件事<b>本轮没有做</b>，理由是它会把现有 animator 冻在旧配置上：
+     * {@code CaretAnimator} 构造时持有 {@code NeovideConfig} 引用（{@code this.config = config}），
+     * 每帧读字段。换掉 CONFIG 指向的对象，已存在的 animator 仍然指着旧对象 ——
+     * 用户改设置后「只有新开的编辑器生效」。要真正整体替换，得先让所有 consumer
+     * 每次读都经 {@code getConfig()}（热路径每帧几十次服务式取值），
+     * 或改 {@code settings/} 的同步入口，两者都超出本轮「零观感变化」的边界。
+     * 见 {@code plans/audit-fix-batch2-round5.md} §七（风险 2）。
+     */
+    private static volatile NeovideConfig CONFIG = new NeovideConfig();
+
+    /**
+     * EDT 契约判据 —— <b>纯函数</b>，只回答「这次调用算不算违约」。
+     *
+     * <p>为什么拆成纯函数：探针要能直接断言真值表（G3-b / H6），
+     * 而不是去源码里搜一段 warning 的 token（陷阱 4：文本断言太弱）。
+     *
+     * <p>为什么「没有平台」放行：离线探针（tools/settings-probe）没有 Application 实例，
+     * 它们本来就在 main 线程上直接调这些入口。硬抛会把整个门禁打断 ——
+     * 那不是发现缺陷，而是把验证工具弄坏。
+     *
+     * @param hasApplication  当前进程是否有平台 Application
+     * @param isDispatchThread 当前线程是否是 EDT
+     */
+    static boolean isEdtContractViolated(boolean hasApplication, boolean isDispatchThread) {
+        return hasApplication && !isDispatchThread;
+    }
+
+    /**
+     * 记录一次「契约要求 EDT、但不在 EDT」的调用。
+     *
+     * <p><b>只 warn 不抛</b>：这些入口在生产里全部由 EDT 到达（Tools 菜单、设置 apply），
+     * 但平台回调的线程模型不该由我们用异常去赌 —— 一次误抛会让正常的设置应用失败，
+     * 那比「配置更新晚一帧可见」严重得多。可观测性由这条 warn 提供。
+     */
+    private static void assertEdtContract(String where) {
+        Application app = ApplicationManager.getApplication();
+        boolean hasApp = app != null;
+        boolean onEdt = !hasApp || app.isDispatchThread();
+        if (isEdtContractViolated(hasApp, onEdt)) {
+            LOG.warn("neovide-cursor: " + where + " 按契约必须在 EDT 上调用；当前线程="
+                    + Thread.currentThread().getName()
+                    + "。CONFIG 的字段级可见性没有保证（见 CONFIG 的 U-M-1 说明）。");
+        }
+    }
 
     /** 保存改动前的光标颜色，用于恢复；为 null 表示当前未隐藏 */
     private static volatile Color savedCaretColor = null;
@@ -446,6 +517,8 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     /** 切换拖尾渲染模式（弹簧 / 残影），并重置所有编辑器的动画状态 */
     public static void setTrailMode(NeovideConfig.TrailMode mode) {
+        // 【U-L-13】写 CONFIG 的公开入口：契约是 EDT（见 CONFIG 的 U-M-1 说明）。
+        assertEdtContract("setTrailMode");
         CONFIG.trailMode = mode;
         syncConfigToStateAndPersist();
         for (CaretAnimator animator : ANIMATORS.values()) {
@@ -473,6 +546,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
      * <p>切换后立即对所有已打开的编辑器生效。
      */
     public static void setHideNativeCaret(boolean on) {
+        assertEdtContract("setHideNativeCaret");
         CONFIG.hideNativeCaret = on;
         syncConfigToStateAndPersist();
         if (on) {
@@ -500,6 +574,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
      * <p>关闭：行为与 0.9.1 一致（辉光瞬时归零）。
      */
     public static void setOverlayFadeOut(boolean on) {
+        assertEdtContract("setOverlayFadeOut");
         CONFIG.overlayFadeOut = on;
         // 落盘：否则重启 IDEA 后又回到默认值。
         // 走 NeovideCursorSettings（唯一持久化真相），不再写第二处。
@@ -521,6 +596,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
      * 最长要等一个空闲周期（600ms）才按新策略跑。
      */
     public static void setAlwaysHighFps(boolean on) {
+        assertEdtContract("setAlwaysHighFps");
         CONFIG.alwaysHighFps = on;
         // 落盘：否则重启 IDEA 后又回到默认，用户会以为"又变回去了"。
         // 走 NeovideCursorSettings（唯一持久化真相），不再写第二处。
@@ -575,9 +651,10 @@ public class NeovideCaretManager implements EditorFactoryListener {
      * 它调 {@code panel.refreshStyles()}（重新 parse 颜色）、
      * 调 {@code afterimageTrail.setLifetime(...)}、并置 {@code forceResync = true}。
      * 但 <b>{@code forceResync} 单独不足以刷新 {@code glowPadding}</b>：
-     * 慢路径在算 padding 之前还有一条「光标中心与高度都没变就 return」的早退
-     * （{@code CaretAnimator:1007}），静态光标编辑器更是整体跳过 {@code refreshTarget}。
+     * 只有真进了慢路径才会重算 padding，而「改了 {@code shadowBlurFactor}、光标没动」
+     * 时快速路径（视觉行列 + 文档戳都没变）依然命中，慢路径根本不会跑。
      * 所以 S7 的循环里还要显式调 {@code refreshGlowPadding()}。
+     * （静态光标编辑器不画辉光，{@code refreshGlowPadding} 对它直接跳过，属有意为之。）
      * 不做 S7 → 改颜色 / 改 {@code shadowBlurFactor} 后画面不变。
      *
      * <p><b>幂等性</b>：连调两次，第二次的 S2–S6 全部跳过（值没变），S7/S8 仍执行。
@@ -640,6 +717,10 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     /** {@link #applyConfig()} 的 EDT 侧实现（S1..S8），{@code old} 是 S0 快照。 */
     private static void applyConfigOnEdt(@NotNull Snapshot old) {
+        // 【U-M-1 / U-L-13】线程契约守卫：本方法直接写 CONFIG 字段并碰 Swing 组件。
+        // 平台存在却不在 EDT 时留一条 warn（不抛 —— 见 assertEdtContract 的说明）。
+        assertEdtContract("applyConfigOnEdt");
+
         final NeovideConfig.TrailMode oldTrailMode = old.trailMode;
         final boolean oldHideNativeCaret = old.hideNativeCaret;
         final boolean oldAlwaysHighFps = old.alwaysHighFps;
@@ -690,8 +771,8 @@ public class NeovideCaretManager implements EditorFactoryListener {
         //
         // onModeChanged() 覆盖：fillColor/glowColor（refreshStyles）、
         // AfterimageTrail.lifetime、forceResync（→ 下一帧慢路径重算 glowPadding）。
-        // 但 forceResync 那条路在「光标静止」时走不到（refreshTarget 在 :1007 早退），
-        // 静态光标编辑器更是整体跳过 refreshTarget —— 所以 glowPadding 必须再主动算一次。
+        // 但 forceResync 那条路在「光标静止」时走不到：快速路径命中就不会进慢路径，
+        // 而 padding 只在慢路径里重算 —— 所以 glowPadding 必须再主动算一次。
         for (CaretAnimator animator : ANIMATORS.values()) {
             try {
                 animator.onModeChanged();
@@ -731,6 +812,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     /** 切换拖尾效果开关 */
     public static void setEnabled(boolean on) {
+        // 【U-L-13】这个入口既写 CONFIG 又会 dispose/新建 animator（碰 Swing），
+        // 契约是 EDT；守卫只 warn，不打断离线探针。
+        assertEdtContract("setEnabled");
         // 【§3.1.4】enabled 只有一个运行期真相：CONFIG.enabled。
         // 历史上这里还有一个独立的静态布尔字段（volatile）与 CONFIG.enabled 并立 ——
         // 那正是"三真相源"的来源，已删除。

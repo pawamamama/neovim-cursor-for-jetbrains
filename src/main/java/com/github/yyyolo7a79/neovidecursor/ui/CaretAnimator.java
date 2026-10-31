@@ -229,13 +229,10 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final int IME_MAX_SKIP_FRAMES = 15;
 
 
-    /** 四个角点的相对位置（左上 → 右上 → 右下 → 左下，顺时针） */
-    private static final double[][] CORNER_RELATIVE = {
-            {-0.5, -0.5},
-            {0.5, -0.5},
-            {0.5, 0.5},
-            {-0.5, 0.5},
-    };
+    // 【U-L-2】原来这里有一份 CORNER_RELATIVE（四角相对位置）—— 零读者。
+    // 权威表在 SpringTrail.CORNER_RELATIVE（本类构造 SpringTrail 时用的就是那一份）。
+    // 角点顺序是「错了就镜像」的不变量，同一语义存在两份时，改错的那一份不会报错，
+    // 只会让某条路径画出来的形状悄悄镜像。删掉死的那份，只留一个来源。
 
     private final Editor editor;
     private final JComponent content;
@@ -267,40 +264,44 @@ public class CaretAnimator implements Disposable, CaretListener {
     private boolean cursorRgbWash;
     private final NeovideConfig config;
     /**
-     * 每个 {@code Caret} 一份拖尾状态（多光标）。
-     *
-     * <p><b>为什么用 {@link IdentityHashMap}</b>：{@code Caret} 对象没有可靠的
-     * {@code equals/hashCode}，必须按<b>引用</b>判等，否则不同光标可能撞键。
-     *
-     * <p><b>为什么还需要帧号清理</b>：官方文档明确「两个 caret 落到同一视觉位置时
-     * 平台会合并成一个」。合并后旧 {@code Caret} 对象不再出现在
-     * {@code getAllCarets()} 里，而 IdentityHashMap 按引用判等 ——
-     * 旧条目永远不会再被访问到。因此每帧遍历时打 {@code lastSeenFrame}，
-     * 回收时删掉「帧号 ≠ 当前帧」的条目（不依赖数量比较，
-     * 因为合并是一增一减、数量可能不变）。
-     */
-    /**
      * 每个光标一份拖尾状态。
      *
-     * <p><b>key 有两种，必须用 HashMap 而不是 IdentityHashMap</b>：
+     * <p><b>key 有两种，必须用 HashMap 而不是 IdentityHashMap</b>（U-L-11①：这里原来
+     * 挂着两块<b>互相矛盾</b>的 javadoc —— 一块说必须 IdentityHashMap、一块说必须 HashMap，
+     * 现实是 HashMap。读第一块的人会把它「改回去」，并把 U-M-8 那个 bug 重新引入）：
      * <ul>
      *   <li>普通多光标 → {@code Caret} 对象。{@code Caret} 没有重写
-     *       {@code equals/hashCode}，因此 HashMap 下天然是引用判等 —
+     *       {@code equals/hashCode}，因此 HashMap 下天然是<b>引用判等</b>，
      *       与 IdentityHashMap 行为一致。</li>
      *   <li>块选区 → {@code Integer}（该行选区起点的 offset）。
      *       <b>这里曾用 IdentityHashMap 出过 bug</b>：块选区每帧都要
-     *       按 offset 查同一个 key，而 {@code Long.valueOf()} 只在
-     *       -128~127 有缓存，offset 超过就每次 new 一个 ——
+     *       按 offset 查同一个 key，而 {@code Integer.valueOf()} 只在
+     *       -128~127 有缓存，offset 超过就每次装成新对象 ——
      *       IdentityHashMap 按引用判等会认为"新 key"，于是每帧新建
-     *       SpringTrail，旧条目永远清不掉（内存泄漏 + 拖尾重复）。</li>
+     *       SpringTrail，旧条目永远清不掉（内存泄漏 + 拖尾重复）。
+     *       <b>这就是必须 HashMap 的唯一原因，别改回去。</b></li>
      * </ul>
+     *
+     * <p><b>为什么还需要帧号清理</b>：官方文档明确「两个 caret 落到同一视觉位置时
+     * 平台会合并成一个」。合并后旧 {@code Caret} 对象不再出现在
+     * {@code getAllCarets()} 里，而按引用判等的 Map 不会自动回收它 ——
+     * 旧条目永远不会再被访问到。因此每帧遍历时打 {@code lastSeenFrame}，
+     * 回收时删掉「帧号 ≠ 当前帧」的条目（不依赖数量比较，
+     * 因为合并是一增一减、数量可能不变）。
      */
     private final Map<Object, SpringTrail> trails = new java.util.HashMap<>();
 
     /** 每帧复用的活跃列表（避免每帧新建） */
     private final List<SpringTrail> activeTrails = new java.util.ArrayList<>();
 
-    /** 帧序号，用于帧号标记-清除 */
+    /**
+     * 拖尾代数：每进入一次<b>慢路径</b>（快速路径未命中）递增 1，用于帧号标记-清除。
+     *
+     * <p><b>它不是一个「显示帧号」（U-L-12）</b>：光标静止时快速路径命中，
+     * 这个值根本不涨。诊断日志里 {@code [frame] #N} 与 {@code shouldSample(frameSeq)}
+     * 的口径都是<b>每 15 次慢路径采样一次</b>，不是每秒 125/144 帧。
+     * 按「帧号」去反推采样率会算错一个数量级 —— 所以这里把口径写在声明处。
+     */
     private long frameSeq = 0L;
 
     /**
@@ -443,6 +444,50 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /** 辉光最大外扩量，用于计算重绘区域需要留出的余量（随光标尺寸动态更新） */
     private int glowPadding;
+
+    // ===== 每帧绘制数据的中转数组（U-M-2：热路径零分配）=====
+    //
+    // 【原来怎么写的】每帧每个光标 addQuad(new double[]{...}, new double[]{...})。
+    // 量化：单光标 @144fps → 288 个 double[4]/秒 ≈ 13.8 KB/s；8 光标 → 110 KB/s。
+    // 单独看不足以掉帧（TLAB 分配很便宜），但它直接违反本类开头写下的
+    // 「零分配热路径」承诺 —— 而 addQuad 是**立即拷贝**语义（见 CaretTrailPanel.addQuad），
+    // 调用方完全可以复用自己的数组，没有任何生命周期问题。
+    //
+    // 【为什么是实例字段而不是静态】一个 animator 一个编辑器，多编辑器各自在 EDT
+    // 上交替跑；静态数组会让 A 的角点出现在 B 的四边形里（串台），
+    // 这正是 U-M-23 那类「全局字段被多个实例写」事故的形态。
+
+    /** 当前光标四角的 X / Y 中转（长度固定 4，与四角约定一致） */
+    private final double[] quadScratchX = new double[4];
+    private final double[] quadScratchY = new double[4];
+
+    /**
+     * 组内最大偏移（按需扩容，容量 &gt;= 组数）。
+     *
+     * <p>原来是每帧按组数新建一个数组：8 光标 144 数组/秒。
+     * 复用后只在组数变大时扩容；每帧先清零已用区间。
+     */
+    private double[] groupMaxScratch = new double[0];
+
+    /**
+     * 把四个角点当前的 X 写进 {@code out}（原地填充，不分配）。
+     *
+     * <p><b>为什么拆成静态方法</b>：探针要能直接调用它断言「写出来的值 = 四角真实坐标」——
+     * 只靠「源码里没有 new」这种文本断言，按陷阱 4 是弱判据；有了这个方法，
+     * 观感零变化就有了逐位证据（G1-e）。
+     */
+    static void fillQuadXs(double[] out, TrailCorner[] corners) {
+        for (int i = 0; i < 4; i++) {
+            out[i] = corners[i].getCurrentX();
+        }
+    }
+
+    /** @see #fillQuadXs */
+    static void fillQuadYs(double[] out, TrailCorner[] corners) {
+        for (int i = 0; i < 4; i++) {
+            out[i] = corners[i].getCurrentY();
+        }
+    }
 
     // ===== 渲染调度 =====
 
@@ -1361,6 +1406,21 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         // 多光标：只要没有任何活跃拖尾就退出（等价于旧的 !initialized）
         if (activeTrails.isEmpty()) {
+            // 【U-L-4】这条分支原来直接 return，于是绕过了下面的「不可见降频」。
+            // 0.9.100 修的是 not-showing 分支（每个隐藏编辑器按 144fps 刷 EDT 空任务），
+            // 而「编辑器不可见 + 当前没有活跃拖尾」同样会以高帧率空转 ——
+            // 两个条件一起出现时（后台标签页、控制台刚加载、光标被暂时移出），
+            // 降频逻辑根本没机会跑。这里是同一形态的第二扇门。
+            if (!content.isShowing()) {
+                currentDelayNs = hiddenTierDelayNs(false);
+                currentDelayMs = (int) (currentDelayNs / 1_000_000L);
+                wasHidden = true;
+            } else if (wasHidden) {
+                // 重新可见但这一帧还没有拖尾：清标志并补一次强制重算，
+                // 否则真正的第一帧拖尾会沿用隐藏期间留下的旧坐标。
+                wasHidden = false;
+                forceResync = true;
+            }
             traceTick(rawDtNs, dt, recovery, content.isShowing(), 0, panel.quadCount(),
                     dispatchLagNs, System.nanoTime() - tickStart, "no-trail");
             return;
@@ -1761,7 +1821,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 旧行高的旧坐标画，用户看到的就是「光标纵向漂移」。
             //
             // 【为什么用局部变量而不是直接置 forceResync】
-            // 下面 :1413 有一句 `forceResync = false;`（「已进入慢路径，标志使命完成」），
+            // 慢路径里有一句 `forceResync = false;`（「已进入慢路径，标志使命完成」），
             // 它会把这里置位一笔勾销 —— 实测过，那样改完全无效（VFontScale 三红）。
             // 字号判据只关心「本帧要不要走快速路径」，不该跟 forceResync 的生命周期纠缠。
             //
@@ -1868,6 +1928,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                 // 只有当两个 API 都成功给出坐标时才做比较；任一抛异常就放行，
                 // 绝不让"取不到坐标"变成"永远不重算"。
                 boolean midComposition = false;
+                // 【U-M-10】上面那次坐标换算的结果在这里留下 x，供诊断复用。
+                // 原来日志实参又换算了一次（同一个昂贵调用）：
+                //   · 诊断关着也照算（本类点名的三大昂贵调用之一，IME 组合期每帧白做）；
+                //   · 那一次求值在 try 之外，一旦抛出就落到外层 catch → 慢路径 return false
+                //     —— 一条诊断日志把动画打停。
+                int byOffsetX = 0;
                 try {
                     Point byOffset = editor.offsetToXY(caretOffset);
                     // 只比较 x：本项目只画竖条光标，横向错位才是本 bug 的表现；
@@ -1882,6 +1948,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 判据见 isInVirtualSpace()：offset 已在该行行尾，
                     // 而 vp.column 超出该行真实存在的字符数。
                     midComposition = byOffset.x != p.x && !isInVirtualSpace(caretOffset, vp);
+                    byOffsetX = byOffset.x;
                 } catch (Throwable ignored) {
                     // 坐标 API 不可用：不判定为中间态，走正常路径
                 }
@@ -1897,8 +1964,10 @@ public class CaretAnimator implements Disposable, CaretListener {
                     //   · vpX/offX 两个 API 给出的 x 差多少
                     // 如果用户报掉帧时日志出现大量 ime-skip，说明本判据误判；
                     // 若完全没出现，问题在别处（EDT 负载 / 重绘面积）。
-                    CursorDiag.imeSkipPicked(imeSkipFrames, p.x, caretOffset,
-                            editor.offsetToXY(caretOffset).x);
+                    // 诊断关着时连实参求值都不做（同一文件 geometryWanted 先例）。
+                    if (CursorDiag.enabled()) {
+                        CursorDiag.imeSkipPicked(imeSkipFrames, p.x, caretOffset, byOffsetX);
+                    }
                     CursorDiag.tickPathTrace(traceId, "ime-skip");
                     success = true;
                     return false;
@@ -2541,13 +2610,10 @@ public class CaretAnimator implements Disposable, CaretListener {
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
             trail.snapToTarget();
-            panel.addQuad(
-                    new double[]{
-                            trail.corners[0].getCurrentX(), trail.corners[1].getCurrentX(),
-                            trail.corners[2].getCurrentX(), trail.corners[3].getCurrentX()},
-                    new double[]{
-                            trail.corners[0].getCurrentY(), trail.corners[1].getCurrentY(),
-                            trail.corners[2].getCurrentY(), trail.corners[3].getCurrentY()},
+            // 【U-M-2】复用中转数组，不再每帧新建两个角点数组
+            fillQuadXs(quadScratchX, trail.corners);
+            fillQuadYs(quadScratchY, trail.corners);
+            panel.addQuad(quadScratchX, quadScratchY,
                     0f);    // 不绘制辉光：控制台不需要，也省掉这部分重绘开销
         }
 
@@ -2593,7 +2659,15 @@ public class CaretAnimator implements Disposable, CaretListener {
                 maxGroup = trail.groupId;
             }
         }
-        double[] groupMaxOffset = new double[maxGroup + 1];
+        // 【U-M-2】复用成员数组，不再每帧按组数新建。
+        // 容量只在组数变大时扩；常用路径只清零已用区间（组数通常 1~3）。
+        int groupCount = maxGroup + 1;
+        if (groupMaxScratch.length < groupCount) {
+            groupMaxScratch = new double[groupCount];
+        } else {
+            java.util.Arrays.fill(groupMaxScratch, 0, groupCount, 0d);
+        }
+        double[] groupMaxOffset = groupMaxScratch;
         for (SpringTrail trail : activeTrails) {
             if (trail.maxOffset() > groupMaxOffset[trail.groupId]) {
                 groupMaxOffset[trail.groupId] = trail.maxOffset();
@@ -2626,7 +2700,14 @@ public class CaretAnimator implements Disposable, CaretListener {
 
         float fade = glowFade(now);
         float effectiveGlow = (glowStrength > 0f) ? glowStrength : lastGlowStrength * fade;
-        panel.setGlowStrength(effectiveGlow);
+        // 【U-M-23】不再每帧写面板的「全局辉光强度」字段。
+        //
+        // 那个字段在**生产绘制里没有读者**：每个四边形把自己的辉光强度作为
+        // addQuad 的第三个实参传下去，drawQuadGlow 只用 quadGlow 这个形参。
+        // 它真正的读者只有两处 —— 设置页预览窗（另一个面板实例，自己 step() 里写）
+        // 和 updateCorners（零生产调用）。原来每帧写一次，等于每帧制造一个
+        // 「看起来在生效、其实没人读」的假象，正是陷阱 2「⑤消费者」的反向样本：
+        // 下一个照 javadoc 去调辉光的人，改完画面毫无变化。
         panel.setGlowFade(fade);
 
         // 淡出未完成时必须继续 tick，否则最后一帧不刷新 → 辉光残留。
@@ -2694,14 +2775,10 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 同组共享组内最大偏移 → 相邻行呈现为一个整体，组间互不影响
             double offForGlow = groupMaxOffset[trail.groupId];
             float trailGlow = glowStrengthForValue(offForGlow, effectiveGlow, fading);
-            panel.addQuad(
-                    new double[]{
-                            trail.corners[0].getCurrentX(), trail.corners[1].getCurrentX(),
-                            trail.corners[2].getCurrentX(), trail.corners[3].getCurrentX()},
-                    new double[]{
-                            trail.corners[0].getCurrentY(), trail.corners[1].getCurrentY(),
-                            trail.corners[2].getCurrentY(), trail.corners[3].getCurrentY()},
-                    trailGlow);
+            // 【U-M-2】复用中转数组（addQuad 立即拷贝，调用方不保留引用）
+            fillQuadXs(quadScratchX, trail.corners);
+            fillQuadYs(quadScratchY, trail.corners);
+            panel.addQuad(quadScratchX, quadScratchY, trailGlow);
 
             if (diagFrame) {
                 // I2 / I3：单光标的偏移合理性
@@ -2743,6 +2820,16 @@ public class CaretAnimator implements Disposable, CaretListener {
                     false, anyAnimating, spread, measuredFps);
         }
 
+        // 【2026-10-31 决定：静止时仍然提交重绘（U-M-3 保持现状，不修）】
+        //
+        // 审计指出这里是「无条件提交」，静止后仍每帧 computeTrailBounds + submitRepaint，
+        // 估算 0.3%~3% 单核持续占用（按面积折算，非采样）。用户 2026-10-31 拍板：
+        // 「这个属于硬性规定先保证观感后续有更好方案再优化」。
+        //
+        // 为什么加一条门有风险：静止跳过之后，「滚动 / 几何变化 / 样式变化」必须有
+        // 别的路径把脏区置上，否则最后一次残影会留在屏幕上。行高与 inlay 有专门的
+        // 失效标志，但这条链路没有全覆盖的守门探针 —— 改了它是拿观感换 CPU。
+        // 后续要优化，前提是先把「静止帧不出残影」变成可断言的事实。
         computeTrailBounds(currentBounds);
         submitRepaint();
         return anyAnimating || fading;
@@ -2978,21 +3065,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         wakeUp();
     }
 
-    /**
-     * 立刻按当前 {@code shadowBlurFactor} 重算辉光外扩量 {@link #glowPadding}。
-     *
-     * <p><b>为什么 onModeChanged() 不够</b>：它只置 {@code forceResync}，指望下一次
-     * {@link #refreshTarget()} 走慢路径去更新 {@code glowPadding}（:1018-1019）。
-     * 但慢路径在算 padding <b>之前</b>还有一条早退：
-     * {@code if (newCenterX == centerX && newCenterY == centerY && height == cursorHeight) return false;}
-     * —— 光标静止时这条恒成立，于是「改了 shadowBlurFactor、光标没动」的场景下
-     * padding 永远算不到。静态光标编辑器（控制台）更是<b>整体跳过</b> refreshTarget
-     * （见 {@code staticCaret}），它连慢路径都进不去，只能靠这里。
-     *
-     * <p>padding 偏小会让重绘包围盒切掉光晕边缘（脏像素残留），偏大只是多画一点。
-     * 设置面板 apply() 之后用户会立刻盯着画面看，所以这里选择<b>主动算一次</b>，
-     * 而不是等下一次光标移动。
-     */
     /** 全部活跃拖尾的角点（供包围盒计算，不分配数组 —— 由调用方遍历 map） */
     private java.util.List<TrailCorner> allCornersScratch = new java.util.ArrayList<>();
 
@@ -3025,6 +3097,25 @@ public class CaretAnimator implements Disposable, CaretListener {
     // 从不调用（它的 D-5 断言只看存在性，见该探针第 81-83 行的 INFO 分支）。
     // 由于该探针在找不到时只打 INFO 不打 FAIL，删除不会改变它的断言结果。
 
+    /**
+     * 立刻按当前 {@code shadowBlurFactor} 重算辉光外扩量 {@code glowPadding}。
+     *
+     * <p><b>为什么只靠 onModeChanged() 不够</b>：它只置 {@code forceResync}，
+     * 指望下一次 {@link #refreshTarget()} 真的走进慢路径去更新 padding。
+     * 而慢路径有一个前提 —— <b>快速路径没命中</b>。快速路径的判据是
+     * 「视觉行号 + 视觉列号 + 文档修改戳都没变」，用户只改了
+     * {@code shadowBlurFactor} 而光标没动时，这三样一个都没变，
+     * 于是刷新一次之后 padding 再也不更新。设置面板 apply() 之后用户会立刻盯着
+     * 画面看，所以这里选择<b>主动算一次</b>，而不是等下一次光标移动。
+     *
+     * <p>padding 偏小会让重绘包围盒切掉光晕边缘（脏像素残留），偏大只是多画一点。
+     *
+     * <p><b>为什么静态光标（控制台）直接跳过</b>：那条路径的四边形辉光实参恒为 0
+     * （见 {@link #tickStaticCaret()}），根本不画光晕，也就不需要光晕半径。
+     * 【U-L-11④】原注释在这里声称「控制台编辑器连慢路径都进不去、只能靠本方法」——
+     * 与代码正好相反：控制台编辑器<b>会</b>走 {@code refreshTarget}，
+     * 跳过它的是本方法自己，而跳过是安全的（原因如上）。
+     */
     void refreshGlowPadding() {
         if (disposed || staticCaret) {
             return;

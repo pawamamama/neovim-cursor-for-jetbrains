@@ -39,29 +39,35 @@ public class CaretTrailPanel extends JComponent {
 
     // ===== 弹簧模式数据 =====
 
+    // ===== 为什么坐标一律用 double 而不是 int（0.9.9 抖动修复）=====
+    //
+    // 【本段原先是「四个角点的当前坐标」那个已删字段的 javadoc】
+    // （U-L-11⑦：字段 0.9.74 删除后注释留在原地，读者会以为它描述下面某个字段。）
+    //
+    // 原先是 int[] + Math.round，把弹簧算出的亚像素坐标四舍五入。
+    // 光标原点对齐字符格（整数），而弹簧四角偏移是小数 —— 两者相加后小数部分每帧都变，
+    // 于是 Math.round 让每个角点**每帧在 N 与 N+1 之间反复横跳**，
+    // 四个角各自独立跳，视觉上就是「形状在抖」。
+    //
+    // 这与辉光无关：用户实测关掉辉光顶点照样跳。
+    // VSCode 上游的 currentPosition 全程 float 直接喂 canvas，
+    // canvas 支持 sub-pixel 因此平滑；我们改成 double + Path2D 才能对齐。
+
     /**
-     * 四个角点的当前坐标（contentComponent 坐标系，<b>保留小数</b>）。
+     * {@link #updateCorners} 的中转数组（复用，避免每次调用两次 new double[4]）。
      *
-     * <p><b>为什么必须是 double（0.9.9 抖动修复）</b>：
-     * 原先是 {@code int[]} + {@code Math.round}，把弹簧算出的亚像素坐标四舍五入。
-     * 光标原点对齐字符格（整数），而弹簧四角偏移是小数 —— 两者相加后小数部分每帧都变，
-     * 于是 {@code Math.round} 让每个角点<b>每帧在 N 与 N+1 之间反复横跳</b>，
-     * 四个角各自独立跳，视觉上就是「形状在抖」。
-     *
-     * <p>这与辉光无关：用户实测关掉辉光顶点照样跳。
-     * VSCode 上游的 {@code currentPosition} 全程 float 直接喂 canvas，
-     * canvas 支持 sub-pixel 因此平滑；我们改成 double + Path2D 才能对齐。
+     * <p><b>预览与探针专用</b>（U-M-23）：生产绘制走 {@code beginQuads() + addQuad()}，
+     * 从不调用 {@code updateCorners}。保留它是为了探针能像旧版本一样写入单个四边形。
      */
-    /** updateCorners 的中转数组（复用，避免每次调用两次 new double[4]） */
     private final double[] ucX = new double[4];
     private final double[] ucY = new double[4];
 
     // 【0.9.74 已删除 polyX / polyY】
     //
-    // 这对数组原属「单四边形快捷路径」。多光标重构后生产代码全改走
-    // beginQuads() + addQuad()，updateCorners 零调用，于是它们恒为初值 0 ——
-    // 但 cornersForProbe() 仍在读它们，导致探针"验证通过"却验的是死数据。
-    // 现在 cornersForProbe(int) 直接读 quads 存储，这对中转数组已无任何用途。
+    // 这对数组原属「单四边形快捷路径」，存的是「最后一次 updateCorners 写入的四边形」。
+    // 多光标重构后生产代码全改走 beginQuads() + addQuad()，updateCorners 零调用，
+    // 于是它们恒为初值 0 —— 而 cornersForProbe() 仍在读它们，
+    // 导致探针"验证通过"却验的是死数据。现在 cornersForProbe(int) 直接读 quads 存储。
 
     /** 四边形路径（复用，避免每帧分配）。用 Path2D 而非 Polygon 以保留亚像素精度。 */
     private final Path2D.Double quadPath = new Path2D.Double();
@@ -421,8 +427,20 @@ public class CaretTrailPanel extends JComponent {
     private static final double SQRT_2 = Math.sqrt(2.0);
 
     /**
-     * 辉光强度（0~1），由 animator 每帧按拖尾展开程度写入。
-     * 为 0 时完全不绘制光晕 —— 光标静止时就该是一条干净的光标。
+     * 辉光强度（0~1）。<b>预览与探针专用</b>，生产绘制路径不读它。
+     *
+     * <p><b>为什么改这个注释（U-M-23）</b>：原来的说明声称「这个值为 0 时光晕完全不画」，
+     * 而生产路径早在多光标重构时就改成<b>逐四边形传强度</b>了 ——
+     * {@code CaretAnimator} 把它作为 {@code addQuad} 的第三个实参传下去，
+     * {@link #drawQuadGlow} 只读形参 {@code quadGlow}。于是「改这个字段能让辉光熄灭」
+     * 是一句**谎话**：下一个照它去调辉光的人会得到「改完画面毫无变化」。
+     *
+     * <p>现在真正的读者只有两处：
+     * <ul>
+     *   <li>{@code AnimationPreview.step()} 写、{@code getGlowStrengthForPreview()} 读
+     *       （设置页预览用的是**另一个面板实例**，与生产每帧链无关）；</li>
+     *   <li>{@link #updateCorners}（零生产调用，探针用）。</li>
+     * </ul>
      */
     private float glowStrength = 1f;
 
@@ -486,14 +504,46 @@ public class CaretTrailPanel extends JComponent {
      * 系数本身为何偏离原版 0.6，见 {@link NeovideConfig#shadowBlurFactor} 的说明。
      * 该半径即光晕的最大外扩距离 —— 最外层膨胀到此处的累积不透明度已降到约 6%，
      * 对应高斯模糊的可见边界。
+     *
+     * <h3>U-L-5：为什么去掉 0.5px 迟滞</h3>
+     *
+     * <p>原实现是「新值与<b>已经写进去的值</b>相差 &gt; 0.5px 才更新」。它想省的是
+     * 「亚像素抖动导致每帧都改一个 float」，但代价是<b>小步长改动被整段吞掉</b>：
+     * 抖动滑块一格只让半径变 0.3px 时，这一次拖动**完全没有效果**，
+     * 而且不会报错、不会记日志 —— 用户看到的就是「拖了没反应」。
+     *
+     * <p>现在改成<b>按输入判重</b>：宽、高、系数三者都与上次相同才跳过；
+     * 任何一个变了就重算。语义上「输入变了 → 输出必须跟着变」，
+     * 而亚像素抖动仍然被完全吸收（输入没变就直接返回）。
+     *
+     * <p>成本：本方法只在几何变化（{@code refreshTarget} 慢路径）与
+     * 设置应用（{@code refreshGlowPadding}）时被调用，不在每帧热路径上，
+     * 所以去掉阈值不会带来任何额外写入。
      */
     public void updateGlowRadius(double cursorWidth, double cursorHeight) {
-        double maxDim = Math.max(cursorWidth, cursorHeight);
-        float newWidth = (float) (config.shadowBlurFactor * maxDim);
-        if (Math.abs(newWidth - glowWidth) > 0.5f) {
-            glowWidth = newWidth;
+        float factor = config.shadowBlurFactor;
+        // 非有限输入直接忽略（保留旧半径）。旧实现靠 `|new-old| > 0.5` 的 NaN 比较
+        // 恒假而"恰好"保住了旧值；改成输入判重后若不加这一条，NaN 会被写进 glowWidth，
+        // 虽然 isFiniteQuad() 会拦住绘制，但半径会一直坏到下一次有效输入。
+        if (!Double.isFinite(cursorWidth) || !Double.isFinite(cursorHeight)
+                || !Float.isFinite(factor)) {
+            return;
         }
+        if (cursorWidth == lastGlowSrcWidth
+                && cursorHeight == lastGlowSrcHeight
+                && factor == lastGlowFactor) {
+            return;
+        }
+        lastGlowSrcWidth = cursorWidth;
+        lastGlowSrcHeight = cursorHeight;
+        lastGlowFactor = factor;
+        glowWidth = (float) (factor * Math.max(cursorWidth, cursorHeight));
     }
+
+    /** {@link #updateGlowRadius} 的输入判重（见该方法 U-L-5 说明）。初值用 NaN，首次必算。 */
+    private double lastGlowSrcWidth = Double.NaN;
+    private double lastGlowSrcHeight = Double.NaN;
+    private float lastGlowFactor = Float.NaN;
 
     /** 当前辉光外扩量，供调用方计算重绘区域余量 */
     public float getGlowWidth() {
@@ -918,11 +968,22 @@ public class CaretTrailPanel extends JComponent {
      * 不透明主体盖住；而真正扩得够远的层，alpha 已衰减到 2% 以下。
      */
     private void drawQuadGlow(Graphics2D g2, float quadGlow) {
-        if (!config.useShadow || currentGlowLayers() <= 0 || glowWidth <= 0.5f) {
+        // 【U-L-6】非有限值守卫 —— 与同文件 buildRgbWashPaint 的 isFinite 判据同构。
+        //
+        // 为什么需要：上游几何异常时 quadX/quadY 或强度可能是 NaN。此时
+        // `peak <= 0f` 为 **false**（NaN 与任何数比较都是 false），于是继续
+        // Math.pow → 逐层 fill 一条 NaN 路径。Java2D 对 NaN 路径不抛异常、
+        // 只是静默画不出来 —— 排查者看到的是「辉光偶发缺失」，
+        // 而不是「某一行算错了」。批 1 已堵住主要源头，这里是同族残余。
+        if (!Float.isFinite(quadGlow) || !isFiniteQuad()) {
             return;
         }
 
+        // 【U-L-10】层数每帧只取一次（原来守卫与赋值处各调一次，两次虚调用没有意义）。
         int layers = currentGlowLayers();
+        if (!config.useShadow || layers <= 0 || glowWidth <= 0.5f) {
+            return;
+        }
 
         // 峰值再乘上强度：光标静止时 glowStrength 为 0，此处直接返回，光晕完全不绘制
         //
@@ -938,7 +999,9 @@ public class CaretTrailPanel extends JComponent {
         // 因此行为与改造前完全一致。
         float peak = config.glowOpacity * (glowColor.getAlpha() / 255f)
                 * quadGlow * glowFade;
-        if (peak <= 0f) {
+        // 写成 `!(peak > 0f)` 而不是 `peak <= 0f`：前者把 NaN 也挡在这里
+        // （NaN 与 0 的比较恒为 false），后者会放过 NaN。U-L-6 的第二道闸门。
+        if (!(peak > 0f)) {
             return;
         }
 
@@ -976,6 +1039,24 @@ public class CaretTrailPanel extends JComponent {
             glowPath.closePath();
             g2.fill(glowPath);
         }
+    }
+
+    /**
+     * 当前四边形（{@link #quadX}/{@link #quadY}）与半径是否都是有限值。
+     *
+     * <p>U-L-6：任一角点或半径是 NaN/Infinity 时，外扩方向与路径都会变成 NaN，
+     * Java2D 只会静默不画 —— 与其让它悄悄少画一层，不如在入口就明确放弃这一帧。
+     */
+    private boolean isFiniteQuad() {
+        if (!Float.isFinite(glowWidth)) {
+            return false;
+        }
+        for (int j = 0; j < 4; j++) {
+            if (!Double.isFinite(quadX[j]) || !Double.isFinite(quadY[j])) {
+                return false;
+            }
+        }
+        return true;
     }
 
 
