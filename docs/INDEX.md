@@ -44,6 +44,7 @@
 | 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 1139 | 2026-10-30（补 BUG-014 预设派生丢 3 字段 / BUG-015 拉伸方向待核实） |
 | **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 266 | 0.9.92，未核对 |
 | 代码审计记录 | [CODE-AUDIT-0.9.87.md](CODE-AUDIT-0.9.87.md) | 722 | 0.9.87（描述当时） |
+| **面板二次重构决策（2026-10-31）** | [DECISIONS-PANEL-2026-10-31.md](DECISIONS-PANEL-2026-10-31.md) | 192 | 2026-10-31，用户看完 0.9.108 实机后拍板 |
 | **设置系统重构分步方案** | [../plans/settings-refactor.md](../plans/settings-refactor.md) | 830 | 0.9.80 实测结论 |
 | 清理清单与执行记录 | [../plans/cleanup-inventory.md](../plans/cleanup-inventory.md) | 222 | 0.9.61 实测 |
 | 「加参数要改 8 处」的原始论证（**0.9.5 时代，勿当现状**） | [design/NEXT-REFACTOR.md](design/NEXT-REFACTOR.md) | 280 | 已加失效横幅 |
