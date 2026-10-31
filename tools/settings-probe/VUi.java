@@ -207,13 +207,24 @@ public final class VUi {
             // 现在严格按渲染顺序。校验方法：跑 ZzSliderOrder 打印面板量程，
             // 与下面 SPEC 的 [min,max] 逐项比对。
             // ===== 【0.9.105 分标签后的新顺序】=====
-            // 6 个标签页：总开关 / 颜色 / 光标行手感 / 列手感 / 特殊 / 调试。
-            // 标签 1 与标签 6 没有滑块，所以滑块顺序 = 标签 2 → 3 → 4 → 5 的页内顺序。
+            // 当前 7 个标签页：总开关 / 颜色 / 光标行手感 / 列手感 / 辉光 / 特殊 / 调试。
+            // 标签 1（总开关）、标签 6（特殊）、标签 7（调试）没有滑块，
+            // 所以滑块顺序 = 标签 2 → 3 → 4 → 5 的页内顺序。
             //
             //   [0]      tailOpacity          ← 标签2（颜色）    原来在 [6]
             //   [1..6]   标签3（光标行手感）  原来在 [0..3] + [7][8]
             //   [7..8]   标签4（列手感）      原来在 [4][5]
-            //   [9..13]  标签5（特殊）        原来在 [9..13]，位置未变
+            //   [9..13]  标签5（辉光）        原来在 [9..13]，位置未变
+            //            （本节原文写「标签5（特殊）」—— 那是 2026-10-30 拆出辉光页之前的编号，
+            //              2026-10-31 P11 顺手改正：辉光是标签 5，特殊是标签 6。）
+            //
+            // ===== 【2026-10-31 P11 面板重构：标签 3 内序调整】=====
+            // 用户要求把「光标宽度 / 高度」从页面底部搬到预览窗右侧，而预览窗是该页第一行，
+            // 于是这两个滑块在组件树里提前到标签 3 的最前面：
+            //   旧：[1] shortAnimationLength … [5] cursorWidthPx [6] cursorHeightRatio
+            //   新：[1] cursorWidthPx [2] cursorHeightRatio，其余四项整体后移两位
+            // 这是**契约变更（面板重构），非缺陷** —— 顺序仍严格等于面板真实渲染顺序。
+            // 其余 8 个滑块（标签 2 / 4 / 5）下标不受影响。
             //
             // 换句话说：只有 tailOpacity 从 [6] 挪到 [0]，其余 13 个滑块各自整体
             // 平移 1 位、相对先后不变。这就是 7 个探针在分标签后立刻变红的原因 ——
@@ -221,12 +232,12 @@ public final class VUi {
             // 正确改法是把定位换成按 key（sliderByKey / textFieldOf / labelOf），
             // 而不是改断言的期望值。
             "tailOpacity",             // [0]  标签2 颜色
-            "shortAnimationLength",   // [1]  标签3 光标行手感（单行组）
-            "typingSmoothness",       // [2]  标签3（单行组）
-            "stretchRatioK",          // [3]  标签3（单行组）
-            "slopeTicks",             // [4]  标签3（单行组，0.9.79 新增）
-            "cursorWidthPx",          // [5]  标签3（光标尺寸组）
-            "cursorHeightRatio",      // [6]  标签3（光标尺寸组）
+            "cursorWidthPx",          // [1]  标签3（预览行右侧「光标尺寸」块）
+            "cursorHeightRatio",      // [2]  标签3（预览行右侧「光标尺寸」块）
+            "shortAnimationLength",   // [3]  标签3（单行组）
+            "typingSmoothness",       // [4]  标签3（单行组）
+            "stretchRatioK",          // [5]  标签3（单行组）
+            "slopeTicks",             // [6]  标签3（单行组，0.9.79 新增）
             "trailSize",              // [7]  标签4 列手感
             "animationLength",        // [8]  标签4 列手感
             "glowOpacity",            // [9]  标签5 特殊（辉光组）
@@ -240,12 +251,12 @@ public final class VUi {
     private static final int[][] SPEC = {
             // 下标与 KEYS 一一对应（= 面板渲染顺序，见 KEYS 上方注释）
             {0, 100, 5},       // [0]  tailOpacity            —— 5% 一档
-            {2, 25, 1},        // [1]  shortAnimationLength   —— 10ms 一档
-            {0, 100, 5},       // [2]  typingSmoothness       —— 5% 一档
-            {10, 80, 5},       // [3]  stretchRatioK          —— 0.5 倍一档
-            {0, 100, 5},       // [4]  slopeTicks             —— 5% 一档（0.9.80 起进预设域，82=上游）
-            {1, 5, 1},         // [5]  cursorWidthPx          —— 1px 一档
-            {30, 100, 10},     // [6]  cursorHeightRatio      —— 10% 一档
+            {1, 5, 1},         // [1]  cursorWidthPx          —— 1px 一档
+            {30, 100, 10},     // [2]  cursorHeightRatio      —— 10% 一档
+            {2, 25, 1},        // [3]  shortAnimationLength   —— 10ms 一档
+            {0, 100, 5},       // [4]  typingSmoothness       —— 5% 一档
+            {10, 80, 5},       // [5]  stretchRatioK          —— 0.5 倍一档
+            {0, 100, 5},       // [6]  slopeTicks             —— 5% 一档（0.9.80 起进预设域，82=上游）
             {0, 100, 5},       // [7]  trailSize              —— 5% 一档
             {5, 35, 1},        // [8]  animationLength        —— 10ms 一档
             {0, 100, 5},       // [9]  glowOpacity            —— 5% 一档

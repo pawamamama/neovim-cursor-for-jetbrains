@@ -24,8 +24,11 @@ import com.intellij.ui.dsl.builder.ComboBoxKt;
 import com.intellij.ui.dsl.builder.HyperlinkEventAction;
 import com.intellij.ui.dsl.builder.MutableProperty;
 import com.intellij.ui.dsl.builder.Panel;
+import com.intellij.ui.dsl.builder.RightGap;
 import com.intellij.ui.dsl.builder.Row;
+import com.intellij.ui.dsl.builder.RowLayout;
 import com.intellij.ui.dsl.builder.SliderKt;
+import com.intellij.ui.dsl.gridLayout.VerticalAlign;
 import com.intellij.ui.dsl.builder.TextFieldKt;
 import com.intellij.ui.dsl.builder.TopGap;
 import kotlin.jvm.functions.Function0;
@@ -325,7 +328,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     // 删除后：当前值不匹配任何预设时下拉显示空白；键入中间值时的临时显示也改成空白
     // （见 refreshPresetDisplayForInput），不再借用这个假项的下标。
 
-    // ==================== 10 个滑块的刻度表（契约 §6.2，逐值冻结）====================
+    // ==================== 滑块的刻度表（契约 §6.2，逐值冻结）====================
 
     /**
      * 一个滑块的完整建模。<b>滑块刻度值</b>是唯一的中间表示：
@@ -634,7 +637,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private final List<String> animPresetItems = new ArrayList<>();
     private final List<String> colorPresetItems = new ArrayList<>();
 
-    /** 10 个滑块的建模对象（滑块 + 输入框 + 数值标签三者一组）。 */
+    /** 滑块的建模对象（滑块 + 输入框 + 数值标签三者一组），一项一个 SliderSpec。 */
     private final List<SliderBinding> bindings = new ArrayList<>();
 
     // 动画时序组的两条动态耦合提示（契约 §7.4：禁止写死数字）
@@ -974,9 +977,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
             // 【0.9.105 拆分】原来的「单行输入输出」组 + 光标组拆成两半：
             // 「光标渐变」归标签 2（颜色），「光标宽度 / 高度」留在这里（手感）。
+            // 【P11 2026-10-31】「光标宽度 / 高度」不再是页级独立组，改为
+            // 预览行右侧的子块（见 buildInlineGroup 里的注释），所以这里只建一个组。
             DialogPanel tabCursorLine = BuilderKt.panel(p -> {
                 buildInlineGroup(p);
-                buildCursorSizeGroup(p);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -996,13 +1000,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 预览窗放在组外而不是组内第一行 —— 与标签 3 / 标签 4 的做法一致：
             // 它属于整页的「结果反馈」，不属于某一个参数组。
+            // 【P11 面板重构 2026-10-31】预览右边接「辉光」组 —— 拖层数 / 锐度时眼睛
+            // 不用离开预览（与标签 3 / 标签 4 同一套语法）。淡出组仍整宽留在下方。
             DialogPanel tabGlow = BuilderKt.panel(p -> {
                 p.row("", row -> {
-                    row.topGap(TopGap.MEDIUM);
-                    row.cell(glowPreview());
+                    row.layout(RowLayout.INDEPENDENT);
+                    row.topGap(TopGap.SMALL);
+                    row.cell(glowPreview()).verticalAlign(VerticalAlign.CENTER);
+                    row.panel(np -> {
+                        buildGlowGroup(np);
+                        return kotlin.Unit.INSTANCE;
+                    });
                     return kotlin.Unit.INSTANCE;
                 });
-                buildGlowGroup(p);
                 buildFadeGroup(p);
                 return kotlin.Unit.INSTANCE;
             });
@@ -1104,77 +1114,87 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * animRestoreBtn / animNewBtn …），拆开反而要来回跳。
      */
     private void buildPresetRows(Panel panel) {
-        // 0b0. 预设下拉（契约 §9.1 的第一块）
-        panel.row("", row -> {
-            row.topGap(TopGap.MEDIUM);
-            row.bottomGap(BottomGap.SMALL);
-            row.label("动画预设");
-            animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
-            animPresetCombo.addActionListener(e -> onAnimPresetPicked());
-            row.label("颜色预设");
-            colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
-            colorPresetCombo.addActionListener(e -> onColorPresetPicked());
-            return kotlin.Unit.INSTANCE;
-        });
-
-        // 0b. 一键恢复：把当前预设已保存的值重新写进 pending。
-        // 只改 pending（和选预设完全同一条路径），落库仍由「应用 / OK」完成。
-        panel.row("", row -> {
-            row.bottomGap(BottomGap.SMALL);
-            animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
-            animRestoreBtn.addActionListener(e -> restoreAnimPreset());
-            row.cell(animRestoreBtn);
-            colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
-            colorRestoreBtn.addActionListener(e -> restoreColorPreset());
-            row.cell(colorRestoreBtn);
-            return kotlin.Unit.INSTANCE;
-        });
-
-        // 0c. 自定义预设的三个动作（0.9.9）。
+        // 【P11 第二轮 2026-10-31】预设区收进组框，四行共享一张列网格。
         //
-        // 【为什么「新建」不是多余的】自动派生只在「改动画字段」时发生；
-        // 用户想「把当前整套观感（含颜色/拉伸强度等）存下来」时需要一个显式出口。
-        // 「重命名」「删除」只对自定义预设可用 —— 内置预设永久只读，按钮置灰。
-        panel.row("", row -> {
-            row.bottomGap(BottomGap.SMALL);
-            animNewBtn = new javax.swing.JButton("新建预设…");
-            animNewBtn.addActionListener(e -> createCustomPreset());
-            row.cell(animNewBtn);
-            animRenameBtn = new javax.swing.JButton("重命名…");
-            animRenameBtn.addActionListener(e -> renameCustomPreset());
-            row.cell(animRenameBtn);
-            animDeleteBtn = new javax.swing.JButton("删除");
-            animDeleteBtn.addActionListener(e -> deleteCustomPreset());
-            row.cell(animDeleteBtn);
-            // 初值：内置预设选中时改名/删除置灰。之后每次 refreshPresetDisplay 会再刷。
-            animRenameBtn.setEnabled(false);
-            animDeleteBtn.setEnabled(false);
-            return kotlin.Unit.INSTANCE;
-        });
+        // 【为什么以前不齐】这四行原来是**页级独立行**，DSL 给每一行单独一套网格 ——
+        // 于是「下拉在第 2 列」和「按钮在第 1 列」各算各的，用户看到的就是三行按钮
+        // 全部顶在最左（用户原话：「预设控件对齐可以吗，有空间」）。
+        //
+        // 【现在】① 收进 group（组自带一张网格）；② 每行声明 RowLayout.PARENT_GRID
+        // （平台定义：整行参与父网格，用于「列对齐的表单」）；③ 动作行最前面放一个
+        // 空 cell 占住标签列，第一个按钮才会落到「下拉」那一列。
+        // 实测列位（离线原型）：标签 21 / 下拉 77 / 恢复与动作首列 180 / 次列 280 / 末列 367。
+        panel.group("预设", true, g -> {
+            // 动画预设：下拉 + 它自己的「恢复默认值」（一键恢复的语义不变：
+            // 把该预设已保存的值重新写进 pending，落库仍由「应用 / OK」完成）。
+            g.row("动画预设", row -> {
+                row.layout(RowLayout.PARENT_GRID);
+                row.topGap(TopGap.SMALL);
+                animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
+                animPresetCombo.addActionListener(e -> onAnimPresetPicked());
+                animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                animRestoreBtn.addActionListener(e -> restoreAnimPreset());
+                row.cell(animRestoreBtn);
+                return kotlin.Unit.INSTANCE;
+            });
 
-        // 0c2. 颜色预设的三个动作（2026-10-29）：与动画侧完全对称。
-        // 用户要求「颜色也做成完整预设」—— 颜色也能新建 / 改名 / 删除 / 派生副本 / 恢复默认。
-        panel.row("", row -> {
-            row.bottomGap(BottomGap.SMALL);
-            colorNewBtn = new javax.swing.JButton("新建颜色预设…");
-            colorNewBtn.addActionListener(e -> createCustomColorPreset());
-            row.cell(colorNewBtn);
-            colorRenameBtn = new javax.swing.JButton("重命名颜色…");
-            colorRenameBtn.addActionListener(e -> renameCustomColorPreset());
-            row.cell(colorRenameBtn);
-            colorDeleteBtn = new javax.swing.JButton("删除颜色");
-            colorDeleteBtn.addActionListener(e -> deleteCustomColorPreset());
-            row.cell(colorDeleteBtn);
-            colorRenameBtn.setEnabled(false);
-            colorDeleteBtn.setEnabled(false);
-            return kotlin.Unit.INSTANCE;
-        });
+            // 0c. 自定义预设的三个动作（0.9.9）。
+            //
+            // 【为什么「新建」不是多余的】自动派生只在「改动画字段」时发生；
+            // 用户想「把当前整套观感（含颜色/拉伸强度等）存下来」时需要一个显式出口。
+            // 「重命名」「删除」只对自定义预设可用 —— 内置预设永久只读，按钮置灰。
+            g.row("", row -> {
+                row.layout(RowLayout.PARENT_GRID);
+                row.cell();                     // 占住标签列 → 按钮与下拉同列起
+                animNewBtn = new javax.swing.JButton("新建预设…");
+                animNewBtn.addActionListener(e -> createCustomPreset());
+                row.cell(animNewBtn);
+                animRenameBtn = new javax.swing.JButton("重命名…");
+                animRenameBtn.addActionListener(e -> renameCustomPreset());
+                row.cell(animRenameBtn);
+                animDeleteBtn = new javax.swing.JButton("删除");
+                animDeleteBtn.addActionListener(e -> deleteCustomPreset());
+                row.cell(animDeleteBtn);
+                // 初值：内置预设选中时改名/删除置灰。之后每次 refreshPresetDisplay 会再刷。
+                animRenameBtn.setEnabled(false);
+                animDeleteBtn.setEnabled(false);
+                return kotlin.Unit.INSTANCE;
+            });
 
-        // 0d. 总说明（2026-10-28）：回答「哪些设置随预设变」。
-        // 用户抱怨原来的提示不够明显、也没说清每一项属于哪一类。
-        panel.row("", row -> {
-            row.bottomGap(BottomGap.MEDIUM);
-            row.rowComment(PRESET_SCOPE_HINT, COMMENT, NO_LINK);
+            // 0c2. 颜色预设：与动画侧完全对称（2026-10-29 用户要求「颜色也做成完整预设」）。
+            g.row("颜色预设", row -> {
+                row.layout(RowLayout.PARENT_GRID);
+                colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
+                colorPresetCombo.addActionListener(e -> onColorPresetPicked());
+                colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                colorRestoreBtn.addActionListener(e -> restoreColorPreset());
+                row.cell(colorRestoreBtn);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            g.row("", row -> {
+                row.layout(RowLayout.PARENT_GRID);
+                row.cell();
+                colorNewBtn = new javax.swing.JButton("新建颜色预设…");
+                colorNewBtn.addActionListener(e -> createCustomColorPreset());
+                row.cell(colorNewBtn);
+                colorRenameBtn = new javax.swing.JButton("重命名颜色…");
+                colorRenameBtn.addActionListener(e -> renameCustomColorPreset());
+                row.cell(colorRenameBtn);
+                colorDeleteBtn = new javax.swing.JButton("删除颜色");
+                colorDeleteBtn.addActionListener(e -> deleteCustomColorPreset());
+                row.cell(colorDeleteBtn);
+                colorRenameBtn.setEnabled(false);
+                colorDeleteBtn.setEnabled(false);
+                return kotlin.Unit.INSTANCE;
+            });
+
+            // 0d. 总说明（2026-10-28）：回答「哪些设置随预设变」。
+            g.row("", row -> {
+                row.bottomGap(BottomGap.MEDIUM);
+                row.rowComment(PRESET_SCOPE_HINT, COMMENT, NO_LINK);
+                return kotlin.Unit.INSTANCE;
+            });
             return kotlin.Unit.INSTANCE;
         });
     }
@@ -1187,20 +1207,23 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private void buildMasterGroup(Panel panel) {
         panel.group("总开关", true, g -> {
             g.row("启用拖尾光标（总开关）", row -> {
-                row.topGap(TopGap.MEDIUM);
+                row.topGap(TopGap.SMALL);
                 bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
                 return kotlin.Unit.INSTANCE;
             });
 
+            // 【P11 第二轮 2026-10-31】说明从「控件右侧」（Cell.comment）改成
+            // 「控件下方」（row.rowComment）：全页说明统一到行标题列的同一条左缘。
+            // 原来右侧说明在 x≈580、下方说明在 x≈330，同一页两种左缘 = 用户说的「放得随意」。
             g.row("隐藏原生光标（覆盖层充当光标）", row -> {
-                bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v)
-                        .comment(W_HIDE_NATIVE, COMMENT, NO_LINK);
+                bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v);
+                row.rowComment(W_HIDE_NATIVE, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
             g.row("常驻刷新（不停手降频）", row -> {
-                bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v)
-                        .comment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
+                bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v);
+                row.rowComment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1227,10 +1250,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 【多光标不辉光】全局设置，不随预设变化
             g.row("多光标时关闭辉光（只保留拉伸）", row -> {
                 bindCheck(row, () -> pending.multiCursorNoGlow,
-                        v -> pending.multiCursorNoGlow = v)
-                        .comment(TAG_GLOBAL + "光标 ≥ 2 个时把辉光层数强制归零，"
-                                + "只保留拖尾拉伸形状 —— 减少多光标时的绘制开销。"
-                                + "单光标不受影响。", COMMENT, NO_LINK);
+                        v -> pending.multiCursorNoGlow = v);
+                row.rowComment(TAG_GLOBAL + "光标 ≥ 2 个时把辉光层数强制归零，"
+                        + "只保留拖尾拉伸形状 —— 减少多光标时的绘制开销。"
+                        + "单光标不受影响。", COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1252,9 +1275,34 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private void buildInlineGroup(Panel panel) {
         panel.group("单行输入输出（打字 / 退格）", true, g -> {
+            // 【P11 面板重构 2026-10-31】预览窗左移，光标宽/高并排到它右边。
+            //
+            // ① 为什么必须 layout(RowLayout.INDEPENDENT)：
+            //    row("") 带一个空标签，默认 RowLayout.LABEL_ALIGNED 会把「标签列」也算进
+            //    父网格 —— 实测预览窗因此被推到 x=166（用户截图里左边那块空的来源）。
+            //    改成 INDEPENDENT 后同一行预览窗落到 x=21，左移 145px。
+            //    依据：平台 API 的 RowLayout 枚举 + 离线实测 —— 同一行在 INDEPENDENT 前后
+            //    预览窗 x 坐标 166 → 21（离屏探针量的，复现方法见 plans/panel-refactor.md §0.4）。
+            //    线上文档 https://plugins.jetbrains.com/docs/intellij/kotlin-ui-dsl-version-2.html
+            //    在本机网络下访问不了，所以结论以实测为准、不以文档措辞为准。
+            //
+            // ② 为什么用 row.panel{} 而不是再建一个 DialogPanel：
+            //    官方指南 "Multi-column blocks: put several panel { } cells in one row"。
+            //    嵌套 panel 自带独立网格（实测子块里的 rowComment 在子块内部换行，
+            //    不会跑到第 6 列），且绑定仍登记在同一个 DialogPanelConfig 上 ——
+            //    所以不需要 registerIntegratedPanel，apply / reset / isModified 自动覆盖。
+            //
+            // ③ 为什么 verticalAlign(CENTER)：两侧高度不等（预览 110 / 尺寸块更高），
+            //    顶端对齐会在下方留出参差，视觉上不像一组（make-interfaces-feel-better
+            //    的 Alignment 原则）。
             g.row("", row -> {
-                row.topGap(TopGap.MEDIUM);
-                row.cell(inlinePreview());
+                row.layout(RowLayout.INDEPENDENT);
+                row.topGap(TopGap.SMALL);
+                row.cell(inlinePreview()).verticalAlign(VerticalAlign.CENTER);
+                row.panel(np -> {
+                    buildCursorSizeBlock(np);
+                    return kotlin.Unit.INSTANCE;
+                });
                 return kotlin.Unit.INSTANCE;
             });
             g.row("短动画时长（打字/退格）", row -> {
@@ -1305,25 +1353,36 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private void buildCrossGroup(Panel panel) {
         panel.group("多行缎带（换行 / 跳转）", true, g -> {
-            g.row("", row -> {
-                row.topGap(TopGap.MEDIUM);
-                row.cell(crossPreview());
-                return kotlin.Unit.INSTANCE;
-            });
-            // 【0.9.72 文案修正】
+            // 【P11 面板重构 2026-10-31】预览窗左移，跨行两个参数并排到它右边 ——
+            // 与标签 3（光标行手感）同一套语法：预览在左、本页核心参数在右、说明在下方。
+            // INDEPENDENT / verticalAlign 的理由见 buildInlineGroup 的注释。
             //
-            // 原文写「也影响行内，但行内主要由『缎带拉伸强度』决定」—— 这是错的。
-            // 核实 TrailCorner.jump()：短跳分支（:209-221）只读 shortAnimationLength
-            // 与 trailFactors，**完全不读 trailSize**。trailSize 只出现在跨行分支（:227）。
-            // 所以「也影响行内」是没有依据的陈述，会误导用户去调它试行内手感。
-            g.row("拖尾密度（跨行缎带）", row -> {
-                addSlider(row, specOf("trailSize"), springMode);
-                row.rowComment(W_TRAIL_SIZE, COMMENT, NO_LINK).enabledIf(springMode);
-                return kotlin.Unit.INSTANCE;
-            });
-            g.row("跨行动画时长", row -> {
-                addSlider(row, specOf("animationLength"), null);
-                row.rowComment(W_ANIM_LEN + BR + W_ANIM_LEN_EXTRA, COMMENT, NO_LINK);
+            // 为什么参数要放进 row.panel{} 而不是直接再加两个 cell：
+            // 直接并排时，「拖尾密度」那条三段式说明会被挤进预览窗右侧的窄列里
+            // （实测整页被撑到 1173px）；放进子面板后说明在子面板内部按它自己的宽度换行。
+            g.row("", row -> {
+                row.layout(RowLayout.INDEPENDENT);
+                row.topGap(TopGap.SMALL);
+                row.cell(crossPreview()).verticalAlign(VerticalAlign.CENTER);
+                row.panel(np -> {
+                    // 【0.9.72 文案修正】
+                    //
+                    // 原文写「也影响行内，但行内主要由『缎带拉伸强度』决定」—— 这是错的。
+                    // 核实 TrailCorner.jump()：短跳分支只读 shortAnimationLength
+                    // 与 trailFactors，**完全不读 trailSize**。trailSize 只出现在跨行分支。
+                    // 所以「也影响行内」是没有依据的陈述，会误导用户去调它试行内手感。
+                    np.row("拖尾密度（跨行缎带）", r -> {
+                        addSlider(r, specOf("trailSize"), springMode);
+                        r.rowComment(W_TRAIL_SIZE, COMMENT, NO_LINK).enabledIf(springMode);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    np.row("跨行动画时长", r -> {
+                        addSlider(r, specOf("animationLength"), null);
+                        r.rowComment(W_ANIM_LEN + BR + W_ANIM_LEN_EXTRA, COMMENT, NO_LINK);
+                        return kotlin.Unit.INSTANCE;
+                    });
+                    return kotlin.Unit.INSTANCE;
+                });
                 return kotlin.Unit.INSTANCE;
             });
             // 契约 §7.3 / §7.4：耦合提示保留在这里（它们讲的就是跨行与短跳的关系）
@@ -1372,27 +1431,31 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 归属变了，联动没变：「辉光颜色」仍然挂 enabledIf(shadowOn)，
             // 关掉「启用辉光」（标签 5 里那个复选框）时它照样变灰。
+            // 【P11 面板重构 2026-10-31】两个取色器并排。
+            //
+            // 为什么值得并排：这两个颜色是「光标渐变」的两端（上端=拖尾色、下端=辉光色），
+            // 分开两行时用户要上下看才能判断「是不是同一色系」；并排后一眼可比。
+            //
+            // 为什么用 row.label 而不是再开一行：平台 DSL 的 row 是网格里的一行，
+            // 一行内多对「标签 + 控件」正是它支持的写法（预设下拉那一行就是同款）。
             g.row("拖尾颜色", row -> {
-                row.topGap(TopGap.MEDIUM);
+                row.topGap(TopGap.SMALL);
                 tailColorPanel = new ColorPanel();
                 tailColorPanel.setSupportTransparency(false);
                 // t7 / R-02：ColorPanel 不是 DialogPanel 的绑定控件，它改了 pending 不会
                 // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
                 tailColorPanel.addActionListener(e -> onColorPanelChanged());
                 row.cell(tailColorPanel);
+                row.label("辉光颜色").gap(RightGap.COLUMNS);
+                shadowColorPanel = new ColorPanel();
+                shadowColorPanel.setSupportTransparency(false);
+                shadowColorPanel.addActionListener(e -> onColorPanelChanged());
+                row.cell(shadowColorPanel).enabledIf(shadowOn);
                 return kotlin.Unit.INSTANCE;
             });
 
             g.row("拖尾不透明度", row -> {
                 addSlider(row, specOf("tailOpacity"), null);
-                return kotlin.Unit.INSTANCE;
-            });
-
-            g.row("辉光颜色", row -> {
-                shadowColorPanel = new ColorPanel();
-                shadowColorPanel.setSupportTransparency(false);
-                shadowColorPanel.addActionListener(e -> onColorPanelChanged());
-                row.cell(shadowColorPanel).enabledIf(shadowOn);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1403,8 +1466,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 现在恢复「光标自身的同色系渐变」语义，文案同步重写。
             g.row("光标渐变（上下深浅）", row -> {
                 bindCheck(row, () -> pending.rgbGradient,
-                        v -> pending.rgbGradient = v)
-                        .comment(TAG_COLOR + W_CURSOR_GRADIENT, COMMENT, NO_LINK);
+                        v -> pending.rgbGradient = v);
+                row.rowComment(TAG_COLOR + W_CURSOR_GRADIENT, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1416,7 +1479,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private void buildGlowGroup(Panel panel) {
         panel.group("辉光", true, g -> {
             g.row("启用辉光", row -> {
-                row.topGap(TopGap.MEDIUM);
+                row.topGap(TopGap.SMALL);
                 bindCheck(row, () -> pending.useShadow, v -> {
                     pending.useShadow = v;
                     shadowOn.set(v);
@@ -1453,16 +1516,20 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      *
      * <p>【0.9.105 拆分】原方法叫 {@code buildCursorGroup}，把「尺寸」和
      * 「光标渐变」放在同一组。分标签后「光标渐变」是颜色语义，搬去标签 2
-     * （{@link #buildColorGroup}），本组只剩尺寸，放在标签 3（光标行手感）
-     * 的「单行输入输出」组后面 —— 用户调完打字手感顺手就能调宽高。
+     * （{@link #buildColorGroup}）。
      *
-     * <p>【组标题未改】「光标（尺寸 / 颜色效果）」字面上还带着「颜色效果」，
-     * 但任务纪律是「不改文案」，所以保留原文。要改的是标题文案，属于另一件事。
+     * <p>【P11 面板重构 2026-10-31】本组从「页面底部独立一组」改为
+     * <b>嵌到预览窗右侧的子面板</b>：用户原话「光标尺寸颜色效果可以放到动画预览窗口旁边，
+     * 能放开，左移窗口就行了」。方法名随之从 {@code buildCursorSizeGroup} 改为
+     * {@code buildCursorSizeBlock}（它不再是页级的一个组，而是预览行里的一个块）。
+     *
+     * <p>【组名修正】原名「光标（尺寸 / 颜色效果）」里的「颜色效果」从 0.9.105 起就是空的
+     * （那一项已迁去颜色页），属于 CLAUDE.md §十 点名的「组名与内容不符」，本次改为「光标尺寸」。
      *
      * <p>这两项都是<b>持久配置</b>，不随动画预设变化。
      */
-    private void buildCursorSizeGroup(Panel panel) {
-        panel.group("光标（尺寸 / 颜色效果）", true, cur -> {
+    private void buildCursorSizeBlock(Panel panel) {
+        panel.group("光标尺寸", true, cur -> {
             cur.row("光标宽度", row -> {
                 // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
                 // 那个档位看不出区别。改成纯 1-5px。
@@ -1488,7 +1555,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private void buildFadeGroup(Panel panel) {
         panel.group("淡出", true, g -> {
             g.row("辉光淡出（停止后柔和熄灭）", row -> {
-                row.topGap(TopGap.MEDIUM);
+                row.topGap(TopGap.SMALL);
                 bindCheck(row, () -> pending.overlayFadeOut, v -> {
                     pending.overlayFadeOut = v;
                     fadeOn.set(v);
@@ -1511,14 +1578,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     /**
-     * G. 实验性（默认折叠）—— 目前只有「拖尾渲染模式」一项。
+     * G. 实验性 —— 目前只有「拖尾渲染模式」一项。
      *
      * <p>残影模式从「总开关组」拆到这里，并明确标注「官方不建议使用」。
      * 理由：AfterimageTrail 是单条历史轨迹模型，多光标只跟主光标；
      * 且掉帧时残影稀疏、观感与弹簧模式差异大，容易让人误以为是 bug。
+     *
+     * <p>【P11 面板重构 2026-10-31】折叠组改平铺（用户原话「特殊和调试改控件」，
+     * 二次确认为「折叠组改平铺」）。警示文案<b>不删</b>：组名里的「官方不建议使用」
+     * 与组内那条 ⚠ 说明都保留，只是不再需要先点开。
      */
     private void buildExperimentalGroup(Panel panel) {
-        panel.collapsibleGroup("实验性（官方不建议使用）", false, g -> {
+        panel.group("实验性（官方不建议使用）", true, g -> {
             g.row("拖尾渲染模式", row -> {
                 Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
                         row.comboBox(MODE_ITEMS, null),
@@ -1544,16 +1615,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     /**
-     * F. 高级（诊断）（默认折叠）。
+     * F. 高级（诊断）—— 平铺（P11 起不再折叠）。
      *
      * <p>从 Tools 菜单挪进来（0.9.6 / M1）：菜单只留 3 项，诊断属于「偶尔用一次」
      * 的高级项。注意「性能诊断」<b>不持久化</b> —— 所以也不参与 isModified()：
      * 勾选后点「应用」才生效，重启即失效。「诊断日志」则写进 State，会持久化。
+     *
+     * <p>【P11 面板重构 2026-10-31】折叠组改平铺。这一页只有两个复选框，
+     * 折叠只是多一次点击。
      */
     private void buildDiagGroup(Panel panel) {
-        panel.collapsibleGroup("高级（诊断）", false, g -> {
+        panel.group("高级（诊断）", true, g -> {
             g.row("性能诊断（跳过重绘，只跑计算）", row -> {
-                row.topGap(TopGap.MEDIUM);
+                row.topGap(TopGap.SMALL);
                 // 【0.9.88 修复：不能用 bindCheck】
                 //
                 // 原来这里是 `bindCheck(row, () -> paintDiag, v -> paintDiag = v)`。
@@ -1563,7 +1637,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 //
                 // 但 paintDiag **不是 State 字段**（不持久化，只活在面板里），
                 // 它本该是「调试开关」而不是「配置项」。本方法开头的 javadoc
-                // （1326 行）早就写着「不参与 isModified()」—— 代码与注释矛盾了。
+                // 早就写着「不参与 isModified()」—— 代码与注释矛盾了。
+                // （原文在这里写死了一个行号，行号会随重构漂移，2026-10-31 已删掉。）
                 //
                 // 修法：用**原生复选框**（row.checkBox 直接拿组件，不调 bindSelected），
                 // 自己监听状态变化。这样它不在绑定控件表里，isModified() 看不到它。
@@ -1584,10 +1659,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 用户看到「诊断那里怎么两个框框」。
             g.row("诊断日志（记录光标状态，供开发者排查）", row -> {
                 row.bottomGap(BottomGap.SMALL);
-                bindCheck(row, () -> pending.diagLogging, v -> pending.diagLogging = v)
-                        .comment("勾选后每 15 帧往 idea.log 写一条光标状态（caret / block / draw）。"
-                                        + "复现问题后把 idea.log 发给开发者；长期开着会撑大日志。",
-                                COMMENT, NO_LINK);
+                bindCheck(row, () -> pending.diagLogging, v -> pending.diagLogging = v);
+                row.rowComment("勾选后每 15 帧往 idea.log 写一条光标状态（caret / block / draw）。"
+                                + "复现问题后把 idea.log 发给开发者；长期开着会撑大日志。",
+                        COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
             return kotlin.Unit.INSTANCE;
@@ -2931,11 +3006,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 原来只报「拉伸系数」，而那个系数是 deriveTrailFactors(k, smooth) 的结果 ——
             // 用户把 smooth 调高后再看这个数字会觉得「我没改拉伸强度啊，怎么系数变了」。
             // 现在直接标注当前 smooth 值，让两个参数的关系可见。
-            singleMoveHint.setText(String.format(Locale.ROOT,
-                    "单行动画时长 = 短动画时长 × 拉伸系数：后缘 %d ms / 横向前缘 %d ms"
+            singleMoveHint.setText("<html>" + String.format(Locale.ROOT,
+                    "单行动画时长 = 短动画时长 × 拉伸系数" + BR
+                            + "后缘 %d ms / 横向前缘 %d ms" + BR
                             + "（系数 %.2f×，已含输入平滑 %.0f%% 的压平效果）。",
                     trailing, leading, f[2] > 0f ? f[0] / f[2] : 0f,
-                    pending.typingSmoothness * 100f));
+                    pending.typingSmoothness * 100f) + "</html>");
         }
         if (crossMoveHint != null) {
             long trailing = Math.round(pending.animationLength * 1000f);
@@ -2959,11 +3035,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             String leadText = (leading <= 0)
                     ? "第 1 帧即到位（约 8 ms）"
                     : leading + " ms";
-            crossMoveHint.setText(String.format(Locale.ROOT,
-                    "跨行动画时长：DampedSpring 时间常数 —— 后缘 = %d ms；前缘 = %s"
-                            + "（拖尾密度 %.2f，为 1.00 时前缘只剩 1 帧）。"
-                            + "<br/>实际拖尾约为该值的 2.6 倍（0.35 s 实测约 920 ms / 115 帧）。",
-                    trailing, leadText, pending.trailSize));
+            // 【P11 面板重构 2026-10-31】这里的两个 hint 是**普通 JLabel**，
+            // 不是 DslLabel：
+            //   · 普通 JLabel 只有在字符串以 <html> 开头时才走 HTML 渲染，
+            //     否则 <br/> 会原样显示（用户截图里列手感页那行字面量就是它）；
+            //   · 普通 JLabel 也不换行，一条长文本会一直往右顶出面板边界。
+            // 所以：整串包 <html>…</html> + 用 BR 显式分行。
+            // 实测每行最宽 412px（原来单行 1160px），远小于用户已接受的 657px。
+            crossMoveHint.setText("<html>" + String.format(Locale.ROOT,
+                    "跨行动画时长：DampedSpring 时间常数 —— 后缘 = %d ms；前缘 = %s" + BR
+                            + "（拖尾密度 %.2f，为 1.00 时前缘只剩 1 帧）。" + BR
+                            + "实际运动时长约为该值的 2.6 倍（示例：0.35 s → 约 920 ms / 115 帧）。",
+                    trailing, leadText, pending.trailSize) + "</html>");
         }
         // 拉伸强度那一行的数值标签里也带派生时长 → 一并刷新
         for (SliderBinding b : bindings) {
@@ -3528,7 +3611,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return syncingControls;
     }
 
-    /** 探针/调试用：10 个滑块，按创建顺序（= 面板从上到下）。 */
+    /**
+     * 探针/调试用：按 <b>SPECS 声明顺序</b>返回滑块（一项一个）。
+     *
+     * <p>与 {@link #textFieldsForProbe()} / {@link #labelsForProbe()} 同序。
+     * <b>注意顺序口径</b>：这是 SPECS 顺序，<b>不是</b>面板渲染顺序 ——
+     * 面板顺序由 {@code VUi.KEYS} 表达（加控件后两者会分家）。
+     */
     public List<JSlider> slidersForProbe() {
         List<JSlider> out = new ArrayList<>();
         for (SliderBinding b : bindings) {
@@ -3537,7 +3626,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return out;
     }
 
-    /** 探针/调试用：10 个输入框，与 {@link #slidersForProbe()} 同序。 */
+    /** 探针/调试用：每个滑块的输入框（一项一个），与 {@link #slidersForProbe()} 同序。 */
     public List<JBTextField> textFieldsForProbe() {
         List<JBTextField> out = new ArrayList<>();
         for (SliderBinding b : bindings) {
@@ -3555,7 +3644,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return out;
     }
 
-    /** 探针/调试用：10 个滑块的字段名，与 {@link #slidersForProbe()} 同序。 */
+    /** 探针/调试用：每个滑块的字段名（一项一个），与 {@link #slidersForProbe()} 的滑块同序。 */
     public List<String> sliderKeysForProbe() {
         List<String> out = new ArrayList<>();
         for (SliderBinding b : bindings) {
