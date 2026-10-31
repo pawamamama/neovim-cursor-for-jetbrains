@@ -1729,3 +1729,632 @@ H-2：返回值被丢弃模式 —— 本批在 ui 发现 2 处新实例（→ U
 > 本批修复优先级建议（给决策会话，非本轮执行）：**先修调度面**（U-H-2/3/4 一次提交可同改，
 > 全部零观感变化、只动异常路径与诊断接线），**再修 U-H-1**（滚动失明——本批唯一正常使用的功能缺陷），
 > 然后 U-H-5/6 隐藏链、U-H-7/8 + U-M-27 诊断基础设施一批。
+
+---
+
+## 九、第 3 批（ui/settings/ 设置面板）
+
+### 9.1 基线与方法
+
+#### 9.1.1 前置检查（含一次偏离，如实记录）
+
+```
+=== 开工时 git status --porcelain ===
+ M docs/DECISIONS-PANEL-2026-10-31.md
+ M src/main/java/.../ui/settings/NeovideCursorConfigurable.java
+ M tools/settings-probe/VUi.java
+?? build/night-run-report.md
+?? plans/batch3-review-prompt.md
+?? plans/panel-refactor.md
+=== 开工时 git log --oneline -3 ===
+ea3f12d docs: 第 5 轮交接 + U-H-1 撤销 + 面板重构决策
+09fbe4d fix(ui): 审计第 2 批第 5 轮 —— G/H 批 14 条（零观感变化）+ 新增守门探针
+1caf7e5 docs: 新增全量审查报告与决策交接
+=== 开工时 git rev-list --left-right --count fork/main...HEAD ===
+0	0
+```
+
+| 项 | 期望（任务书） | 实测 | 结论 |
+|---|---|---|---|
+| HEAD | `ea3f12d` | 开工 `ea3f12d`；审查中变为 `a1efc13` | ⚠️ 偏离，见下 |
+| 与 fork/main 同步 | `0 0` | `0 0`（开工） | ✅ |
+| 工作区 | 3 个 M + 2 个 ?? | 与期望一致 | ✅ |
+| 8 文件行数 | 5552 | `wc -l` = 971+153+127+3784+230+102+97+88 = **5552** | ✅ |
+
+**偏离处置**：审查进行中，面板重构被提交为 `a1efc13`（分支 `p11-panel-refactor`，
+4 文件 +598/−157，含此前未跟踪的 `plans/panel-refactor.md`）。该提交由用户侧完成，
+不是本会话执行的（本会话全程未运行 `git add` / `git commit`）。提交只记录内容、不改内容：
+`NeovideCursorConfigurable.java` 提交前后同为 **3784 行**，重构标记 13 处俱在，
+四个代理读的都是同一份磁盘内容。按用户要求已先备份：`git push -u fork p11-panel-refactor`
+→ `fork/p11-panel-refactor...HEAD = 0 0`；`fork/main...HEAD = 0 1`（分支领先 main 一个提交，未合并）。
+
+**结论：审查基础不变。** 报告中的行号均对应当前工作区（= HEAD `a1efc13`）。
+
+#### 9.1.2 门禁基线
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probes.ps1
+# 仓库根执行，不带 -Repo；本轮只跑一份（四-G-2 并发假红禁令），串行跑两次
+```
+
+| 指标 | 实测 | 任务书期望 | 结论 |
+|---|---|---|---|
+| 总条目 | **102** | 102 | ✅ |
+| PASS | **1103** | 1103 | ✅ |
+| FAIL | **2**（仅 `VRegr2`，R-5/R-6，informational） | 2 | ✅ |
+| 末行 | `V-PROBES RESULT: ALL PASS`（exit 0） | ALL PASS | ✅ |
+
+汇总数由 `awk` 对逐探针输出求和得到（`条目=102 exit和=1 PASS=1103 FAIL=2`），非目测。
+两次运行（提交前 / 提交后）结果一致；日志保存在 `build/gate-batch3.log`（未入库）。
+
+#### 9.1.3 范围（8 文件 / 5552 行，行数实测）
+
+| 文件 | 行数 | 角色 |
+|---|---|---|
+| `NeovideCursorConfigurable.java` | 3784 | 面板主体：构建、绑定、pending/State 同步、预设工作流、apply/reset |
+| `AnimationPreview.java` | 971 | 预览窗：独立物理积分、字体度量、rank 排序副本 |
+| `PluginInfoBar.java` | 230 | 顶栏：版本号、GitHub 检查更新（后台线程） |
+| `ColorPanelBinding.java` | 153 | 颜色面板三向同步（pull / push / differs） |
+| `EditSession.java` | 127 | pending / baseline 的唯一重指向入口 |
+| `ProbeFacade.java` | 102 | 探针接口 |
+| `SettingsSearchIndex.java` | 97 | 搜索关键字 → 数值标签映射 |
+| `SettingsUiUtil.java` | 88 | 纯函数（锐度换算、深拷贝等） |
+
+不在范围：`ui/` 其余文件（第 2 批已审）、`core/`、`settings/`、`tools/settings-probe/`。
+允许且仅允许看调用点几行——`SettingsField` / `CursorPresets` / `CustomPresets` / `CursorPresetApplier`
+因此出现在证据引用中，但发现均落在 8 文件内（唯一例外 P-L-6 的判定依据在 `CustomPresets`）。
+
+#### 9.1.4 四个代理的视角与返回状态
+
+| # | 视角 | 代理 | 状态 | 原始返回 | 工作量实证 |
+|---|---|---|---|---|---|
+| 4.1 | 通用质量 + 重构回归 + 内聚性 | `code-reviewer` | ✅ 成功 | 0C / 0H / 2M / 4L | 101 次工具调用 / 712 s / 20.6 万 token |
+| 4.2 | 状态同步 + 线程 + 平台 API（已令其跳过 Framework Detection） | `java-reviewer` | ✅ 成功 | 0C / 2H / 3M / 10L | 63 次工具调用 / 814 s / 20.9 万 token |
+| 4.3 | 静默失败（点了没反应 / 改了不生效） | `silent-failure-hunter` | ✅ 成功 | 1C / 1H / 4M / 3L | 83 次工具调用 / 720 s / 20.7 万 token |
+| 4.4 | 安全（收窄到搜索索引 / 预设名渲染 / 配置回写，禁 OWASP 打分） | `security-reviewer` | ✅ 成功 | 0C / 0H / 2M / 2L | 76 次工具调用 / 461 s / 13.5 万 token |
+
+四个视角一个不缺，无 429、无重试。原始合计 **34 条**，去重合并后 **31 条**
+（1 CRITICAL / 3 HIGH / 11 MEDIUM / 16 LOW）。合并掉 3 条重复。
+
+**汇总时调度者亲自复核过的行号与代码原文**（逐条 sed/grep，非转述）：
+`apply():3164-3225`（persistQuietly 丢弃返回值、逐字段 FIELDS 循环无 try）、
+`NeovideCursorSettings:696-757`（PersistResult 三态；`FAILED` 只 `LOG.warn`）+
+全仓 `PersistResult` 调用点（仅 `:348` 读）、
+`refreshDerivedHints:2997-3050`（两参 `deriveTrailFactors`，`<html>` 包裹完整）、
+`stretchText:3070-3085`（同为两参）、`NeovideCursorSettings:464-465`（运行期三参）、
+`SettingsUiUtil:59-68`（锐度换算）、`normalizeTextField:1894-1913`（无条件写回）、
+`SettingsField.restoreSkipping:797+`（返回 applied）、`CursorPresetApplier:120-145`（applied==0 已修）、
+`SettingsSearchIndex:42-44`（常驻/高帧 → glowLayers）、
+`CustomPresets.isValidName:525-547`（无长度上限）、`CursorPresets.parseColorSnapshot:539-558`、
+`PluginInfoBar:146-151`（失败复位文案）、`disposeUIResources:3346-3369`、
+`AnimationPreview:366-379`（Timer 成对 start/stop）、`:903-906`（520×110 / 300×150）、
+`SpringTrail:243`（`assignRanks` private）、`EditSession:100-110`（reloadFrom / close）、
+`git show a1efc13 -U0` 的全部 hunk 区间。
+
+#### 9.1.5 陷阱记录检索（四处）
+
+| 出处 | 命中 | 对本轮的约束 |
+|---|---|---|
+| CLAUDE.md §五 陷阱 1 | 一字段两职责 | 抓到 P-H-2（`shadowBlurFactor` 同时承担「存储值」与「锐度刻度源」，有损互转） |
+| 陷阱 2 | 六层链路 ⑤消费 / ⑥控件；`afterPendingEdited` 唯一入口 | 抓到 P-M-10（`bindCheck` 绕过派生的唯一入口） |
+| 陷阱 6 | 预览与生产同源 | 抓到 P-H-1（预览已三参、文字仍两参）与 P-M-8（rank 算法两份） |
+| 陷阱 7 | 预设域三份清单同源 | 抓到 P-H-3（`restoreSkipping` 结果被丢弃，与 `CursorPresetApplier` 分家）与 P-M-6 |
+| 陷阱 8 | 设备/环境开关 | 已核：`runtimeSwitch` 由字段自身携带，`restoreSkipping` 走同一份，无第二清单 |
+| 陷阱 12 | 文档会撒谎 | 抓到 P-L-2（6 页/10 个标签/`TopGap.MEDIUM` 三处过期注释） |
+| CLAUDE.md §7.0 B/C | 探针契约 / 控件定位顺序 | 已核：`VUi.KEYS/SPEC` 与渲染顺序同步（标签 3 尺寸项提前），无错位 |
+| WORK-DISCIPLINE 四-D | 一值两职责 | 同 P-H-2；另 `charsMoved` 类问题本轮未复现 |
+| 四-E | 字段接通 ≠ 生效 | 用于审 `sizePanel` 登记：两条路径独立 javap 均证实 `Row.panel{}` 共用同一 `DialogPanelConfig` |
+| 四-G | 探针假通过 | 本批白名单禁改探针，无法做变异测试；已核 `slidersForProbe()` 语义与新 javadoc 一致 |
+| 四-J | 看可维护性 | 支撑 P-M-7 的切分方案（不是「太大」一句话） |
+| DECISIONS-PANEL §九 | 重构施工记录 + §9.2 的 `<br/>` 更正 | 直接用于 9.5：只改两条普通 `JLabel`，22 处 `rowComment` 一字未动 |
+
+---
+
+### 9.2 结论
+
+**BLOCK（有 1 条 CRITICAL）。**
+
+```
+去重后 31 条 = 1 CRITICAL + 3 HIGH + 11 MEDIUM + 16 LOW
+```
+
+- **BLOCK 的唯一依据**：P-C-1 —— 落盘结果三态被丢弃，`FAILED` 只写日志，
+  用户看到「应用成功」而重启后设置全部回滚。按 `rules/common/code-review.md`
+  的 Severity Levels，这属于「数据丢失风险 → CRITICAL → BLOCK」。
+- **面板重构本身没有引入行为回归**（证据见 9.5）。31 条发现中，落在重构改动区间内的
+  只有两条提示标签的改写与一条新增注释，且改写正确；其余全部位于 `a1efc13` 未触碰的代码段。
+- 若只看重构质量，判定会是 **APPROVE**（code-reviewer 独立结论，四个怀疑点逐条实证排除）；
+  BLOCK 来自面板整体（存量行为 + 本轮全量审查才被看见的缺陷）。
+
+---
+
+### 9.3 发现清单（按严重度排序）
+
+> 每条格式：文件:行号 / 代码原文 1~5 行 / 问题一句话 / 失败场景 / 严重度 / 视角。
+> 严重度以本报告为准；对代理原始定级有调整的，在条目末尾写明理由。
+
+#### CRITICAL（P0，1 条）
+
+##### [P-C-1] 落盘失败被完全吞掉，面板照样「应用成功」，重启才回滚
+
+- 文件：`NeovideCursorConfigurable.java:3221-3225`（消费侧）；`NeovideCursorSettings.java:696-757`（产生侧，范围外证据）
+- 代码原文：
+  ```java
+          // A4：落盘
+          svc.persistQuietly();
+
+          // A5：唯一生效入口（写字段 → 调 setter → 刷新三类缓存）
+          NeovideCaretManager.applyConfig();
+  ```
+- 问题：`persistQuietly()` 返回三态 `PersistResult`（`CONFIRMED / DEFERRED / FAILED`），
+  这里把返回值直接丢弃。`FAILED` 分支只写一行 `LOG.warn`；全仓 `PersistResult`
+  的读取点只有 `NeovideCursorSettings:348`（迁移删旧键），**UI 侧零处**把它报给用户。
+- 失败场景：磁盘只读 / 配置目录被占用 / `XmlSerializer` 往返自检失败 / `saveSettings()` 抛异常
+  → 用户拖完滑块点「应用」→ `apply()` 继续执行 `applyConfig()`、`session.reloadFrom(target)`，
+  面板显示新值、当前会话也生效、对话框正常关闭 → **重启 IDEA 后全部设置回到旧值，全程零提示**。
+  附带：`CONFIRMED` 也只证明「平台没抛异常」（`:688-694` 的 L-6 自述），并不证明磁盘已写入。
+- 严重度：**CRITICAL**（用户配置静默丢失）。
+- 视角：静默失败（1 个视角）。
+- 修复方向（不属本轮）：接住返回值；`FAILED` 时不推进 baseline，并用
+  `Messages.showErrorDialog` / 平台通知告知「设置未写入磁盘，重启后会丢失」。
+  同类丢弃还存在于 `CursorPresetApplier:73/138/200/228` 与 `NeovideCaretManager:348`（范围外，仅登记）。
+
+#### HIGH（P1，3 条）
+
+##### [P-H-1] 两条派生提示用两参 `deriveTrailFactors`，运行期是三参（含斜度）→ 默认值下面板数字错 16%~31%
+
+- 文件：`NeovideCursorConfigurable.java:3000-3001`（单行提示）、`:3081-3082`（拉伸强度行数值标签）
+- 代码原文：
+  ```java
+              float[] f = NeovideCursorSettings
+                      .deriveTrailFactors(pending.stretchRatioK, pending.typingSmoothness);
+  ```
+- 问题：`slopeTicks` 引入后，运行期唯一入口是三参（`NeovideCursorSettings:464-465`），
+  预览也已在 `:782-783` 改为三参；只有这两处给人看的数字仍是两参。
+- 失败场景（默认 k=4.5 / smooth=0 / slope=0 / short=0.11s）：
+  面板写「后缘 110 ms / 横向前缘 46 ms（2.38×）」，运行期真实为 **95 ms / 35 ms（2.69×）**
+  （`applySlopeOverlay` 在 t=0 归为 `[0.86,0.86,0.32,0.32]`）。
+  同一页的预览窗已用三参 → **预览与右侧数字互相矛盾**；用户按数字调参，调的是一套不存在的观感。
+- 严重度：**HIGH**（用户可见的错误信息，默认配置即触发）。
+- 视角：Java/平台（1 个视角）。
+- 修复影响：`VHints:54-56` 用两参自算期望值，改生产代码必须同步改 oracle（契约变更，非缺陷）。
+
+##### [P-H-2] 「辉光锐度」刻度↔存储有损不可逆，默认 0.2f 不在换算网格上 → 只点一下数字框再移出就会派生副本
+
+- 文件：`NeovideCursorConfigurable.java:461-465`（SPECS）、`:1904-1913`（失焦无条件写回）；
+  `SettingsUiUtil.java:59-68`（换算）
+- 代码原文：
+  ```java
+      static float blurOfSharpness(int sharp) {
+          int v = Math.max(0, Math.min(100, sharp));
+          return 0.05f + (100 - v) * 0.0055f;
+      }
+  ```
+  ```java
+          b.spec.writeTick.accept(pending, clamped);
+  ```
+- 问题：`blur → sharp` 四舍五入后不可逆：`sharpnessOf(0.2f)=73`，
+  但 `blurOfSharpness(73)=0.19849999f`，与 `0.2f` 差 **1.5e-3**，远大于匹配容差 `EPS=1e-6`。
+  全场只有「锐度」一个滑块有此现象（其余 12 个刻度↔存储往返逐位相等）。
+- 失败场景：默认 `shadowBlurFactor=0.2f`（`NeovideCursorSettings:996`，`ANIM_PRESETS` 的
+  `blurFactorTicks=20`）→ 点一下「辉光锐度」数字框、什么都不改、再点空白处 →
+  `normalizeTextField` 无条件 `writeTick(73)` → pending 变成 0.1985 →
+  「应用」按钮无端点亮 → `refreshPresetDisplay → afterPendingEdited → matchAnimPreset`
+  因差值 1.5e-3 返回 null → **当场派生「基础 副本」并切走**，预设表凭空多一条；点应用即持久化。
+- 严重度：**HIGH**（默认配置、零输入即可触发，且会改变用户预设列表）。
+- 视角：Java/平台（1 个视角）。
+- 修复方向待产品决策（见 9.6-2）。
+
+##### [P-H-3] 自定义动画预设快照损坏时下拉「声称已切过去」，实际一个字段都没应用
+
+- 文件：`NeovideCursorConfigurable.java:2044-2050`（同缺陷 `:2525`）
+- 代码原文：
+  ```java
+              SettingsField.restoreSkipping(pending, e.snapshot);
+              pending.animCustomName = e.name;
+          }
+          syncAllControlsFromPending();
+  ```
+- 问题：`restoreSkipping()` 返回成功写入字段数，这里丢弃；返回 0 时仍写 `animCustomName`
+  并刷新显示 → 显示层撒谎。Tools 菜单路径已修过同一缺陷
+  （`CursorPresetApplier:120-145`：`applied == 0` 时不写名字、不落盘、返回 false），
+  面板路径没跟上 —— 两条路径语义分家。
+- 失败场景：选中一个快照为空/整条不可解析的自定义预设（手改 XML、旧格式残留）→
+  pending 一个字段没变 → 下拉显示已选中、`isModified()` 可能为 false → 用户点「应用」也不会重试
+  → 观感毫无变化，无任何提示。
+- 严重度：**HIGH**（用户操作无反馈且界面状态错误）。
+- 视角：静默失败（1 个视角）。
+
+#### MEDIUM（P2，11 条）
+
+##### [P-M-1] `apply()` 逐字段写活着的 State，无事务/无回滚 → 异常时「一半新一半旧」
+
+- 文件：`NeovideCursorConfigurable.java:3168-3187`、`:3222`、`:3240`
+- 代码原文：
+  ```java
+          NeovideCursorSettings.State target = svc.getState();
+          ...
+              if (sf.differs(pending, baseline)) {
+                  sf.copy(pending, target);
+              }
+  ```
+- 问题：`target` 是 `service.getState()` 本体，逐字段就地改写；从第一行 copy 到
+  `session.reloadFrom(target)` 之间没有回滚点。
+- 失败场景：`afterPendingEdited` / `refreshPreviews` / `sf.copy` / `applyConfig()` 任一处抛异常
+  → 已 copy 的字段留在内存、未落盘、baseline 不前移；用户看到「值已改、又没保存」的混合态，
+  再点一次「应用」可能把刚写进 target 的字段覆盖回去。建议先 deepCopy 到临时对象，
+  全部成功后再一次性写回。
+- 严重度：**MEDIUM**（需异常触发，属结构性风险）。
+- 视角：静默失败（1 个视角）。
+
+##### [P-M-2] 设置搜索：关键词映射到错误控件；且多数设置项「点了什么都没发生」
+
+- 文件：`SettingsSearchIndex.java:42-44`；`NeovideCursorConfigurable.java:3381-3398`
+- 代码原文：
+  ```java
+          if (has(key, "常驻", "高帧", "highfps", "fps", "刷新")) {
+              return labelOf(bindings, "glowLayers");
+          }
+  ```
+- 问题：① 「常驻刷新 / 高帧 / 帧率 / fps」被映射到**辉光层数**滑块的数值标签，目标与关键词无关
+  （该分支上方注释写着「必须排在辉光/层前面，否则会先命中 glowLayers」，而它自己返回的就是 glowLayers）；
+  ② 映射只覆盖 9 组关键词，复选框（隐藏原生光标、常驻刷新、目标帧率、多光标不辉光、诊断日志）、
+  下拉（渲染模式）、色板等一律返回 null → 平台把 null 当「无可定位项」，点击零反应；
+  ③ 命中后 `target.requestFocusInWindow()` 对 `JLabel` 恒返回 false（JLabel 默认不可聚焦），只有滚动生效。
+- 失败场景：搜「目标帧率」→ 点击 → 什么都不发生；搜「常驻刷新」→ 跳到辉光层数，用户以为点错。
+- 严重度：**MEDIUM**（代理原判 MEDIUM + LOW 两条合并；合并后维持 MEDIUM，理由：同一函数内
+  同时存在「错误目标」与「无效焦点」两类用户可见缺陷）。
+- 视角：静默失败 + Java/平台（2 个视角）。
+
+##### [P-M-3] 颜色预设坏快照：点选与「恢复默认值」都静默无反应
+
+- 文件：`NeovideCursorConfigurable.java:2091-2096`、`:2563-2566`
+- 代码原文：
+  ```java
+              String[] hex = CursorPresets.parseColorSnapshot(e.snapshot);
+              if (hex == null) {
+                  refreshPresetDisplay();          // 坏快照 → 当作选中失败，不写半套颜色
+                  return;
+  ```
+- 问题：「不写半套颜色」正确，但用户侧表现为点了没反应，也没有「该预设已损坏」提示；
+  `restoreColorPreset()` 里同类分支连刷新都没有。
+- 失败场景：选中一个快照损坏的自定义颜色预设 → 下拉被复位、颜色不变 → 用户反复点、反复无反应。
+- 严重度：**MEDIUM**。视角：静默失败（1 个视角）。
+
+##### [P-M-4] 「检查更新」失败与「没反应」在界面上不可区分
+
+- 文件：`PluginInfoBar.java:146-151`
+- 代码原文：
+  ```java
+              if (latestTag == null) {
+                  check.setText("检查更新");
+                  check.setToolTipText("检查失败：" + err + "（可点 GitHub 手动查看）");
+                  return;
+              }
+  ```
+- 问题：失败后按钮文字复位成与点击前完全一致，失败原因只在 tooltip 里；用户不会悬停，
+  看到的就是「点了、转了一下、什么都没变」。
+- 失败场景：本机代理对 GitHub 常失效（现实高频）→ 用户以为「已是最新」或「按钮坏了」。
+- 严重度：**MEDIUM**（代理原判 MEDIUM）。视角：静默失败（1 个视角）。
+
+##### [P-M-5] 自定义动画预设快照的数值不经量程校验就进 State 并落盘
+
+- 文件：`NeovideCursorConfigurable.java:2047`、`:2525`、`:3182-3186`、`:3222`
+- 代码原文：
+  ```java
+              if (sf.differs(pending, baseline)) { sf.copy(pending, target); }
+  ```
+- 问题：`SettingsField.decode` 的 FLOAT/INT 分支只拒绝 NaN/Inf 与解析失败
+  （`SettingsField.java:250-266`），不 clamp 到字段量程；真正的 clamp 只在下次启动的
+  `loadState` 里发生。`apply()` 本身不 clamp 是设计（入口保证），但预设还原这条入口没保证。
+- 失败场景：旧版/手改配置里 `glowLayers=99`（量程 1–12）→ 选中它 → 应用 →
+  State 与 XML 写入 99；同一会话滑块被夹到 12、输入框却显示 99（`syncAllControlsFromPending:1970-1972`
+  写的是 `exact`）；下次启动 `loadState` 悄悄改回 → 用户看到「值自己变了」。
+  （`glowLayers` 取超大值不会卡死：`CaretTrailPanel:1009-1013` 有 `argb < 1` 提前返回。）
+- 严重度：**MEDIUM**。视角：安全（1 个视角）。
+
+##### [P-M-6] 自定义颜色预设快照不校验 HEX 格式，非法颜色字符串可落盘
+
+- 文件：`NeovideCursorConfigurable.java:2092-2098`、`:2567-2568`；
+  依据在 `CursorPresets.java:539-558`
+- 代码原文：
+  ```java
+              String[] hex = CursorPresets.parseColorSnapshot(e.snapshot);
+              ...
+              pending.tailColor = hex[0];
+              pending.shadowColor = hex[1];
+  ```
+- 问题：`parseColorSnapshot` 只判断两个键都存在，不校验 `#RRGGBB`；
+  而动画快照走 `SettingsField.decode` 的 HEX 分支，那里有 `isValidHexColor`
+  （`SettingsField.java:285-300`，0.9.74 专为这类 bug 加的）。同一类校验两条路不一致。
+- 失败场景：`customColorPresets` 里 `tailColor=not-a-color` → 选中 → 应用 → 非法串落盘；
+  `NeovideColors.parse` 解析失败回落不透明黑 → 光标变黑、色板显示黑块；下次启动 `sanitizeColor` 静默改回默认。
+- 严重度：**MEDIUM**。视角：安全（1 个视角）。
+
+##### [P-M-7] `NeovideCursorConfigurable` 3784 行承担 9 类责任，切分点被「pending 重指向 + 回调环」锁死 —— 附可执行切分方案
+
+- 文件：`NeovideCursorConfigurable.java:331-3784`
+- 代码原文（责任簇边界示例）：
+  ```java
+      private AnimationPreview inlinePreview;   // 580
+      ...
+      private void afterPendingEdited() {       // 2322
+  ```
+- 责任簇（行号为实测）：A 滑块机制 ~500 行（331-528、1686-1916、3582-3672，反向调 D）；
+  B 预览集成 ~155 行（580-600、728-882）；C 面板构建 ~753 行（907-1660）；
+  D 预设工作流 ~980 行（2005-2983，注释占约三成）；E 派生提示 ~90 行（2997-3089）；
+  F 生命周期 ~297 行（3101-3398）；G 纯函数 + 探针 API ~385 行（3400-3784）。
+- 问题：文件是 800 行软上限的 4.7 倍；§7.0 列的「加一个设置项 11 个落点」有 6 个集中在本类，
+  每次新需求要在互不相邻的 4 个区段同时改。
+- 失败场景：下次加设置项只改 C（控件）与 F（apply），漏改 A 的 SPECS 或 D 的预设域
+  → 能拖、能存，但重启失效或预设不派生。本类历史上已发生 6 次同类静默事故
+  （`:2304-2360` 的自述注释即证据），不是推测。
+- 切分方案（按风险从低到高，每步单独跑全量门禁）：
+  1. `PreviewController`（~155 行）：迁 728-882 + 字段 580-600；只需改 3 个调用点；
+  2. `PresetEditor`（~700 行实码）：迁 2005-2983 非静态部分，须保留两个回调方向
+     （`refreshPresetDisplay → afterPendingEdited → refreshPreviews` 这条环）；
+     `applyAnimPresetFields` 等四个 static 助手留在本类做转发壳（探针 46 处静态调用）；
+  3. `SliderPanel`（~500 行）：**前置改造两件** —— `SliderSpec.valueText` 的 `BiFunction`
+     把宿主类写进了数据表，需换成独立接口；新类不能长期持有 `State`（`EditSession`
+     会重新指向），必须每次传参或提供 `rebind(State)`。
+  完成后本类约 1200 行。第 4 步（11 个 `build*` 拆 `PageBuilder`）不建议现在做。
+- 严重度：**MEDIUM**（可维护性）。视角：通用质量（1 个视角）。
+
+##### [P-M-8] 预览的四角 rank 排序是生产算法的复制品（陷阱 6）
+
+- 文件：`AnimationPreview.java:801-822`；生产侧 `SpringTrail.java:243`（`private`）
+- 代码原文：
+  ```java
+      private int[] assignRanks(double cx, double cy) {
+          ...
+          // 稳定插入排序：只有严格大于才后移，并列保持原始顺序（索引 tiebreak）
+  ```
+- 问题：`SpringTrail.assignRanks()` 是 private，预览只能手写一份副本；方法注释自己记录了
+  0.9.79 因「两份实现」导致「生产变斜、预览不变」。
+- 失败场景：以后改生产排序（例如对浮点误差加 epsilon），预览不跟随 → 用户按预览调参、
+  回车后观感不一致；门禁里没有任何探针能发现（预览不是被断言对象）。
+- 严重度：**MEDIUM**（可维护性 + 观感分家风险）。
+- 修复方向：抽 `static int[] ranks(double[] alignment)` 到 core，两处共用。
+- 视角：通用质量（1 个视角）。
+
+##### [P-M-9] 两个抑制标志共 16 个写入点，只有 3 处保存前值；`refreshPresetDisplay` 会把外层守卫直接清成 false（今天安全，靠语句位置）
+
+- 文件：`NeovideCursorConfigurable.java:2228 / 2266`（`refreshPresetDisplay`）、`2161 / 2168`
+- 代码原文：
+  ```java
+          syncingControls = true;
+          try {
+              replaceModel(animPresetCombo, animPresetItems, names);
+              ...
+          } finally {
+              syncingControls = false;
+          }
+  ```
+- 问题：`syncingControls` 是裸 boolean，从不保存前值，任何嵌套都会把外层 true 清成 false；
+  `suppressDerive` 的 7 个置 true 点只有 3 处保存前值（`:1940 / 2500 / 2547`）。
+- 失败场景（今天不出事的条件）：`refreshPresetDisplay()` 恰好是 `syncAllControlsFromPending()`
+  受守卫区间的**最后一句**（`:1981` 之后到 finally 之间无语句）。任何人以后插一句回灌，
+  其后的回调都会按「用户编辑」处理 → 重复派生副本、脏标记乱置，无任何报错。
+- 明确结论（用户点名要查的）：**不存在「两个标志同时为 true 导致编辑被永久吞掉」的可达路径**；
+  16 个写入点全部 try/finally，异常不会卡 true；模态框调用时两个标志均为 false。
+  这是**潜伏风险**，不是现有 bug。
+- 严重度：**MEDIUM**（可维护性）。视角：Java/平台（1 个视角）。
+
+##### [P-M-10] `bindCheck` 是唯一绕过 `refreshPresetDisplay()` 的编辑入口 → 复选框改动后下拉继续「自称」原预设
+
+- 文件：`NeovideCursorConfigurable.java:3453-3461`
+- 代码原文：
+  ```java
+              box.addActionListener(e -> {
+                  if (syncingControls) {
+                      return;             // 程序化回灌（reset / 切预设）：不是用户编辑
+                  }
+                  setter.accept(box.isSelected());
+                  refreshPreviews();
+              });
+  ```
+- 问题：逐条核对七个编辑入口，只有复选框这条「写 pending 但不走 `afterPendingEdited`」。
+- 失败场景：面板停在「基础」（`useShadow=true`）→ 标签 5 取消勾选「启用辉光」→ 预览立刻变化、
+  pending 已变，但动画预设下拉仍显示「基础」，而「基础」声明 `useShadow=true`
+  → 用户看到「下拉说我在基础预设，可基础明明带辉光」。滑块路径不会这样。
+- 说明：代码注释（`:3436-3440`）已声明「不擅自派生」是有意为之；本条只针对「显示层撒谎」
+  与「同一类操作两种行为」两条判据。建议照 `refreshPresetDisplayForInput` 只刷显示态，不写 pending。
+- 严重度：**MEDIUM**。视角：Java/平台（1 个视角）。
+
+##### [P-M-11] `disposeUIResources()` 未释放三个预览与 `previewConfig`，dispose 后仍会继续写它们
+
+- 文件：`NeovideCursorConfigurable.java:3346-3369`
+- 代码原文：
+  ```java
+      public void disposeUIResources() {
+          super.disposeUIResources();
+          tailColorPanel = null;
+          ...
+          session.close();
+  ```
+- 问题：`inlinePreview / crossPreview / glowPreview`（580-597）、`previewConfig`（600）、
+  `paintDiagCheck`（657）、`trailModeCombo`（648）、两个恢复按钮（625/630）均未置 null；
+  `refreshPreviews()` 的门槛是 `previewConfig == null`，因此 dispose 后仍会继续操作三个已脱离组件树的预览。
+- 失败场景：关闭设置页 → `session.close()` 把 pending 换成默认 State →
+  一个排队中的 ColorPanel 事件到达 → `refreshPreviews()` → 把默认参数写进 previewConfig，
+  再对三个已 dispose 的预览逐个 `onConfigChanged()` + `repaint()`。组件不会炸
+  （Swing 对不可见组件的 repaint 会早退），但三个 `AnimationPreview` 各持一整棵组件树，
+  被 Configurable 强引用到应用退出。同文件 `:3355-3359` 专门把颜色按钮置 null 的理由
+  完全适用于预览，只是没做完。
+- 顺带确认：三个预览的 Timer **不泄漏**（`AnimationPreview:366-379` 的 addNotify/removeNotify 成对）。
+- 严重度：**MEDIUM**（两个视角分别报 LOW / MEDIUM；合并后取 MEDIUM，理由：与同文件已采纳的
+  「释放已 dispose 组件」判据自相矛盾，且 dispose 后仍有写入路径）。
+- 视角：Java/平台 + 静默失败（2 个视角）。
+
+#### LOW（P3，16 条，登记从简）
+
+##### [P-L-1] 12 处 javadoc 连续堆叠，前一块永远不会被采用
+`NeovideCursorConfigurable.java:90-91、212-213、287-288、343-344、672-673、726-727、1918-1919、3065-3066、3584-3585、3679-3680`；`AnimationPreview.java:383-401`。
+例：`/** 配置页 id —— … */` + `/** 0.9.7 起 fork 独立 id … */` + `public static final String ID` —— 只有紧邻那块生效。修法：合并（纯删除，零行为风险）。【通用质量】
+
+##### [P-L-2] 过期注释：6 页 / 10 个标签 / `TopGap.MEDIUM`
+`NeovideCursorConfigurable.java:724`（「每个分组第一行都加 `TopGap.MEDIUM`」——全文 0 次）、`:937`（「6 个标签页」——实际 7）、`:1051`（「这 6 个内层」）、`:3638`（「10 个数值标签」——实际 14）、`:1020`（特殊页不再是折叠组）。【通用质量 + Java，2 个视角】
+
+##### [P-L-3] 预设动作行的列位注释与实际相反
+`NeovideCursorConfigurable.java:1124-1125、1148`。注释写「空 cell 占住标签列 → 按钮与下拉同列起」；
+实测列位（`plans/panel-refactor.md:276`）是按钮与「恢复默认值」同列（220px）。平台 `row("")` 会先自动补一个标签列 cell，
+本行显式 `cell()` 占的是**下拉列**。维护者若按注释删掉这个空 cell，三个按钮会整体左移一列。
+建议改注释（一行）。【通用质量】
+
+##### [P-L-4] `AnimationPreview.probeFontSize()` 无调用方的重复 API
+`AnimationPreview.java:911 / 949`：`probeFontSizeNow()` 有 3 处调用，`probeFontSize()` 在 `src/`+`tools/` 零调用。【通用质量】
+
+##### [P-L-5] 以 `<html` 开头的预设名会被默认 combo 渲染器当 HTML 渲染
+`NeovideCursorConfigurable.java:2219-2230、2386-2401`。平台 `ComboBox` 未装自定义渲染器，默认 `BasicComboBoxRenderer` 是 JLabel：
+名字若为 `<html><b>x</b>`，下拉与选中框出现粗体；`<html><img src="http://…">` 可能触发一次对外图片请求。
+`<b>x</b>`（不以 `<html` 开头）无效果；Swing HTML 不执行脚本，不是代码执行。
+输入源为用户自己/导入配置，无权限边界。【安全】
+
+##### [P-L-6] 预设名无长度上限
+`NeovideCursorConfigurable.java:2627-2632`（重命名侧 2655-2662 同构）；`CustomPresets.isValidName:525-547` 只拦空名/分隔符/XML 非法码点。
+粘一万字符当预设名 → combo 首选宽按最长项计算、恢复按钮文案随之变长，可能把整行撑宽/挤出可视区。自损伤。【安全】
+
+##### [P-L-7] 滑块 ChangeListener 无异常边界：先写 pending 再刷界面，中途抛异常会停在半更新态
+`NeovideCursorConfigurable.java:1749-1762`。没有找到必然抛出的调用点，属结构性建议：
+给派生刷新加 try/catch + `LOG.warn`，保证「写数据」与「刷界面」不互相拖死。【静默失败】
+
+##### [P-L-8] `reset()` 不复位「性能诊断」复选框与 `paintDiag`
+`NeovideCursorConfigurable.java:1648-1651`、`:3102-3118`。`paintDiagCheck` 故意不走 `bindCheck`，
+但 reset 也没手工复位；`paintDiag` 只在 `createPanel()` 读一次。触发很窄（正常取消是关对话框），
+只记为对称性缺口。【静默失败】
+
+##### [P-L-9] `createPanel()` 返回时滑块停在 `JSlider` 初始值 50，只有 `reset()` 后才与 pending 对齐
+`NeovideCursorConfigurable.java:1054-1061`。DSL 的 `slider()` 不设初值，而 `intTextField` 初值是对的。
+`:914` 的注释自己写「平台可能只调 createPanel 不调 reset」——会话开了，控件没回灌。
+不要简单在末尾加 `syncAllControlsFromPending()`：`buildSearchableOptions` 会在后台线程调 createPanel，
+那会把 Swing reset 挪到非 EDT。建议加 EDT 守卫或修正注释。【Java/平台】
+
+##### [P-L-10] `baseline` 在 dispose 后为 null，`apply()` 的 `sf.differs(pending, baseline)` 会 NPE
+`NeovideCursorConfigurable.java:3182-3187`；`SettingsField.differs` 无 null 检查，而 `dirtyAnyField` 有。
+`EditSession.close()` 把 baseline 置 null。平台正常时序不会踩，属鲁棒性缺口。【Java/平台】
+
+##### [P-L-11] `isRainbowSelected()` 静默吞 `Throwable`，一行日志都没有
+`NeovideCursorConfigurable.java:831-837`。与同批 L-5/H-3 的「吞了要记日志」纪律矛盾；
+未来 `matchColorPreset` 若因字段改动抛异常，预览永远走双拼/纯色且无任何线索。【Java/平台】
+
+##### [P-L-12] 三个预览的 Timer 在设置窗打开期间常转（8ms × 3），非选中页也跑物理
+`AnimationPreview.java:366-372`（`FRAME_MS=8`）；切页不触发 `removeNotify`。`RepaintManager` 会早退，
+所以没有绘制开销，只有计算与调度开销。可在 `step()` 加 `if (!isShowing()) return;`。
+注意：与用户已拍板的「编辑器光标静止也每帧重绘」不是同一件事。【Java/平台】
+
+##### [P-L-13] 硬编码字号与固定色值绕过平台字体/主题
+`PluginInfoBar.java:72-74`（`deriveFont(Font.PLAIN, 11f)`）、`:54-55`（`new Color(0x589DF6)` / `0x8A8A8A`）；
+8 文件内 `JBUI` 零命中。用户调大 IDE 字号时这两行不跟随；浅色主题下 `DIM` 对比度偏低。
+`new Dimension(520,110)`（`AnimationPreview:903-906`）按用户指示不计。【Java/平台】
+
+##### [P-L-14] `probeTick()` 是 public 且会改 Swing 状态，无线程约定；`PreviewShowcase` 正在非 EDT 调用
+`AnimationPreview.java:926-946`；调用方 `tools/settings-probe/PreviewShowcase.java:112-127`。
+今天安全（组件未 realize，Timer 为 null），一旦对已显示实例调用就会有非 EDT 改 Swing
+与「手动步进 × 8ms Timer」交错积分两个问题。建议 javadoc 写明「必须 EDT 且仅用于未 realize 实例」。【Java/平台】
+
+##### [P-L-15] 一次滑块拖动触发 N 次完整预设重算 + 三份预览重排
+`NeovideCursorConfigurable.java:1749-1762` → `:851-882`。每次 ChangeEvent 都跑
+`CustomPresets.parse` + `matchAnimPreset` +（副本上）`snapshot` + `put`，并 `new AnimationPreview[]`。
+量级小、无实测掉帧；列出是因为将来加参数会变成 O(n)。可把数组提成字段常量，或用 `invokeLater` 合并同批事件。【Java/平台】
+
+##### [P-L-16] `syncPreviewCursorSize()` 名不副实（经 pushStyleTo 还推了渐变与彩虹）
+`NeovideCursorConfigurable.java:794-798 / 810-822`。纪律四-J ③「名字与行为不符 → 改名」：
+建议 `syncPreviewStyle()`。【Java/平台】
+
+---
+
+### 9.4 十类检查的覆盖结论
+
+| # | 检查项 | 谁审的 | 结论 |
+|---|---|---|---|
+| 1 | State 字段六层链路（重点 ⑤消费 / ⑥控件） | Java + 静默 + 通用 | **通过**。7 个标签页与 7 次 `registerIntegratedPanel` 一一对应（`:1032-1060`）；标签 3 的 `sizePanel`、标签 4 的两个跨行参数、标签 5 的辉光三滑块走 `Row.panel{}`，两个代理独立 javap 证实共用同一 `DialogPanelConfig`，apply/reset/isModified 全覆盖；颜色三个方向由 `ColorPanelBinding` 补齐 |
+| 2 | 一字段两职责 | 通用 + Java | **未通过**。P-H-2：`shadowBlurFactor` 同时是存储值与锐度刻度源，有损互转且默认值不在像上 |
+| 3 | 预设域三份清单同源 | 静默 + 安全 | **未通过**。P-H-3：面板路径丢弃 `applied`，与 `CursorPresetApplier` 分家；P-M-6：颜色快照校验与动画快照不一致 |
+| 4 | 默认值与迁移 | 安全 + Java | **未通过**。P-H-2 默认 `0.2f` 偏离刻度网格；P-M-5 预设还原值不经量程校验 |
+| 5 | 数值边界 | 安全 + 静默 | **未通过**。P-M-5（FLOAT/INT 不 clamp）、P-M-6（HEX 不校验）、P-C-1（落盘失败无感知） |
+| 6 | 异常与静默失败 | 静默（主）+ Java + 安全 | **未通过**。1 CRITICAL + 1 HIGH + 4 MEDIUM；逐条核对 13 个控件回调入口，`NeovideCursorConfigurable` 内**零 try/catch**，「catch 吞异常」这一类为 0，失败集中在「返回值被丢弃」与「bad snapshot 直接 return」 |
+| 7 | 线程与并发 | Java | **通过**。唯一后台线程 `PluginInfoBar.doCheck` 只在 `invokeLater` 里碰 Swing（4s 超时 + try-with-resources + finally disconnect）；两个抑制标志无死锁路径；`EditSession` 是 pending/baseline 唯一重指向点。P-L-14 属探针 API 的线程契约缺口，不影响生产 |
+| 8 | 死代码 | 通用 | **有发现**。P-L-4（`probeFontSize` 零调用）；`collapsibleGroup` 在 8 文件内 0 命中（折叠改平铺未留死代码）；`RUNTIME_SWITCH_KEYS` 类第二清单未复现 |
+| 9 | 命名与行为一致 | 通用 + Java | **未通过**。P-L-1（堆叠 javadoc）、P-L-2（过期数字）、P-L-3（列位注释与实测相反）、P-L-16（方法名只说 size） |
+| 10 | 可维护性 | 通用（主）+ Java | **未通过**。P-M-7（3784 行 / 9 类责任 / 已给三步切分方案）、P-M-8（rank 算法两份）、P-L-15（每次事件全量重算） |
+
+**没有任何一项「本轮无人覆盖」。** 十项全部有代理结论，7 项给出否定结论。
+
+**正面结论（同样需要证据——「查过且干净」也是产出）**：
+① `row.panel{}` 不需登记、`apply/reset/isModified` 全覆盖：两个代理分别 javap 证实，与本文件 `:1289-1293` 的注释一致；
+② `<html>` 包裹完整：两条提示的 `setText` 全仓只有 `:3009` 与 `:3045`，都以 `"<html>" + … + "</html>"` 包裹，数字刷新后不会漏字面量；
+③ 折叠改平铺是真的：`PanelImpl.groupImpl` 的 boolean 是 indent，`collapsibleGroup` 的才是 initial-collapsed；
+④ 探针契约同步正确：`VUi.KEYS/SPEC` 已随标签 3 重排（尺寸项提前），下拉顺序未变，`VTabPages.EXPECTED_COMPOSITION` 仍成立；
+⑤ 除「锐度」外 12 个滑块的刻度↔存储往返逐位相等（jshell 实测）；
+⑥ 三个预览 Timer 成对 start/stop，无泄漏；
+⑦ 预设名从未进入 HTML（只进 JButton 文案与 ComboBox 项）；
+⑧ pending 的写入点与 `dirtyAnyField` 覆盖一致，未找到「改了却不亮应用按钮」的路径。
+
+---
+
+### 9.5 与面板重构（P11）的衔接
+
+**结论：本次重构没有引入行为回归。**
+
+证据一（改动区间）。`git show a1efc13 -U0` 的全部 hunk 落在四段：
+`27-640`（导入 / 类声明 / 字段）、`980-1662`（页面构建）、`2934-3050`（两条提示 + `refreshDerivedHints`）、
+`3531-3647`（`stretchText` 注释与探针方法）。9.3 的 31 条发现中，
+除 P-L-3（注释在 1124/1148，属 980-1662 区间内）外，**没有一条落在这些区间**；
+P-L-3 本身是重构新增注释写错，不是布局错。
+
+证据二（四个重点怀疑点，全部实证排除）：
+1. 标签 3 内嵌 `sizePanel` 是否需要登记 —— **不需要**。`RowImpl.panel(...)` 用同一个
+   `DialogPanelConfig` 构造内层 `PanelImpl`，绑定仍在同一张回调表上；且 `addSlider` 的
+   ChangeListener 直接写 pending（`:1749-1762`），即使绑定路径失效也不会「改了不生效」。
+   两个代理独立反编译得出同一结论。
+2. 两条列手感提示的 `<html>` 是否会在运行时刷新后丢失 —— **不会**。`refreshDerivedHints`
+   的两处 `setText` 都重新包裹。
+3. 标签 1 的 `PARENT_GRID` 列位是否把按钮挤出去 —— **没有**。整页 preferred 938px，
+   低于用户已接受的 987px；唯二问题是注释措辞（P-L-3）。
+4. 折叠组改平铺是否留下死代码 —— **没有**。`collapsibleGroup|expand|collapse` 在 8 文件内 0 命中。
+
+证据三（DECISIONS-PANEL §9.2 的更正被尊重）。
+`§9.2` 更正了「`rowComment` 不解析 HTML」的错误前提：真正漏字面量的是两条普通 `JLabel`。
+本轮核对：重构只改了 `singleMoveHint` / `crossMoveHint` 两处，22 处 `rowComment` 一字未动
+（`grep "\.comment("` 在面板内 = 0，`rowComment` 调用全部保留）；面板内**没有**再出现
+「给 rowComment 加 `<html>` 前缀」或「拆成多条 rowComment」的错误修法。
+§9.2 的更正被后续代码尊重。
+
+---
+
+### 9.6 待确认（需用户拍板 / 需实机）
+
+1. **P-C-1 的修复形态**：`FAILED` 时弹错误框但仍关闭面板，还是阻止关闭并把设置页留在打开态？
+   （产品决策：影响用户关闭设置页的体验。）
+2. **P-H-2 的修法**：改换算步长让默认值落在网格上（观感零变化，但要动 `SettingsUiUtil` 的常量），
+   还是把默认 `0.2f` 改成 `blurOfSharpness(73)`（会改掉预设常量，用户可见）？
+   这是产品决策 —— 两条路对默认观感的影响不同。
+3. **P-M-2 的搜索**：是否保留 `enableSearch`？如果保留，「无匹配」时定位到页顶还是保持无反应？
+   （产品决策。）
+4. **P-M-10 的复选框**：取消「不派生」，还是只刷显示态（下拉置空/标「已修改」）？
+   （产品决策：影响用户对「当前在哪个预设」的认知。）
+5. **P-L-3 的列位注释**：需要实机点开一次设置页，确认三行按钮实际落在哪一列。
+   （需实机；本报告按 `plans/panel-refactor.md:276` 的实测列位判断。）
+6. **P-M-8 的修复时机**：是否并入 P-M-7 的 B 簇迁移一起做？（实现决策，可不问用户。）
+
+---
+
+### 9.7 本轮未覆盖
+
+| 未覆盖项 | 原因 |
+|---|---|
+| `ui/` 其余文件、`core/`、`settings/`、`tools/settings-probe/` | 第 1、2 批已审；本批只做调用点取证 |
+| 变异测试 | 白名单禁改生产代码与探针，无法执行「改坏 → 必须红」的标准验证 |
+| 实机 / 装 jar 看界面 | 任务书禁止；P-L-3、P-M-2 的焦点效果、P-L-13 的字号对比需实机 |
+| P-L-9 的 `buildSearchableOptions` 线程路径 | 只核到「平台可能在后台线程调 createPanel」，未实测平台是否真的这么调 |
+| P-C-1 的同类调用点（`CursorPresetApplier` ×4、`NeovideCaretManager` ×1） | 8 文件之外，仅登记 |
+| 第 2 批 U-M-28（预设名日志注入）的同一 sink | 已由第 2 批登记，本轮不重复计；面板侧 `CursorDiag.presetApplied` 传的是内置预设常量名，不是用户输入 |
+| `VRegr2` R-5 / R-6 | 已知 informational |
+| `build/` 下一次性脚本、`Probe4Bugs.java` 等未纳入门禁的历史探针 | 不在范围；`Probe4Bugs` 按 11 个滑块硬编码，已失效，建议后续清理时先列清单 |
+
+> **本节四个数字供决策会话引用**：**102 条目 / 1103 PASS / 2 FAIL / ALL PASS**；
+> **31 条去重发现 = 1 CRITICAL + 3 HIGH + 11 MEDIUM + 16 LOW**；结论 **BLOCK**。
+> 其中重构本身**零回归**（9.5）；BLOCK 仅由 P-C-1 一条驱动。
+> 修复优先级建议（给决策会话，非本轮执行）：**先修 P-C-1**（唯一 BLOCK 项，只动 apply 的返回处理），
+> 再修 P-H-1 / P-H-3（各一处改动 + 各一条契约变更），然后 P-H-2（需先拍板方案），
+> P-M-11 最便宜（dispose 补 8 个 null）。
