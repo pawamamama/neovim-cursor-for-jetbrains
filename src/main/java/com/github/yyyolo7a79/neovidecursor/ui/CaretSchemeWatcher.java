@@ -25,9 +25,13 @@ import com.intellij.util.messages.MessageBusConnection;
  * 而 {@code setColor} 只改了旧 scheme 对象，新的不受影响。
  *
  * <p><b>修法</b>：用平台的消息总线订阅 {@link EditorColorsManager#TOPIC}
- * （{@code Topic<EditorColorsListener>}，广播方向 {@code TO_DIRECT_CHILDREN}，
- * {@code immediateDelivery=false} → 回调在 EDT 上跑，{@code setColor} 无需再包 {@code invokeLater}），
+ * （{@code Topic<EditorColorsListener>}，广播方向 {@code TO_DIRECT_CHILDREN}），
  * 回调里调 {@code applyNativeCaretHidden(true)} 强制按<b>当前</b> scheme 重新隐藏。
+ *
+ * <p><b>【U-M-20 修正】原注释说「{@code immediateDelivery=false} → 回调在 EDT 上跑」，
+ * 这是错的</b>：javap 实测 {@code MessageBusImpl} 的 {@code immediateDelivery}
+ * 只决定「锁冲突时是否延后投递」，<b>不改投递线程</b>。所以本类在回调入口显式判断
+ * 线程并在非 EDT 时 {@code invokeLater} 转投（见 {@code handleSchemeChange}）。
  *
  * <p><b>为什么【禁止】用 {@code getSchemeModificationCounter()} 轮询</b>：它只是个
  * {@code abstract long}，没有变更通知语义；轮询必然引入延迟与无谓开销。
@@ -75,14 +79,17 @@ public final class CaretSchemeWatcher implements Disposable {
             if (conn == null) {
                 return false;
             }
+            // 【复查 L-5】先登记再 subscribe：subscribe 抛时 dispose() 才断得开，
+            // 否则 MessageBusConnection 泄漏（旧缺陷，本次顺手修）。
+            this.connection = conn;
             EditorColorsListener l = scheme -> handleSchemeChange(scheme);
             conn.subscribe(EditorColorsManager.TOPIC, l);
-            this.connection = conn;
             this.listener = l;
             return true;
-        } catch (Throwable ignored) {
-            // 消息总线不可用时静默跳过：切主题后仍需用户手动重开一次开关，
-            // 但不该因此让插件在启动阶段崩溃。
+        } catch (Throwable t) {
+            // 消息总线不可用时不能让插件在启动阶段崩溃 —— 但也不能一个字都不留（U-M-16）：
+            // 调用点（NeovideCaretManager.ensureSchemeWatcher）会根据返回值决定是否提示。
+            CursorDiag.swallowed("installSchemeWatcher", t);
             return false;
         }
     }
@@ -110,6 +117,38 @@ public final class CaretSchemeWatcher implements Disposable {
      *               因为 {@code applyNativeCaretHidden(force)} 语义就是「按当前的重新来」）
      */
     public void handleSchemeChange(EditorColorsScheme scheme) {
+        // 【U-M-20】**不假定自己在哪个线程**。
+        //
+        // 原类注释断言「TOPIC 无 immediateDelivery → 回调在 EDT 上跑」，javap 已否证：
+        // immediateDelivery 只决定「锁冲突时是否延后投递」，**不改投递线程**；
+        // 非 EDT 的发布者会让 setColor 写到全局 scheme 的中途态。
+        //
+        // 防御方式是「判断 + 转发」，不是 assertIsDispatchThread() —— 后者会把
+        // 「可能并发」变成「必定崩溃」。
+        // 【复查 LOW】取 app / 判线程 / 转投 这一段也要有兜底：平台在 dispose 之后
+        // 仍可能投递一次主题事件，此时 invokeLater 会抛 AlreadyDisposedException，
+        // 而异常会从消息总线订阅者里穿出去。转投失败就降级为当场执行。
+        try {
+            Application app = ApplicationManager.getApplication();
+            if (app != null && !app.isDispatchThread()) {
+                app.invokeLater(() -> handleSchemeChangeOnEdt(scheme));
+                return;
+            }
+        } catch (Throwable ignored) {
+            // 落到下面的直接执行
+        }
+        handleSchemeChangeOnEdt(scheme);
+    }
+
+    /**
+     * 真正干活的那一半（原 {@code handleSchemeChange} 的方法体）。
+     *
+     * <p><b>绝不再判断线程</b>：探针桩里的 {@code invokeLater} 是立即执行的，
+     * 这里若再判一次就会无限递归（StackOverflow）。
+     *
+     * <p>{@code restricted} 包级可见：既是拆方法的必然结果，也让探针能单独驱动。
+     */
+    void handleSchemeChangeOnEdt(EditorColorsScheme scheme) {
         try {
             if (!NeovideCaretManager.isEnabled()) {
                 return;
@@ -118,8 +157,9 @@ public final class CaretSchemeWatcher implements Disposable {
                 return;
             }
             NeovideCaretManager.applyNativeCaretHidden(true);   // ← force：忽略 savedCaretColor 早退
-        } catch (Throwable ignored) {
-            // 单次主题切换失败不应影响 IDE
+        } catch (Throwable t) {
+            // 【U-M-18】单次主题切换失败不该影响 IDE，但必须留痕：这是「缺陷 4」唯一的兜底路径。
+            CursorDiag.swallowed("schemeChange", t);
         }
     }
 

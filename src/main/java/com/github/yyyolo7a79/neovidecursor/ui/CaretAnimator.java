@@ -783,7 +783,30 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 之后 refreshTarget 拿到真实光标尺寸时会修正。
         this.glowPadding = (int) Math.ceil(Math.max(3f, config.shadowBlurFactor * 32f)) + 4;
 
+        // ==================== 【U-M-22】以下开始有外部副作用 ====================
+        //
+        // 构造器从这一行起把 this / panel 交给外部持有者（Swing 容器、CaretModel、
+        // InlayModel、RenderScheduler）。任何一步抛异常，都必须把【已经交出去的】
+        // 按逆序摘掉 —— 否则后果是：该编辑器永久没有覆盖层（U-H-5 的现场）、
+        // 监听器与面板泄漏（对象不可回收）、调度线程因集合非空永不退出。
+        //
+        // 【为什么 try 块内的代码不额外缩进】与 refreshTarget 拆两层同一个理由：
+        // 缩进一层会让整份构造器的 diff 变成「全文重排」，review 时看不出改了哪几行。
+        // 这里只增删边界行与 undoOnFail.push 行，其余逐字节不变。
+        java.util.ArrayDeque<Runnable> undoOnFail = new java.util.ArrayDeque<>();
+        try {
         // 面板覆盖整个内容区（拖尾可能延伸到光标之外）
+        //
+        // 【撤销先登记、再执行】remove 对「还没加进去」的组件是无害的；
+        // 而 add 自己抛时若不登记，就永远没有机会摘。两个方向都安全。
+        undoOnFail.push(() -> {
+            try {
+                content.remove(panel);
+                content.repaint();
+            } catch (Throwable ignored) {
+                // 卸载路径上再失败不能挡住后面的撤销步骤
+            }
+        });
         panel.setBounds(0, 0, Math.max(content.getWidth(), 1), Math.max(content.getHeight(), 1));
         content.add(panel);
 
@@ -796,9 +819,28 @@ public class CaretAnimator implements Disposable, CaretListener {
                 RenderScheduler.wakeUp(this);
             }
         };
+        undoOnFail.push(() -> {
+            try {
+                panel.removeHierarchyListener(showListener);
+            } catch (Throwable ignored) {
+            }
+        });
         panel.addHierarchyListener(showListener);
 
         // 【平台 252】getCaretModel() 本身是编辑器读取，注册动作也放进同一个 read action。
+        //
+        // 【U-M-22】先登记撤销、再注册：add 自己抛时也要尝试 remove
+        // （对未注册的监听器无害），否则「注册到一半失败」会留下一个谁都不知道的监听器。
+        undoOnFail.push(() -> {
+            try {
+                readEditor(() -> {
+                    editor.getCaretModel().removeCaretListener(CaretAnimator.this);
+                    return null;
+                });
+            } catch (Throwable ignored) {
+                // 卸载路径上再失败不能挡住后面的撤销步骤
+            }
+        });
         readEditor(() -> {
             editor.getCaretModel().addCaretListener(this);
             return null;
@@ -841,10 +883,25 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 有些编辑器实现（例如只读的命令行视图）可能没有 InlayModel：
             // 取不到就退化为旧行为（inlay 变化后等下一次光标事件自愈），不要因此让动画整个挂掉。
         }
+        // 平台没有 removeListener，只能靠注册时给的生命期句柄回收（同 dispose 的做法）。
+        undoOnFail.push(() -> {
+            try {
+                Disposer.dispose(inlayListenerHandle);
+            } catch (Throwable ignored) {
+            }
+        });
 
         // 首次定位
         refreshTarget();
 
+        // 【U-M-22】register 把 this 放进全局静态表并可能起线程 —— 失败时必须摘掉，
+        // 否则调度线程因集合非空永不退出（U-H-3 的「全体停摆」反过来变成「永不退场」）。
+        undoOnFail.push(() -> {
+            try {
+                RenderScheduler.unregister(CaretAnimator.this);
+            } catch (Throwable ignored) {
+            }
+        });
         startScheduler();
 
         // 【BUG-007】诊断：记录这个 animator 诞生时的环境。
@@ -860,6 +917,39 @@ public class CaretAnimator implements Disposable, CaretListener {
         if (CursorDiag.enabled()) {
             EdtWatchdog.start();
         }
+        } catch (Throwable t) {
+            // 【复查 L-4】先置 disposed：startScheduler 可能已经注册过，调度线程也许
+            // 已投递一次 runTick —— 不置位它会真的 tick 一个构造失败的对象。
+            disposed = true;
+            // 【U-M-22】逆序摘除已交给外部的资源（LIFO：先摘最后登记的调度器，
+            // 再摘 inlay 句柄、caret 监听器、层级监听器、面板）。
+            // 每一步单独 try：卸载路径上本来就可能再抛，一步失败不能挡住后面几步。
+            while (!undoOnFail.isEmpty()) {
+                try {
+                    undoOnFail.pop().run();
+                } catch (Throwable ignored) {
+                    // 卸载失败不改变「构造失败」这个结论
+                }
+            }
+            throw rethrowInit(t);
+        }
+    }
+
+    /**
+     * 【U-M-22】构造失败时原样抛出 {@link RuntimeException} / {@link Error}，其余包一层。
+     *
+     * <p>为什么不一律包成 RuntimeException：调用方（{@code install}）的 catch 是
+     * {@code Throwable}，包不包它都吞得住；但 {@link Error} 被包成 Exception 会误导
+     * 排查（看起来像普通失败而不是 OOM/断言）。
+     */
+    private static RuntimeException rethrowInit(Throwable t) {
+        if (t instanceof Error) {
+            throw (Error) t;
+        }
+        if (t instanceof RuntimeException) {
+            return (RuntimeException) t;
+        }
+        return new IllegalStateException("CaretAnimator 初始化失败（已逆序摘除已登记的资源）", t);
     }
 
     /** 编辑器类型名；取不到时退化为 UNKNOWN（诊断代码绝不允许自己抛异常）。 */
@@ -2466,7 +2556,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         //
         // 注意这里用的是 config.glowLayers（用户设的持久值）——
         // 静态光标路径不参与自适应降级，它的 quadGlow 恒为 0，本来就不画辉光。
-        CursorDiag.glowLayersNow = config.glowLayers;
+        // 【U-M-14】不再写 CursorDiag 的 static 字段：辉光层数由本帧调用方直接传给 frameSummary。
 
         computeTrailBounds(currentBounds);
         submitRepaint();
@@ -2584,14 +2674,16 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 这个字段原来只在 tickStaticCaret 里被赋值，弹簧路径从不写 ——
         // 于是日志里的 layers 恒为 0，看起来像"辉光根本没画"。
         // 用户和我都被它误导过一次（以为辉光关着）。现在按本帧实际值写。
-        CursorDiag.glowLayersNow = effectiveGlowLayers;
+        // 【U-M-14】本帧生效的辉光层数只在本方法内传递，最后传给 frameSummary；
+        // 不再写 static 字段（那会让多个 animator 的 layers= 串台）。
 
         panel.beginQuads();
         boolean diagFrame = CursorDiag.shouldSample(frameSeq);
         // [trail] 的行数上限按 animator 分桶（见 CursorDiag.TRAIL_MAX_LINES）。
         // 键与下面 frameSummary 用的完全相同：identityHashCode(this)，
         // 这样多编辑器各算各的额度，不会互相吃掉。
-        int diagAnimatorId = System.identityHashCode(this);
+        // 【U-L-3】统一用 traceId：它与 forget(traceId) 必须是同一个键，否则 dispose 清不到。
+        int diagAnimatorId = traceId;
         int diagIdx = 0;
         int diagTotal = activeTrails.size();
         // 块选区各行目标 x 的最大差值（I4 用）
@@ -2644,8 +2736,10 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 而 runTick 当时只有 finally 没有 catch → 异常穿出 → 丢一帧 + 每秒约 8 条堆栈。
             // 本行只在「诊断开启 且 命中采样帧」时执行，正常路径不进这个分支。
             int caretCount = readEditor(() -> editor.getCaretModel().getAllCarets().size());
-            CursorDiag.frameSummary(System.identityHashCode(this), frameSeq,
-                    caretCount, diagTotal,
+            // 【U-M-14】辉光层数作为参数传入（原来是 static 字段，跨 animator 串台）。
+            // 【U-L-3】用已有的 traceId，不再重复算 identityHashCode。
+            CursorDiag.frameSummary(traceId, frameSeq,
+                    caretCount, diagTotal, effectiveGlowLayers,
                     false, anyAnimating, spread, measuredFps);
         }
 
@@ -2997,6 +3091,11 @@ public class CaretAnimator implements Disposable, CaretListener {
         } catch (Throwable ignored) {
             // 忽略
         }
+
+        // 【U-M-13】最后一步：注销诊断分桶。
+        // 放在最后是因为 unregister 之后仍可能有已投递的 runTick（它首句看 disposed 早退，
+        // 不会重建条目）；若在中间清，晚到的诊断回调会让 computeIfAbsent 重新建条目。
+        CursorDiag.forget(traceId);
     }
 
     /**

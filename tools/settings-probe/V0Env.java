@@ -53,6 +53,54 @@ public final class V0Env {
      */
     public static int throwOnPropertiesLookup;
 
+    /**
+     * 探针注入：{@code Application.isDispatchThread()} 的返回值。
+     *
+     * <p><b>默认 true（= 现状）。</b>生产代码里这个调用等价于
+     * {@code SwingUtilities.isEventDispatchThread()}，但离线探针没有真正的 EDT，
+     * 后者<b>恒为 false</b>。审计 U-M-20 要给「回调不在 EDT 时转投」补一条守门断言，
+     * 必须能<b>从探针侧翻转这个判定</b>，否则「非 EDT 分支」永远走不到（假通过）；
+     * 而改用 {@code assertIsDispatchThread()} 又会把「可能并发」变成「必定崩溃」。
+     */
+    public static volatile boolean dispatchThreadOverride = true;
+
+    /**
+     * 探针计数：{@code Application.invokeLater(Runnable)} 被调用的次数。
+     *
+     * <p>用来断言「非 EDT 时确实<em>转了</em>一次」，而不是只看「最终结果相同」
+     * —— 后者在本桩里恒成立（桩把 invokeLater 实现成立即 run），
+     * 是一条<b>恒真断言</b>（AC-008 红线）。
+     */
+    public static int invokeLaterCalls;
+
+    /**
+     * 探针注入：{@code true} 时 {@code invokeLater(Runnable)} 只入队、不立刻执行。
+     *
+     * <p><b>默认 false（= 立即 run，既有 60 个探针依赖这个语义）。</b>
+     * 审计 U-M-20 要证明「非 EDT 时是<em>转发</em>而不是当场执行」——
+     * 只数调用次数不够（直接执行也会 +1），必须能观察「调用返回时活还没干、队列里有 1 个」。
+     */
+    public static volatile boolean queueInvokeLater;
+
+    /** {@link #queueInvokeLater} 为 true 时的待执行队列。 */
+    public static final java.util.List<Runnable> INVOKE_LATER_QUEUE = new java.util.ArrayList<>();
+
+    /** 执行并清空队列，返回执行了几个（探针用）。 */
+    public static int drainInvokeLater() {
+        int n;
+        synchronized (INVOKE_LATER_QUEUE) {
+            n = INVOKE_LATER_QUEUE.size();
+            for (Runnable r : new java.util.ArrayList<>(INVOKE_LATER_QUEUE)) {
+                r.run();
+            }
+            INVOKE_LATER_QUEUE.clear();
+        }
+        return n;
+    }
+
+    /** 探针注入：{@code true} 时 {@code MessageBus.connect(...)} 抛异常（模拟总线故障）。 */
+    public static boolean throwOnBusConnect;
+
     public static final ExperimentalUIStub EXPERIMENTAL_UI = new ExperimentalUIStub();
 
     private V0Env() {
@@ -73,7 +121,7 @@ public final class V0Env {
                         case "getService":
                             return service(a);
                         case "isDispatchThread":
-                            return true;
+                            return dispatchThreadOverride;
                         // 【平台 252】生产代码用 ReadAction.compute 包住编辑器读取。
                         // 平台字节码核实：ReadAction.compute → computeBlocking →
                         // Application.runReadAction(ThrowableComputable)。
@@ -88,7 +136,14 @@ public final class V0Env {
                         case "saveSettings":
                             return null;
                         case "invokeLater":
-                            ((Runnable) a[0]).run();
+                            invokeLaterCalls++;
+                            if (queueInvokeLater) {
+                                synchronized (INVOKE_LATER_QUEUE) {
+                                    INVOKE_LATER_QUEUE.add((Runnable) a[0]);
+                                }
+                            } else {
+                                ((Runnable) a[0]).run();
+                            }
                             return null;
                         case "getMessageBus":
                             return bus;
@@ -345,6 +400,9 @@ public final class V0Env {
         @Override public boolean hasUndeliveredEvents(Topic<?> t) { return false; }
 
         private MessageBusConnection newConn() {
+            if (throwOnBusConnect) {
+                throw new IllegalStateException("V0Env.FakeBus: 注入的总线连接失败");
+            }
             connectCount++;
             return (MessageBusConnection) Proxy.newProxyInstance(
                     V0Env.class.getClassLoader(),

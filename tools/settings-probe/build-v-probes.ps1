@@ -172,7 +172,14 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # NaN 进了弹簧就再也出不来。正常路径全对，所以跑一遍功能永远测不出来。
         # 它靠 Logger.setFactory 捕获平台日志，把「某条 warn 打没打」变成可断言的事实。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VAuditBatch1')
+        'VAuditBatch1',
+        # 【2026-10-30】审计第 2 批「第 2~4 轮」（E 原生光标与挂载链 / F 生命周期 /
+        # B 诊断基础设施，共 20 条）的守门探针。
+        # 这一批的共同点：「基础设施自己失败时无人知道」—— 挂载被空 catch 吞、
+        # 记账先于副作用、诊断文件写盘失败静默、EDT 假设被 javap 否证却无防御。
+        # 正常路径全对，只能精确注入失败才测得出来。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VAuditBatch2Round2to4')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

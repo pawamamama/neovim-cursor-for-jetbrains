@@ -78,6 +78,23 @@ public class NeovideCaretManager implements EditorFactoryListener {
             java.util.Collections.synchronizedMap(new java.util.IdentityHashMap<>());
 
     /**
+     * 每个 scheme 的「恢复连续失败次数」（U-M-17）。
+     *
+     * <p><b>为什么需要它</b>：{@code setColor} 失败时条目留在 {@link #HIDDEN_SCHEMES} 里
+     * 「等下次重试」，而重试源是「用户亲手再拨一次开关」—— 事实上永远不会发生。
+     * 于是那个 scheme 永久停在透明态，用户看到「光标消失且关不掉」，且零日志。
+     *
+     * <p><b>为什么不用 synchronizedMap</b>：它的所有读写都在
+     * {@code synchronized (HIDDEN_SCHEMES)} 块内完成，锁顺序固定为
+     * HIDDEN_SCHEMES → RESTORE_FAILURES，不存在反向获取。
+     */
+    private static final java.util.Map<EditorColorsScheme, Integer> RESTORE_FAILURES =
+            new java.util.IdentityHashMap<>();
+
+    /** 连续失败到这个次数就放弃该条记录（探针 T-6 用的就是同一个数字）。 */
+    private static final int RESTORE_FAILURES_GIVE_UP = 3;
+
+    /**
      * 兜底光标色：Darcula / Dark 系方案的标准光标色。
      *
      * <p>仅在配色方案已被污染、且 {@code getDefaultForeground()} 也拿不到时启用，
@@ -87,6 +104,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
     /** 是否已为「插件加载时已存在的编辑器」补建过动画 */
     private static volatile boolean initialScanDone = false;
+
+    /** 「主题监听装不上」的提示只打一次（U-M-16）：重复记没有新信息，只会淹没别的线索。 */
+    private static volatile boolean schemeWatcherWarned = false;
 
     /**
      * 性能诊断开关：置位后跳过全部覆盖层重绘，只保留物理计算与帧率统计。
@@ -150,7 +170,11 @@ public class NeovideCaretManager implements EditorFactoryListener {
         // 必须排在任何早退【之前】：隐藏原生光标之后用户随时可能切主题，
         // 漏装一次就要等到下次重建编辑器才发现「光标复活」。
         // install() 本身幂等，每次 editorCreated 调它只是多一次 null 判断。
-        installSchemeWatcher();
+        ensureSchemeWatcher();
+
+        // 【U-M-21】把收尾清理挂到平台 Disposer 上（幂等，只有第一次真的注册）。
+        // 排在这里是因为它是「插件被加载」这一事实的产物，与有没有编辑器无关。
+        ensureShutdownHook();
 
         // 【首次回调：先同步持久化设置，再判断 enabled —— 顺序不能反】
         //
@@ -174,9 +198,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 return;
             }
 
-            for (Editor existing : EditorFactory.getInstance().getAllEditors()) {
-                install(existing);
-            }
+            installAll(EditorFactory.getInstance().getAllEditors(), "启动扫描");
         }
 
         if (!CONFIG.enabled) {
@@ -264,23 +286,34 @@ public class NeovideCaretManager implements EditorFactoryListener {
         return settingsSynced;
     }
 
-    /** 为单个编辑器挂载拖尾动画（含各项过滤条件） */
-    private static void install(Editor editor) {
-        try {
-            if (editor == null) {
-                return;
-            }
+    /**
+     * 挂载结果（U-H-5）。
+     *
+     * <p><b>为什么是三态而不是 boolean</b>：{@code install} 有三种结局 ——
+     * 「挂上了」「合法跳过」「失败」。合法跳过包含 {@code editor == null}、
+     * 没有 project 的全局日志窗口、终端编辑器 —— 这几类在用户每开一个文件时都会大量出现。
+     * 若把它们算进「本轮挂载失败 N 个」，日志立刻变成噪声，而噪声等于没有日志。
+     */
+    private enum Mount {
+        MOUNTED, SKIPPED, FAILED
+    }
 
+    /** 为单个编辑器挂载拖尾动画（含各项过滤条件）。 */
+    private static Mount install(Editor editor) {
+        if (editor == null) {
+            return Mount.SKIPPED;
+        }
+        try {
             // 跳过没有归属项目的编辑器（如部分全局日志窗口）：
             // 这类编辑器不是用户会去交互的地方，挂覆盖层反而可能出问题
             if (editor.getProject() == null) {
-                return;
+                return Mount.SKIPPED;
             }
 
             // 跳过终端：它的光标由终端模拟器自行绘制、不受 CARET_COLOR 控制，
             // 全局隐藏对它无效 —— 补画反而会变成双光标。详见 isTerminalEditor。
             if (isTerminalEditor(editor)) {
-                return;
+                return Mount.SKIPPED;
             }
 
             // 【不要跳过控制台编辑器】
@@ -308,8 +341,61 @@ public class NeovideCaretManager implements EditorFactoryListener {
             }
 
             ANIMATORS.computeIfAbsent(editor, e -> new CaretAnimator(e, CONFIG));
+            return Mount.MOUNTED;
         } catch (Throwable t) {
-            // 单个编辑器挂载失败不应影响其他编辑器
+            // 【U-H-5】原来这里是空 catch：「单个编辑器挂载失败不应影响其他编辑器」这句话
+            // 只对了一半 —— 不影响别人，但这个人**永久没有覆盖层且零线索**。
+            // 默认配置下 hideNativeCaret=true，这个文件里的光标会彻底不可见，
+            // 而 idea.log 与独立诊断文件里一个字都没有。
+            LOG.warn("neovide-cursor: installEditor 挂载失败（编辑器 " + describeEditor(editor)
+                    + "）；该编辑器不会有拖尾覆盖层"
+                    + (CONFIG.hideNativeCaret ? "，且原生光标已被隐藏 —— 这个文件里光标将完全不可见" : ""),
+                    t);
+            CursorDiag.swallowed("installEditor", t);
+            return Mount.FAILED;
+        }
+    }
+
+    /**
+     * 编辑器的一句话描述（日志用）。<b>绝不允许它自己抛</b> —— 否则 catch 体变成新的事故点。
+     */
+    private static String describeEditor(Editor editor) {
+        try {
+            if (editor == null) {
+                return "<null>";
+            }
+            if (editor.isDisposed()) {
+                return "<已销毁的编辑器>";
+            }
+            return String.valueOf(editor);
+        } catch (Throwable t) {
+            return "<描述失败: " + t.getClass().getSimpleName() + ">";
+        }
+    }
+
+    /**
+     * 批量挂载并按结果汇总（U-H-5 的「本轮挂载失败 N 个」）。
+     *
+     * <p><b>只在有失败时打一行</b>：正常启动扫描几十个编辑器全是 MOUNTED/SKIPPED，
+     * 每次都打「失败 0 个」等于制造噪声（与 CursorDiag 的「只打真的变了」同一判据）。
+     */
+    private static void installAll(Editor[] editors, String where) {
+        int mounted = 0;
+        int skipped = 0;
+        int failed = 0;
+        for (Editor e : editors) {
+            Mount r = install(e);
+            if (r == Mount.MOUNTED) {
+                mounted++;
+            } else if (r == Mount.SKIPPED) {
+                skipped++;
+            } else {
+                failed++;
+            }
+        }
+        if (failed > 0) {
+            LOG.warn("neovide-cursor: " + where + " 本轮挂载失败 " + failed + " 个（成功 "
+                    + mounted + "，合法跳过 " + skipped + "）");
         }
     }
 
@@ -391,7 +477,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
         syncConfigToStateAndPersist();
         if (on) {
             // 【缺陷 4】勾选时确保主题监听在位上 —— 否则下一次切主题就复活
-            installSchemeWatcher();
+            ensureSchemeWatcher();
             applyNativeCaretHidden();
         } else {
             restoreNativeCaret();
@@ -503,6 +589,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
      * S2..S6 的 changed() 全为 false，setter 链一个都不会执行。
      */
     public static void applyConfig() {
+        // 【U-M-11】设置面板的 apply() 是唯一全局生效入口 —— 在这里失效诊断的服务缓存，
+        // 保证「刚勾上的诊断日志」在本次 S1..S8 的读取里立刻可见（不必等下一次调用）。
+        CursorDiag.invalidateEnabled();
         com.intellij.openapi.application.Application app = ApplicationManager.getApplication();
         if (app == null) {
             // 没有平台（离线探针）：直接同步执行，无处排队
@@ -570,6 +659,10 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
         // ---------- S2..S6：只在值真的变了时才调 setter ----------
         // 每个 setter 都带持久化与结构性副作用，无条件调用既慢又会清掉正在画的拖尾。
+        //
+        // 【U-M-24】failures 统计本方法内所有「吞掉但不该假装成功」的失败。
+        // 上一版无论这里抛没抛，末尾都无条件打「applyConfig 完成」—— 与第 1 批 H-2 同型。
+        int failures = 0;
         try {
             if (CONFIG.trailMode != oldTrailMode) {
                 setTrailMode(CONFIG.trailMode);
@@ -587,6 +680,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 setEnabled(CONFIG.enabled);
             }
         } catch (Throwable t) {
+            failures++;
             LOG.warn("neovide-cursor: applyConfig 的 setter 链失败", t);
         }
 
@@ -603,11 +697,13 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 animator.onModeChanged();
             } catch (Throwable t) {
                 // 单个 animator 刷新失败不应影响其他编辑器
+                failures++;
                 LOG.warn("neovide-cursor: 刷新 animator 缓存失败（编辑器可能已销毁）", t);
             }
             try {
                 animator.refreshGlowPadding();
             } catch (Throwable t) {
+                failures++;
                 LOG.warn("neovide-cursor: 重算 glowPadding 失败（编辑器可能已销毁）", t);
             }
         }
@@ -617,16 +713,18 @@ public class NeovideCaretManager implements EditorFactoryListener {
             try {
                 animator.requestWakeUp();
             } catch (Throwable ignored) {
-                // 调度唤醒失败不影响正确性：下一次正常 tick 会自己接上
+                // 调度唤醒失败不影响正确性：下一次正常 tick 会自己接上 —— 但仍要计数，
+                // 否则「完成但有失败」会漏掉这一类。
+                failures++;
             }
         }
 
-        LOG.info("neovide-cursor: applyConfig 完成（animators=" + ANIMATORS.size()
-                + "，trailMode=" + CONFIG.trailMode
-                + "，hideNativeCaret=" + CONFIG.hideNativeCaret
-                + "，alwaysHighFps=" + CONFIG.alwaysHighFps
-                + "，overlayFadeOut=" + CONFIG.overlayFadeOut
-                + "，enabled=" + CONFIG.enabled + "）");
+        String summary = applySummary(failures, ANIMATORS.size());
+        if (failures == 0) {
+            LOG.info(summary);
+        } else {
+            LOG.warn(summary);
+        }
     }
 
     // ==================== 启用 / 禁用 ====================
@@ -641,7 +739,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
 
         if (on) {
             // 【缺陷 4】重新开启插件时补装监听（关掉期间它被 dispose 过）
-            installSchemeWatcher();
+            ensureSchemeWatcher();
             // 【上游踩坑 #19】尊重 hideNativeCaret：默认保留原生光标
             if (CONFIG.hideNativeCaret) {
                 applyNativeCaretHidden();
@@ -649,9 +747,7 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 restoreNativeCaret();
             }
             // 为当前已打开的编辑器补建动画
-            for (Editor editor : EditorFactory.getInstance().getAllEditors()) {
-                install(editor);
-            }
+            installAll(EditorFactory.getInstance().getAllEditors(), "启用插件");
         } else {
             restoreNativeCaret();
             for (CaretAnimator animator : ANIMATORS.values()) {
@@ -716,12 +812,21 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 }
             }
             // force 时【必须】重新取原始色：新 scheme 的可见色才是要保存的值
-            savedCaretColor = sanitizeCaretColor(scheme, scheme.getColor(EditorColors.CARET_COLOR));
+            Color original = sanitizeCaretColor(scheme, scheme.getColor(EditorColors.CARET_COLOR));
 
-            // t7 / R-03：把「这个 scheme 对象被我们改过、原色是 savedCaretColor」记下来。
+            // 【U-H-6】顺序即契约：**先写副作用、成功后才记账**。
+            //
+            // 原写法是「先 putIfAbsent、后 setColor」——setColor 一抛（只读 scheme、
+            // shutdown 期禁写、scheme 被回收），账本就说这个 scheme 已隐藏，而
+            // CARET_COLOR 一个字没改。此后所有非 force 调用在早退判据
+            // （HIDDEN_SCHEMES.containsKey）上永久早退，原生光标与覆盖层叠成双光标，
+            // 只有切主题（force）或重启才能压掉 —— 而且全程零日志。
+            scheme.setColor(EditorColors.CARET_COLOR, new Color(0, 0, 0, 0));
+
+            // t7 / R-03：把「这个 scheme 对象被我们改过、原色是 original」记下来。
             // 只留一个 savedCaretColor 槽位的话，切主题后旧 scheme 会永久停在透明态
             // 且无从恢复（见 HIDDEN_SCHEMES 的 javadoc）。
-            if (savedCaretColor != null) {
+            if (original != null) {
                 // t9 / t8-(a)：必须用 putIfAbsent，不能用 put。
                 //
                 // 【为什么】「A 隐藏 → 切 B → 切回 A」这条路径上会<b>第二次</b>对 A 调用本方法，
@@ -729,13 +834,23 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 //   sanitizeCaretColor(A, 透明) → 透明不可用 → 返回【兜底前景色】
                 //   → put() 会把 A 的正确原色【覆盖】成兜底色。
                 // 用 putIfAbsent 保住第一次记录的正确原色。
-                HIDDEN_SCHEMES.putIfAbsent(scheme, savedCaretColor);
+                HIDDEN_SCHEMES.putIfAbsent(scheme, original);
             }
+            // savedCaretColor 也只在写色成功后才更新：它会被 restoreNativeCaret 当兜底值
+            // 写回配色方案，一个「从未生效」的值写回去只会制造假象。
+            savedCaretColor = original;
 
-            scheme.setColor(EditorColors.CARET_COLOR, new Color(0, 0, 0, 0));
             repaintAllEditors();
-        } catch (Throwable ignored) {
-            // 配色方案不可用时静默跳过：此时原生光标会保留，但拖尾仍能正常工作
+        } catch (Throwable t) {
+            // 【U-H-6】不再静默：写色失败正是「双光标」的直接成因，必须留痕。
+            // CursorDiag.swallowed 在诊断关闭时第一句就返回，零成本。
+            //
+            // 【复查 LOW】同时清掉 savedCaretColor：它此刻还是**上一个** scheme 的原色，
+            // 而 restoreNativeCaret 的兜底段会把它写进**当前** scheme ——
+            // 换主题失败一次就可能把旧主题的光标色刷到新主题上（用户可见）。
+            // 清掉最多损失兜底层（账本里的 scheme 仍能按条目恢复），换来不会写错色。
+            savedCaretColor = null;
+            CursorDiag.swallowed("hideNativeCaret", t);
         }
     }
 
@@ -750,6 +865,155 @@ public class NeovideCaretManager implements EditorFactoryListener {
      */
     public static boolean installSchemeWatcher() {
         return CaretSchemeWatcher.getInstance().install();
+    }
+
+    // ==================== 探针入口（审计第 2 批 · E/F）====================
+
+    /**
+     * 探针入口：与 {@code editorCreated} 走<b>完全相同</b>的挂载路径。
+     *
+     * <p><b>为什么需要它</b>：{@link #install(Editor)} 是 private，而探针在默认包里 ——
+     * 没有这层转发，「构造抛异常时 install 有没有留下监听器残留」就完全无法离线断言
+     * （审计 U-H-5 / U-M-22 的守门断言 T-1 / T-2）。
+     *
+     * <p><b>返回值语义</b>：{@code FAILED} 才是 {@code false}；
+     * 「挂上了」与「合法跳过」都是 {@code true}（跳过的编辑器本来就不该有覆盖层）。
+     */
+    public static boolean installForProbe(Editor editor) {
+        return install(editor) != Mount.FAILED;
+    }
+
+    /**
+     * 「applyConfig 完成」的<b>唯一决策点</b>（U-M-24）。
+     *
+     * <p>原来无论 setter 链是否失败都打「完成」—— 失败仍宣称成功，
+     * 与第 1 批 H-2 同型。抽成方法是为了让它可被直接断言：端到端注入一个会抛的
+     * animator 需要真编辑器，而真正需要守住的只是「失败数进不进文案、级别对不对」。
+     */
+    public static String applySummary(int failures, int animators) {
+        String body = "animators=" + animators
+                + "，trailMode=" + CONFIG.trailMode
+                + "，hideNativeCaret=" + CONFIG.hideNativeCaret
+                + "，alwaysHighFps=" + CONFIG.alwaysHighFps
+                + "，overlayFadeOut=" + CONFIG.overlayFadeOut
+                + "，enabled=" + CONFIG.enabled;
+        return failures == 0
+                ? "neovide-cursor: applyConfig 完成（" + body + "）"
+                : "neovide-cursor: applyConfig 完成但有 " + failures + " 项失败（" + body + "）";
+    }
+
+    /** 探针入口（F-1）：转发生产决策点。 */
+    public static String applySummaryForProbe(int failures, int animators) {
+        return applySummary(failures, animators);
+    }
+
+    /** 收尾钩子是否已注册（一次性；register 抛也不重试，否则每次 editorCreated 都会再试）。 */
+    private static volatile boolean shutdownHookInstalled = false;
+
+    /**
+     * 把收尾清理挂到平台 Disposer 上（U-M-21 的最小接点）。
+     *
+     * <p><b>为什么不改 plugin.xml</b>：真正的「插件被禁用/卸载」钩子需要
+     * {@code postStartupActivity} / 插件描述符里的 Disposable 注册 —— 那是 plugin.xml 的事，
+     * 超出本批白名单。这里用 {@code Disposer.register(Application, ...)}：
+     * 覆盖「平台关闭 / Application dispose」，<b>不覆盖</b>运行时禁用插件
+     * （这一点已登记在交接报告里，不当成已修）。
+     */
+    private static void ensureShutdownHook() {
+        if (shutdownHookInstalled) {
+            return;
+        }
+        try {
+            com.intellij.openapi.application.Application app =
+                    com.intellij.openapi.application.ApplicationManager.getApplication();
+            if (app == null) {
+                // 【复查 L-6】平台还没就绪时不要置位 —— 否则这个 JVM 内永远不再尝试。
+                return;
+            }
+            shutdownHookInstalled = true;
+            com.intellij.openapi.util.Disposer.register(app, NeovideCaretManager::shutdownCleanup);
+        } catch (Throwable t) {
+            // register 失败也不要每次 editorCreated 都重试（那会把日志刷满）
+            shutdownHookInstalled = true;
+            CursorDiag.swallowed("ensureShutdownHook", t);
+        }
+    }
+
+    /**
+     * 插件收尾：把外部副作用还回去（U-M-21）。
+     *
+     * <p><b>不写盘、不改 CONFIG</b>：收尾不是用户设置变更，不该触发持久化。
+     * <b>幂等</b>：平台退出时只会调一次，但探针/重复调用都不许抛。
+     */
+    public static void shutdownCleanup() {
+        try {
+            restoreNativeCaret();
+        } catch (Throwable t) {
+            CursorDiag.swallowed("shutdown.restoreCaret", t);
+        }
+        for (CaretAnimator animator : ANIMATORS.values()) {
+            try {
+                animator.dispose();
+            } catch (Throwable t) {
+                CursorDiag.swallowed("shutdown.disposeAnimator", t);
+            }
+        }
+        ANIMATORS.clear();
+        try {
+            CaretSchemeWatcher.getInstance().dispose();
+        } catch (Throwable t) {
+            CursorDiag.swallowed("shutdown.disposeWatcher", t);
+        }
+        LOG.info("neovide-cursor: 已执行收尾清理（animator 全部销毁、主题监听断开）");
+    }
+
+    /**
+     * 探针入口：暴露「确保主题监听在位」这一步的结果，供 T-4 断言。
+     *
+     * <p>转发 {@link #ensureSchemeWatcher()} —— 与三个生产调用点走<b>同一条</b>路径。
+     */
+    public static boolean ensureSchemeWatcherForProbe() {
+        return ensureSchemeWatcher();
+    }
+
+    /**
+     * 确保配色方案监听在位（U-M-16）。
+     *
+     * <p><b>为什么不能直接 {@code installSchemeWatcher();} 了事</b>：
+     * 那个方法返回的 boolean 在三个调用点全被丢弃。它有三种 false：
+     * ① 已经装过（幂等命中，正常）；② 平台不可用（离线/早期）；③ 安装时抛异常（真故障）。
+     * 前两种不该记日志（每个 editorCreated 都会调，逐次记就是刷屏），第三种必须让人知道
+     * —— 否则「切主题后原生光标复活」这个已修缺陷会静默复发。
+     *
+     * <p><b>只记一行</b>：用一次性标志，而不是限流。这个状态在一次 IDE 运行里不会自愈
+     * （除非用户再拨一次开关），重复记没有新信息。
+     *
+     * @return true = 监听现在在位（本次建立或本来就已装）
+     */
+    private static boolean ensureSchemeWatcher() {
+        boolean installedNow = installSchemeWatcher();
+        if (installedNow || CaretSchemeWatcher.getInstance().isInstalled()) {
+            return true;
+        }
+        if (!schemeWatcherWarned) {
+            schemeWatcherWarned = true;
+            LOG.warn("neovide-cursor: 主题监听未能安装（切换配色方案后原生光标可能复活；"
+                    + "再拨一次「隐藏原生光标」开关会重试）");
+        }
+        return false;
+    }
+
+    /**
+     * 探针入口：把一条「已隐藏」记录直接写进账本。
+     *
+     * <p>T-6 要驱动 {@link #restoreNativeCaret()} 的「连续 3 次失败」分支，
+     * 而正常路径下账本只能由 {@link #applyNativeCaretHidden(boolean)} 写入 ——
+     * 那个方法在 setColor 失败时（修复后）不会写账本，探针就没有入口了。
+     * 纯测试脚手架，不参与生产路径。
+     */
+    public static void putHiddenSchemeForProbe(EditorColorsScheme scheme, Color original) {
+        HIDDEN_SCHEMES.putIfAbsent(scheme, original);
+        savedCaretColor = original;
     }
 
     /** 探针/调试用：当前保存的「原色」，{@code null} 表示未隐藏。 */
@@ -839,8 +1103,9 @@ public class NeovideCaretManager implements EditorFactoryListener {
                 synchronized (HIDDEN_SCHEMES) {
                     currentHandledByMap = HIDDEN_SCHEMES.containsKey(currentScheme);
                 }
-            } catch (Throwable ignored) {
-                // 取不到就按「未由记录表处理」走兜底，行为与修复前一致
+            } catch (Throwable t) {
+                // 取不到就按「未由记录表处理」走兜底，行为与修复前一致；但要留痕（U-M-17）。
+                CursorDiag.swallowed("restoreNativeCaret.currentScheme", t);
             }
 
             // 1) 先按记录逐个恢复（含所有历史 scheme）
@@ -855,6 +1120,11 @@ public class NeovideCaretManager implements EditorFactoryListener {
             // 改成按条目删除：成功的 remove，失败的留下次重试。
             // HIDDEN_SCHEMES 本身是 synchronizedMap，用 entrySet().iterator().remove()
             // 在同一个 synchronized 块里是安全的。
+            //
+            // 【复查 M-3】日志与 CursorDiag.swallowed 不能在这个块里调用：
+            // 它们会取平台服务表 / 日志框架（磁盘 IO）—— 把不确定耗时的外部调用
+            // 放进拿全局配色锁的位置，是这类事故的标准成因。先收集，出块再打。
+            java.util.List<Runnable> pendingLogs = new java.util.ArrayList<>();
             synchronized (HIDDEN_SCHEMES) {
                 java.util.Iterator<java.util.Map.Entry<EditorColorsScheme, Color>> it =
                         HIDDEN_SCHEMES.entrySet().iterator();
@@ -871,9 +1141,33 @@ public class NeovideCaretManager implements EditorFactoryListener {
                         s.setColor(EditorColors.CARET_COLOR, original);
                         any = true;
                         it.remove();          // ← 只删恢复成功的
-                    } catch (Throwable ignored) {
-                        // 【保留】失败者留在表里，等下一次 restoreNativeCaret() 重试
+                        RESTORE_FAILURES.remove(s);   // 成功即清零
+                    } catch (Throwable t) {
+                        // 【保留】失败者留在表里等下一次重试 —— 但重试源只能是我们自己，
+                        // 所以必须给「永远失败」一个终点，否则它就是一笔永久静默的坏账。
+                        int n = RESTORE_FAILURES.merge(s, 1, Integer::sum);
+                        if (n == 1) {
+                            pendingLogs.add(() -> CursorDiag.swallowed("restoreNativeCaret", t));
+                        }
+                        if (n >= RESTORE_FAILURES_GIVE_UP) {
+                            it.remove();
+                            RESTORE_FAILURES.remove(s);
+                            pendingLogs.add(() -> LOG.warn("neovide-cursor: 配色方案 "
+                                    + describeScheme(s) + " 的光标色恢复连续失败 "
+                                    + RESTORE_FAILURES_GIVE_UP + " 次，已放弃该条记录。"
+                                    + "若该主题下光标不可见，请在 Settings | Editor | Color Scheme"
+                                    + " | General | Caret 手动设置"));
+                        }
                     }
+                }
+            }
+
+            // 【复查 M-3】锁外再打日志（收集到的东西）。
+            for (Runnable log : pendingLogs) {
+                try {
+                    log.run();
+                } catch (Throwable ignored) {
+                    // 记录失败不能影响恢复流程
                 }
             }
 
@@ -886,8 +1180,8 @@ public class NeovideCaretManager implements EditorFactoryListener {
                     EditorColorsManager.getInstance().getGlobalScheme()
                             .setColor(EditorColors.CARET_COLOR, current);
                     any = true;
-                } catch (Throwable ignored) {
-                    // 忽略
+                } catch (Throwable t) {
+                    CursorDiag.swallowed("restoreNativeCaret.fallback", t);
                 }
             }
 
@@ -904,8 +1198,18 @@ public class NeovideCaretManager implements EditorFactoryListener {
             if (any) {
                 repaintAllEditors();
             }
-        } catch (Throwable ignored) {
-            // 忽略
+        } catch (Throwable t) {
+            // 外层兜底：内层已经逐处留痕，这里防的是「连取当前 scheme 都失败的更早期异常」。
+            CursorDiag.swallowed("restoreNativeCaret", t);
+        }
+    }
+
+    /** 配色方案的一句话描述（日志用）。{@code getName()} 也可能抛，所以另包一层。 */
+    private static String describeScheme(EditorColorsScheme scheme) {
+        try {
+            return scheme == null ? "<null>" : String.valueOf(scheme.getName());
+        } catch (Throwable t) {
+            return "<配色方案>";
         }
     }
 
@@ -914,9 +1218,13 @@ public class NeovideCaretManager implements EditorFactoryListener {
         return HIDDEN_SCHEMES.size();
     }
 
-    /** 探针/调试用：清空记录（模拟 IDE 重启）。 */
+    /** 探针/调试用：清空记录（模拟 IDE 重启）。失败计数也要一起清，否则测试之间互相污染。 */
     public static void clearHiddenSchemesForProbe() {
-        HIDDEN_SCHEMES.clear();
+        // 【复查 L-13】两张表在同一把锁内清，与 RESTORE_FAILURES 的访问纪律保持一致。
+        synchronized (HIDDEN_SCHEMES) {
+            HIDDEN_SCHEMES.clear();
+            RESTORE_FAILURES.clear();
+        }
     }
 
     /** 改完配色后主动刷新所有编辑器，让新颜色立即生效 */

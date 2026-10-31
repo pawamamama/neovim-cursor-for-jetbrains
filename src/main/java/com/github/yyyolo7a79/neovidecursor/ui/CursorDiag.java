@@ -42,55 +42,240 @@ public final class CursorDiag {
      * 我需要用户复制粘贴才能看到 —— 慢且容易漏。
      * 写到独立文件后，我直接读盘即可。
      *
-     * <p>位置：{@code <config>/neovide-cursor-diag.log}
+     * <p>位置（2026-10-30 起）：{@code <log>/neovide-cursor-diag-<pid>.log}
+     * —— 走 {@code PathManager.getLogPath()}（不是 config：config 会被导出/漫游带走），
+     * 文件名带 PID（双 IDE 实例不互相截断）。旧注释里的 config 路径已过期：
      * 也就是 {@code %APPDATA%JetBrainsIntelliJIdea2026.1
 eovide-cursor-diag.log}
      */
     static java.nio.file.Path diagFile() {
+        // ① 探针覆盖（唯一用途：把输出钉到临时文件，绝不碰用户的真实日志）
+        String override = System.getProperty("neovide.cursor.diag.file");
+        if (override != null && !override.isEmpty()) {
+            return java.nio.file.Paths.get(override);
+        }
+        // ② 【U-L-7】文件名带 PID：主仓 + worktree 两个 IDE 并行调试时，
+        //    固定名 + TRUNCATE_EXISTING 会互相截断对方的证据。
+        String name = "neovide-cursor-diag-" + currentPid() + ".log";
+        // ③ 【U-M-26】log 目录，不是 config 目录。
+        //    理由：config 目录会被「Export Settings」/域漫游/备份代理整目录带走，
+        //    而这份文件的内容是逐次按键的时间线。
         try {
-            com.intellij.openapi.application.PathManager pm = null;
+            java.lang.reflect.Method m = com.intellij.openapi.application.PathManager.class
+                    .getMethod("getLogPath");
+            Object v = m.invoke(null);
+            if (v instanceof String) {
+                return java.nio.file.Paths.get((String) v, name);
+            }
+        } catch (Throwable ignored) {
+            // 老平台没有 getLogPath 时退回 config 目录（仍然可用，只是位置不理想）
+        }
+        try {
             java.lang.reflect.Method m = com.intellij.openapi.application.PathManager.class
                     .getMethod("getConfigPath");
             Object v = m.invoke(null);
             if (v instanceof String) {
-                return java.nio.file.Paths.get((String) v, "neovide-cursor-diag.log");
+                return java.nio.file.Paths.get((String) v, name);
             }
         } catch (Throwable ignored) {
         }
-        return java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"),
-                "neovide-cursor-diag.log");
+        return java.nio.file.Paths.get(System.getProperty("java.io.tmpdir"), name);
     }
 
-    /** 当前日志文件句柄（懒开，append 模式） */
+    private static long currentPid() {
+        try {
+            return ProcessHandle.current().pid();
+        } catch (Throwable t) {
+            return -1L;
+        }
+    }
+
+    /** 探针入口：暴露最终落点（T-13 要断言文件名带 PID）。 */
+    public static java.nio.file.Path diagFileForProbe() {
+        return diagFile();
+    }
+
+    /**
+     * 当前日志文件句柄（懒开）。
+     *
+     * <p><b>字段名与类型不能改</b>：{@code VTrailCap} 用反射按名字读写
+     * {@code fileTried} / {@code fileWriter}（它把这俩换成内存 sink 来断言行内容）。
+     */
     private static java.io.PrintWriter fileWriter;
     private static boolean fileTried;
 
-    private static void writeFile(String line) {
-        if (!fileTried) {
-            fileTried = true;
-            try {
-                java.nio.file.Path f = diagFile();
-                java.nio.file.Files.createDirectories(f.getParent());
-                // 【每次启动清空】避免历史日志混入，每次排查都是干净的
-                fileWriter = new java.io.PrintWriter(
-                        java.nio.file.Files.newBufferedWriter(f,
-                                java.nio.charset.StandardCharsets.UTF_8,
-                                java.nio.file.StandardOpenOption.CREATE,
-                                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING));
-            } catch (Throwable t) {
-                emit("neovide-cursor: 无法写独立诊断文件 " + t);
+    /** 【U-M-12】fileTried / fileWriter 的跨线程守卫：看门狗与 EDT 会并发创建。 */
+    private static final Object FILE_LOCK = new Object();
+
+    private static int linesSinceCheck;
+    /** 【复查 H-1/H-2】「打不开」与「写失败」分开计数：它们的重试语义不同。 */
+    private static int openFailures;
+    private static int writeFailures;
+    /** 是否已经成功打开过一次：首次 TRUNCATE（每次启动清空），重建 APPEND（不抹已采证据）。 */
+    private static boolean everOpened;
+    private static long bytesWritten;
+    private static int totalLines;
+    private static boolean totalCapLogged;
+    private static boolean gaveUp;
+
+    /** 每写这么多行检查一次写盘错误（每行 checkError 会把成本摊在 EDT 上）。 */
+    private static final int FILE_CHECK_EVERY = 64;
+    /** 【U-H-7】重建上限：设备坏了就不要无限重试。 */
+    private static final int MAX_FILE_REOPEN = 3;
+    /** 【U-M-27】单行上限：异常 message / 预设名可能很长。 */
+    private static final int MAX_LINE_CHARS = 2000;
+    /** 【U-M-27】总行数闸门。 */
+    private static final int TOTAL_MAX_LINES = 200_000;
+    /** 【U-M-27】文件字节上限。 */
+    private static final long MAX_FILE_BYTES = 16L * 1024 * 1024;
+
+    /**
+     * 写一行到独立文件。
+     *
+     * <p>【U-H-7】PrintWriter 的契约是吞 IOException、只置内部 error 标志 ——
+     * 本类全文原来没有一处 {@code checkError()}，于是磁盘满 / 文件被独占打开 /
+     * 轮转后句柄失效，全部表现为「后续写入静默丢弃」，而 {@code fileWriter != null}
+     * 恒真、永不重试。用户把一份半截且无停更标记的文件发回来，结论建立在不存在的证据上。
+     *
+     * @return 需要打到 idea.log 的事件文案；{@code null} = 无事件。
+     *         返回而不是直接打日志，是为了不在持 {@link #FILE_LOCK} 时进日志框架。
+     */
+    private static String writeFile(String line) {
+        synchronized (FILE_LOCK) {
+            String openEvent = ensureWriterLocked();
+            if (fileWriter == null) {
+                // 【复查 H-1】「文件根本建不出来」必须有一条出口 —— 旧代码在这里会 emit
+                // 一行「无法写独立诊断文件」，改造成 writeFile 之后漏掉了，
+                // 于是整类故障（目录不可写 / 磁盘只读 / 同名目录占位）变成零日志。
+                return openEvent;
             }
-        }
-        if (fileWriter != null) {
-            fileWriter.println(line);
+            // 【U-M-27】总量闸门放在 writeFile 而不是 emit：writeTrace 是另一条出口，
+            // 只有它们共同的这里才能覆盖全部。
+            if (totalLines >= TOTAL_MAX_LINES || bytesWritten >= MAX_FILE_BYTES) {
+                if (!totalCapLogged) {
+                    totalCapLogged = true;
+                    rawWriteLocked("[diag] 已达诊断输出上限（行 " + TOTAL_MAX_LINES
+                            + " / 字节 " + MAX_FILE_BYTES + "），后续所有行不再输出");
+                }
+                return null;
+            }
+            totalLines++;
+            String cut = line.length() > MAX_LINE_CHARS
+                    ? line.substring(0, MAX_LINE_CHARS) + "…(截断)"
+                    : line;
+            fileWriter.println(cut);
             fileWriter.flush();       // 立即落盘，崩溃也能看到
+            // 【复查 L-2】按 UTF-8 字节计，不是 char 数（中文 3 字节/字，否则上限虚高 3 倍）
+            bytesWritten += cut.getBytes(java.nio.charset.StandardCharsets.UTF_8).length + 2L;
+            if (++linesSinceCheck >= FILE_CHECK_EVERY) {
+                linesSinceCheck = 0;
+                if (fileWriter.checkError()) {
+                    closeWriterLocked();
+                    // 【复查 H-2】写失败单独计数、重建时不清零 —— 否则「打开成功、写入失败」
+                    // （典型：磁盘满）会无限重建：每 64 行一条 warn，且每次重建 TRUNCATE
+                    // 把已经采到的证据抹掉，最后只剩不到 64 行。
+                    writeFailures++;
+                    if (writeFailures == 1) {
+                        return "neovide-cursor: 独立诊断文件写入失败，[tick] 类证据已中断"
+                                + "（将尝试重建，最多 " + MAX_FILE_REOPEN + " 次）；"
+                                + "独立文件不再可信，请以 idea.log 为准";
+                    }
+                    if (writeFailures >= MAX_FILE_REOPEN) {
+                        gaveUp = true;
+                        return "neovide-cursor: 独立诊断文件重建 " + MAX_FILE_REOPEN
+                                + " 次仍失败，已放弃（此后独立文件不再有输出，idea.log 仍有）";
+                    }
+                }
+            }
+            return null;
+        }
+    }
+
+    /** 不受总量闸门约束的底层写（只用于「已达上限」那一行本身，避免递归）。 */
+    private static void rawWriteLocked(String line) {
+        if (fileWriter == null) {
+            return;
+        }
+        fileWriter.println(line);
+        fileWriter.flush();
+    }
+
+    /**
+     * 懒打开文件。
+     *
+     * @return 需要打到 idea.log 的事件文案（「打不开」「已放弃」）；{@code null} = 无事件。
+     */
+    private static String ensureWriterLocked() {
+        if (fileWriter != null) {
+            return null;
+        }
+        if (gaveUp) {
+            return null;
+        }
+        try {
+            java.nio.file.Path f = diagFile();
+            if (f.getParent() != null) {
+                java.nio.file.Files.createDirectories(f.getParent());
+            }
+            // 【每次启动清空】首次打开用 TRUNCATE（同一个 PID 被复用时仍然清空）；
+            // 【复查 H-2】错误后的重建用 APPEND —— 否则每次重建都会把已经采到的证据截成 0。
+            fileWriter = everOpened
+                    ? new java.io.PrintWriter(java.nio.file.Files.newBufferedWriter(f,
+                    java.nio.charset.StandardCharsets.UTF_8,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND))
+                    : new java.io.PrintWriter(java.nio.file.Files.newBufferedWriter(f,
+                    java.nio.charset.StandardCharsets.UTF_8,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING));
+            fileTried = true;
+            openFailures = 0;
+            linesSinceCheck = 0;
+            if (!everOpened) {
+                totalLines = 0;
+                totalCapLogged = false;
+                bytesWritten = 0;
+            }
+            everOpened = true;
+            return null;
+        } catch (Throwable t) {
+            fileTried = true;
+            openFailures++;
+            if (openFailures == 1) {
+                // 【复查 H-1】这是「文件根本建不出来」，与「写失败」是两回事，都必须留痕。
+                return "neovide-cursor: 独立诊断文件无法创建（" + diagFile() + "）："
+                        + t.getClass().getSimpleName()
+                        + "；诊断输出只剩 idea.log 一条通路";
+            }
+            if (openFailures >= MAX_FILE_REOPEN) {
+                gaveUp = true;
+                return "neovide-cursor: 独立诊断文件连续 " + MAX_FILE_REOPEN
+                        + " 次创建失败，已放弃独立文件输出（idea.log 仍有）";
+            }
+            return null;
+        }
+    }
+
+    private static void closeWriterLocked() {
+        try {
+            fileWriter.close();
+        } catch (Throwable ignored) {
+        }
+        fileWriter = null;
+    }
+
+    /** 写文件并把「证据通道出问题」的事件转给 idea.log（锁外打）。 */
+    private static void writeFileAndReport(String line) {
+        String event = writeFile(line);
+        if (event != null) {
+            LOG.warn(event);
         }
     }
 
     /** 统一出口：同时写 idea.log 和独立文件 */
     private static void emit(String line) {
         LOG.info(line);
-        writeFile(line);
+        writeFileAndReport(line);
     }
 
     static final String PROP_ENABLED = "neovide.cursor.diag";
@@ -108,19 +293,92 @@ eovide-cursor-diag.log}
     private CursorDiag() {
     }
 
+    /**
+     * 【U-M-11】服务引用的缓存。
+     *
+     * <p><b>为什么只缓存服务引用、不缓存布尔值</b>：本方法每帧被调用 2~5 次，
+     * 每次都要走 {@code ApplicationManager.getApplication().getService(...)}
+     * （全局属性表锁 + 服务定位）。但大量既有探针（{@code VReadAction} / {@code VTrailCap} /
+     * {@code VAuditBatch1}）都是<b>直接改 {@code state.diagLogging} 然后依赖立即生效</b> ——
+     * 缓存布尔值会让它们全部变红，而且是「假红」（看起来像生产坏了）。
+     * 缓存引用则两者兼得：服务定位一次，字段每次读。
+     */
+    private static volatile com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings cachedService;
+
+    /** 上一次成功读到的值：服务不可用时沿用它，而不是一律 false（U-M-11）。 */
+    private static volatile boolean lastKnownEnabled;
+
+    /** 「服务未就绪」的 warn 只记一次（U-M-11 的限流）。 */
+    private static volatile boolean lookupWarned;
+
     /** 当前是否启用：设置项或系统属性，任一为真。 */
     public static boolean enabled() {
         if (Boolean.getBoolean(PROP_ENABLED)) {
+            lastKnownEnabled = true;
             return true;
         }
-        try {
-            return com.intellij.openapi.application.ApplicationManager
-                    .getApplication()
-                    .getService(com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings.class)
-                    .getState().diagLogging;
-        } catch (Throwable t) {
-            return false;
+        com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings svc = cachedService;
+        if (svc == null) {
+            try {
+                com.intellij.openapi.application.Application app =
+                        com.intellij.openapi.application.ApplicationManager.getApplication();
+                if (app == null) {
+                    return lastKnownEnabled;
+                }
+                svc = app.getService(
+                        com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings.class);
+                cachedService = svc;
+            } catch (Throwable t) {
+                // 【U-M-11】原来这里 return false —— 恰好在「最需要证据」的时刻
+                // 把整个诊断通道哑掉。改为沿用上次的值，并留一行（只一次）。
+                if (!lookupWarned) {
+                    lookupWarned = true;
+                    LOG.warn("neovide-cursor: 诊断开关读取失败（服务未就绪），沿用上一次的值 "
+                            + lastKnownEnabled + "；本条只记一次", t);
+                }
+                return lastKnownEnabled;
+            }
         }
+        if (svc == null) {
+            return lastKnownEnabled;
+        }
+        boolean v;
+        try {
+            v = svc.getState().diagLogging;
+        } catch (Throwable t) {
+            return lastKnownEnabled;
+        }
+        boolean was = lastKnownEnabled;
+        lastKnownEnabled = v;
+        if (v && !was) {
+            // 【U-M-15a】诊断从关变开时也把看门狗拉起来 —— 原来只有「新建 animator」一个启动源，
+            // 用户在设置里勾上却不开新文件时永远抓不到卡顿。
+            //
+            // 【复查 M-1】必须包 try：enabled() 在 paintComponent / runTick / frameSummary 的
+            // 入口上，看门狗创建失败（OOM / IllegalThreadState）绝不能变成一次绘制异常。
+            try {
+                EdtWatchdog.start();
+            } catch (Throwable ignored) {
+                // 看门狗起不来只是少了 [edt] 证据，不影响任何绘制行为
+            }
+        }
+        return v;
+    }
+
+    /**
+     * 非 EDT（看门狗线程）专用：只读 volatile 快照。
+     *
+     * <p>{@code diagLogging} 是普通字段，看门狗线程读它可能长期读到 false（U-M-11 的最后一面）。
+     * 快照由 EDT 侧的 {@link #enabled()} 每次刷新，volatile 保证可见性。
+     */
+    public static boolean enabledForBackgroundThread() {
+        return lastKnownEnabled;
+    }
+
+    /** 设置生效后失效服务缓存（唯一全局入口 {@code NeovideCaretManager.applyConfig} 调它）。 */
+    public static void invalidateEnabled() {
+        cachedService = null;
+        lookupWarned = false;
     }
 
     static boolean shouldSample(long frameSeq) {
@@ -167,6 +425,138 @@ eovide-cursor-diag.log}
 
     private static TrailBudget trailBudgetOf(int animatorId) {
         return TRAIL_BUDGETS.computeIfAbsent(animatorId, k -> new TrailBudget());
+    }
+
+    /** 【U-M-27】[frame] 的每 animator 行数预算（与 [trail] 同结构、同上限）。 */
+    private static final java.util.Map<Integer, TrailBudget> FRAME_BUDGETS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static TrailBudget frameBudgetOf(int animatorId) {
+        return FRAME_BUDGETS.computeIfAbsent(animatorId, k -> new TrailBudget());
+    }
+
+    /**
+     * 【U-M-13】注销某个 animator 的全部分桶。
+     *
+     * <p>四张表必须一起清 —— 漏一张就是「新 animator 继承了旧额度/旧标志」
+     * （对象被 GC 后 identityHashCode 会被复用）。
+     *
+     * <p>包级可见：由 {@code CaretAnimator.dispose()} 在最后一步调用。
+     */
+    static void forget(int animatorId) {
+        TRAIL_BUDGETS.remove(animatorId);
+        FRAME_BUDGETS.remove(animatorId);
+        SAMPLE_STATE.remove(animatorId);
+        TRACES.remove(animatorId);
+    }
+
+    /** 探针用：四张表里是否还有这个 id 的条目（T-10）。 */
+    public static boolean tableContainsForProbe(int animatorId) {
+        return TRAIL_BUDGETS.containsKey(animatorId)
+                || FRAME_BUDGETS.containsKey(animatorId)
+                || SAMPLE_STATE.containsKey(animatorId)
+                || TRACES.containsKey(animatorId);
+    }
+
+    /** 探针用：四张表的当前尺寸 [trail, frame, sample, trace]（冷启动应为全 0）。 */
+    public static int[] tableSizesForProbe() {
+        return new int[]{TRAIL_BUDGETS.size(), FRAME_BUDGETS.size(),
+                SAMPLE_STATE.size(), TRACES.size()};
+    }
+
+    // ==================== 探针入口（B 批）====================
+
+    /** 探针入口：驱动绘制追踪（T-9）。 */
+    public static void paintTraceForProbe(int id, int quads, long costNs,
+                                          boolean earlyReturn, Throwable error) {
+        paintTrace(id, quads, costNs, earlyReturn, error);
+    }
+
+    /** 探针入口：驱动帧汇总（T-10 / T-14）。 */
+    public static void frameSummaryForProbe(int id, long seq, int carets, int trails, int glowLayers) {
+        frameSummary(id, seq, carets, trails, glowLayers, false, false, -1, 0);
+    }
+
+    /** 探针入口：驱动 [trail] 分桶（T-10）。 */
+    public static void trailSnapshotForProbe(int id) {
+        trailSnapshot(id, 0, 1, "spring", 0, 100, 100, 100, 100, 0, 8, 20, true, 8);
+    }
+
+    /** 探针入口：驱动 [font-scale]（T-15）。 */
+    public static void fontScaleResyncForProbe(int from, int to) {
+        fontScaleResync(from, to);
+    }
+
+    /** 探针入口：驱动 [ime-skip]（T-15）。 */
+    public static void imeSkipPickedForProbe(int skipN, int vpX, int offset, int offX) {
+        imeSkipPicked(skipN, vpX, offset, offX);
+    }
+
+    /** 探针入口：把独立文件句柄恢复到「未打开」，并清空计数器（让每个测试从干净文件开始）。 */
+    public static void resetFileForProbe() {
+        synchronized (FILE_LOCK) {
+            closeWriterLocked();
+            fileTried = false;
+            openFailures = 0;
+            writeFailures = 0;
+            everOpened = false;
+            gaveUp = false;
+            totalLines = 0;
+            totalCapLogged = false;
+            bytesWritten = 0;
+            linesSinceCheck = 0;
+        }
+    }
+
+    /** 探针入口：把当前 writer 换成「一写就失败」的 PrintWriter（T-16）。 */
+    public static void setFailingWriterForProbe() {
+        synchronized (FILE_LOCK) {
+            closeWriterLocked();
+            java.io.Writer bad = new java.io.Writer() {
+                @Override
+                public void write(char[] c, int off, int len) throws java.io.IOException {
+                    throw new java.io.IOException("injected: 写盘失败");
+                }
+
+                @Override
+                public void flush() throws java.io.IOException {
+                    throw new java.io.IOException("injected: flush 失败");
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+            fileWriter = new java.io.PrintWriter(bad);
+            fileTried = true;
+            everOpened = true;
+            linesSinceCheck = 0;
+            openFailures = 0;
+            writeFailures = 0;
+            gaveUp = false;
+            totalLines = 0;
+            totalCapLogged = false;
+            bytesWritten = 0;
+        }
+    }
+
+    /**
+     * 【复查 M】看门狗退场必须留痕。
+     *
+     * <p>否则「日志里没有 [edt] 行」会被读成「没有发生 EDT 卡顿」——
+     * 而真实原因可能是「看门狗 5 分钟没事干，早退场了」。本项目已经因这类
+     * 「缺失的证据把方向带偏」吃过一次亏（U-H-8）。
+     */
+    static void watchdogExit(String reason) {
+        writeFileAndReport("[edt] " + traceStamp() + " watchdog 停止采样：" + reason
+                + "（下次启用诊断 / 新建编辑器时重启）");
+    }
+
+    /** 探针入口：当前 writer 是否已关闭并置 null（T-16）。 */
+    public static boolean fileWriterIsNullForProbe() {
+        synchronized (FILE_LOCK) {
+            return fileWriter == null;
+        }
     }
 
     /**
@@ -252,7 +642,8 @@ eovide-cursor-diag.log}
         if (!enabled()) {
             return;
         }
-        LOG.info("[font-scale] 行高 " + fromLineHeight + " -> " + toLineHeight
+        // 【U-L-8】与类注释 515 的纪律一致：这类「证据」只写独立文件，不刷 idea.log。
+        writeFileAndReport("[font-scale] 行高 " + fromLineHeight + " -> " + toLineHeight
                 + "，强制重算光标几何");
     }
 
@@ -262,17 +653,30 @@ eovide-cursor-diag.log}
         }
         // 每 5 帧记一次：判据若误判会连续命中，但要能看出「连续多久」
         if (skipN == 1 || skipN % 5 == 0) {
-            LOG.info("[ime-skip] skip=" + skipN + " offset=" + offset
+            // 【U-L-8】同上：只进独立文件（也受 U-M-27 的总量闸门约束）。
+            writeFileAndReport("[ime-skip] skip=" + skipN + " offset=" + offset
                     + " vpX=" + vpX + " offX=" + offX + " dx=" + (vpX - offX));
         }
     }
 
     static void frameSummary(int animatorId, long frameSeq, int caretCount, int trailCount,
-                             boolean targetMoved, boolean anyOffsetMoved,
+                             int glowLayers, boolean targetMoved, boolean anyOffsetMoved,
                              double blockSpread, double fps) {
         if (!enabled()) {
             return;
         }
+        // 【U-M-27】[frame] 是唯一有数量级风险的逐帧出口（8 光标 ≈75 行/秒 → 45MB/小时）。
+        // 与 [trail] 同策略、同上限：同一份文件里两种行不该有两种口径。
+        TrailBudget fb = frameBudgetOf(animatorId);
+        if (fb.lines >= TRACE_MAX_LINES) {
+            if (!fb.capLogged) {
+                fb.capLogged = true;
+                emit("[frame] animator=" + animatorId + " 已达上限 " + TRACE_MAX_LINES
+                        + " 行，后续不再输出");
+            }
+            return;
+        }
+        fb.lines++;
 
         // 【真实每帧间隔：用「本 animator 自己的序号差 ÷ 时间差」直接算】
         //
@@ -334,7 +738,7 @@ eovide-cursor-diag.log}
 
         emit("[frame] #" + frameSeq
                 + " carets=" + caretCount + " trails=" + trailCount
-                + " layers=" + glowLayersNow
+                + " layers=" + glowLayers
                 + fpsText
                 + " targetMoved=" + targetMoved
                 + " offsetMoved=" + anyOffsetMoved
@@ -401,9 +805,11 @@ eovide-cursor-diag.log}
     }
 
     // ==================== 帧率 ====================
-
-    /** 最近一帧的辉光层数（由绘制路径写入，供 frameSummary 打印） */
-    static int glowLayersNow = 0;
+    //
+    // 【U-M-14 删除那个 static 的 glowLayersNow 字段】
+    // 它被每个 animator 每帧覆写、被别的 animator 读 —— [frame] 行的 layers= 报的是别人的值，
+    // 正是本类定义过的「日志撒谎」形态。现在改为 frameSummary 的入参：
+    // 「本 animator 本帧生效值」由调用方传入，结构上不可能串台。
 
     // ==================== 真实帧率采样状态（0.9.81 修复）====================
     //
@@ -492,11 +898,22 @@ eovide-cursor-diag.log}
      * </ul>
      */
     public static void swallowed(String where, Throwable t) {
-        if (!enabled()) {
-            return;
+        // 【复查 M-2】catch 体自己不许抛：本方法被十几处 catch 调用，内部会走
+        // enabled()（服务定位 / 可能建线程）与日志框架 —— 任一抛出都会
+        // **替换掉原始异常**并冲出调用方，把「单个失败不影响其他」变成新的崩溃点。
+        try {
+            if (!enabled()) {
+                return;
+            }
+            String text = "[error] " + where + ": " + t.getClass().getSimpleName()
+                    + (t.getMessage() == null ? "" : " — " + t.getMessage());
+            // 【复查 M-4】异常本体要交给 Logger：原来只传格式化后的字符串，栈永远不存在，
+            // 「知道发生过、不知道在哪」对 restoreNativeCaret 这类逐条失败毫无帮助。
+            LOG.info(text, t);
+            writeFileAndReport(text);
+        } catch (Throwable ignored) {
+            // 连「记录失败」都失败时，静默是唯一不制造新事故的选择
         }
-        emit("[error] " + where + ": " + t.getClass().getSimpleName()
-                + (t.getMessage() == null ? "" : " — " + t.getMessage()));
     }
 
     // ==================== 【BUG-007】首用追踪 ====================
@@ -550,9 +967,13 @@ eovide-cursor-diag.log}
         boolean noTrailLogged;
         boolean fastPathLogged;
         boolean imeSkipLogged;
-        boolean emptyPaintLogged;
-        boolean paintErrorLogged;
         String lastClearReason;
+        /** 【U-H-8】上一帧是否处于「空绘制」状态：翻转才记，而不是终身只记一次。 */
+        boolean lastEmptyPaint;
+        /** 【U-H-8】上一帧是否处于「绘制异常」状态。 */
+        boolean lastPaintError;
+        /** 【U-H-8】上一次记录的异常类名：不同类型异常不能互相吃掉名额。 */
+        String lastPaintErrorClass;
     }
 
     private static final java.util.Map<Integer, Trace> TRACES =
@@ -585,13 +1006,13 @@ eovide-cursor-diag.log}
         if (tr.lines >= TRACE_MAX_LINES) {
             if (tr.lines == TRACE_MAX_LINES) {
                 tr.lines++;
-                writeFile("[" + tag + "] id=" + id + " " + traceStamp()
+                writeFileAndReport("[" + tag + "] id=" + id + " " + traceStamp()
                         + " 已达追踪上限 " + TRACE_MAX_LINES + " 行，后续不再输出");
             }
             return;
         }
         tr.lines++;
-        writeFile("[" + tag + "] id=" + id + " " + traceStamp() + " " + body);
+        writeFileAndReport("[" + tag + "] id=" + id + " " + traceStamp() + " " + body);
     }
 
     /** 构造完成时一行：记录这个 animator 诞生时的环境（尺寸 / 可见性 / 关键开关）。 */
@@ -786,22 +1207,43 @@ eovide-cursor-diag.log}
             return;
         }
         Trace tr = traceOf(id);
-        if (error != null) {
-            if (tr.paintErrorLogged) {
-                return;
+        // 【U-H-8】原实现是「终身只记一次」：编辑器未布局完时那次正常空绘制会消耗掉
+        // 唯一的名额，之后真故障（U-H-5/U-H-6 都能造成）进入同一状态时不再记录；
+        // 绘制异常也只记首个类名，后续不同类型异常无痕。
+        // 排查者按「[paint] 里没有 earlyReturn 行」反推「面板一直有内容」——
+        // 方向被日志机制自己带错，比没有日志更糟。
+        boolean errorNow = error != null;
+        boolean emptyNow = error == null && earlyReturn && quads == 0;
+        boolean record = false;
+        String flip = "";
+
+        if (errorNow != tr.lastPaintError) {
+            tr.lastPaintError = errorNow;
+            record = true;
+        }
+        if (errorNow) {
+            String cls = error.getClass().getSimpleName();
+            if (!cls.equals(tr.lastPaintErrorClass)) {
+                tr.lastPaintErrorClass = cls;
+                record = true;
             }
-            tr.paintErrorLogged = true;
-        } else if (earlyReturn) {
-            if (tr.emptyPaintLogged || quads > 0) {
-                return;
-            }
-            tr.emptyPaintLogged = true;
-        } else if (costNs < TRACE_SLOW_PAINT_NS) {
+        } else {
+            tr.lastPaintErrorClass = null;
+        }
+        if (emptyNow != tr.lastEmptyPaint) {
+            tr.lastEmptyPaint = emptyNow;
+            record = true;
+            flip = emptyNow ? " flip=into-empty" : " flip=out-empty";
+        }
+        if (!errorNow && !emptyNow && costNs >= TRACE_SLOW_PAINT_NS) {
+            record = true;
+        }
+        if (!record) {
             return;
         }
         writeTrace(id, "paint", "quads=" + quads
                 + " cost=" + (costNs / 1000) + "us"
-                + " earlyReturn=" + earlyReturn
+                + " earlyReturn=" + earlyReturn + flip
                 + (error == null ? "" : " error=" + error.getClass().getSimpleName()
                 + (error.getMessage() == null ? "" : " — " + error.getMessage())));
     }
@@ -834,17 +1276,18 @@ eovide-cursor-diag.log}
      * EDT 被占住的一次采样（由 {@link EdtWatchdog} 调用，见该类的说明）。
      *
      * <p>不按 animator 分桶：EDT 只有一条，这个问题与哪个编辑器无关，所以直接写文件、
-     * 由看门狗自己限量（一次运行最多 6 次）。
+     * 由看门狗自己限量（{@code EdtWatchdog.MAX_DUMPS}，当前 20 次）。
      *
      * @param waitedNs    ping 投递到执行之间的间隔
      * @param stackCostNs 抓栈本身花的时间；≈waitedNs 说明当时是 JVM 全局暂停（GC），
      *                    远小于 waitedNs 才说明是 EDT 上某个方法在跑
      */
     static void edtBlocked(long waitedNs, long stackCostNs, String frames) {
-        if (!enabled()) {
+        if (!enabledForBackgroundThread()) {
+            // 【U-M-11】看门狗在自己的线程里跑：读 volatile 快照，不去碰服务定位与非 volatile 字段。
             return;
         }
-        writeFile("[edt] " + traceStamp()
+        writeFileAndReport("[edt] " + traceStamp()
                 + " waited=" + ms(waitedNs / 1e6) + "ms"
                 + " stackCost=" + (stackCostNs < 0 ? "?" : ms(stackCostNs / 1e6) + "ms")
                 + " " + frames);
