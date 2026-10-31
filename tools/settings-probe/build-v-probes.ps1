@@ -204,7 +204,21 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 它要反射驱动 SpringTrail 取生产的真 rank，与「喂同一份对齐度」的预览结果逐角比对。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
         'VBatch3Medium',
-        'VPreviewRank')
+        'VPreviewRank',
+        # 【2026-10-31】「校验下沉」（U-1 / U-2 / U-3）的守门：
+        #   T-1 Tools 入口喂越界快照必须夹回（oracle = loadState）/ T-2 两条入口结果逐项相同 /
+        #   T-3 9 位 #RRGGBBAA 经 loadState 往返仍在 / T-4 坏 HEX 两条入口都拒绝 /
+        #   S-1 区间只有一份（loadState 端点 == 独立 oracle，面板端点换算回来也一样）/
+        #   S-2 颜色合法性只有一份（loadState 与 isValidHexColor 同口径）。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VValidationSink',
+        # 【2026-10-31】U-M-7（慢路径中途抛出 → 标志已清、戳已标 → 拖尾永久停错位置，
+        # 表现为 BUG-006 的「光标串到其他行」）的守门：
+        #   C-1 异常被吞 / C-2 抛出后重算请求仍在（主红点）/ C-3 目标几何未算 /
+        #   C-4 下一帧必须重算 / C-5 成功后请求被消费 / C-6 静止时回到快速路径。
+        # 变异已验证：把清零挪回慢路径开头 → C-2、C-4 变红。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VCatchRollback')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

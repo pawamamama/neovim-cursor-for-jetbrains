@@ -136,6 +136,29 @@ public final class SettingsField {
      */
     public final boolean runtimeSwitch;
 
+    /**
+     * 合法区间（闭区间），只对 {@link Kind#FLOAT} / {@link Kind#INT} 有意义。
+     *
+     * <p><b>这是全项目唯一一份「量程」</b>（2026-10-31 校验下沉）。它同时被三处消费：
+     * <ol>
+     *   <li>{@link #decode} —— 预设快照还原时夹回（面板 / Tools 菜单 / 将来任何入口）；</li>
+     *   <li>{@code NeovideCursorSettings.loadState()} —— 启动读盘时夹回；</li>
+     *   <li>{@code ui/settings/NeovideCursorConfigurable} 的滑块刻度端点 —— 由它导出，
+     *       <b>不再手写第二份端点字面量</b>。</li>
+     * </ol>
+     *
+     * <p><b>为什么放在字段表而不是面板</b>：量程是「这个字段合法取值范围」，属于数据契约，
+     * 与「怎么画滑块」无关。放在 {@code ui/} 里，{@code settings/} 层的
+     * {@code loadState} 就只能抄一份数字 —— 那正是陷阱 8「补了 4 项忘了 5 项」的同型错误。
+     *
+     * <p>{@link Double#NaN} 表示不校验（布尔 / 枚举 / 颜色 / 指针，以及
+     * {@code targetFps} 这种「白名单 setter 自带校验」的字段）。
+     */
+    public final double min;
+
+    /** 合法区间上界；语义见 {@link #min}。 */
+    public final double max;
+
     private SettingsField(String key, Kind kind,
                           Function<NeovideCursorSettings.State, Object> getState,
                           BiConsumer<NeovideCursorSettings.State, Object> setState,
@@ -144,6 +167,18 @@ public final class SettingsField {
                           BiPredicate<Object, Object> same,
                           boolean syncsToConfig, boolean inPreset,
                           boolean runtimeSwitch) {
+        this(key, kind, getState, setState, getConfig, setConfig, same,
+                syncsToConfig, inPreset, runtimeSwitch, Double.NaN, Double.NaN);
+    }
+
+    private SettingsField(String key, Kind kind,
+                          Function<NeovideCursorSettings.State, Object> getState,
+                          BiConsumer<NeovideCursorSettings.State, Object> setState,
+                          Function<NeovideConfig, Object> getConfig,
+                          BiConsumer<NeovideConfig, Object> setConfig,
+                          BiPredicate<Object, Object> same,
+                          boolean syncsToConfig, boolean inPreset,
+                          boolean runtimeSwitch, double min, double max) {
         this.key = key;
         this.kind = kind;
         this.getState = getState;
@@ -154,6 +189,109 @@ public final class SettingsField {
         this.syncsToConfig = syncsToConfig;
         this.inPreset = inPreset;
         this.runtimeSwitch = runtimeSwitch;
+        this.min = min;
+        this.max = max;
+    }
+
+    /**
+     * 返回<b>带合法区间</b>的副本（本类对象不可变，工厂链式调用不会改到已发布实例）。
+     *
+     * <p>用法：写在字段自己那一行，紧挨着它的 setter ——
+     * {@code out.add(floats("glowOpacity", ...).range(0, 1));}。
+     * 与 {@code runtimeSwitch} 同一个思路：<b>契约写在字段定义旁边，忘不掉也抄不错</b>。
+     */
+    public SettingsField range(double lo, double hi) {
+        if (kind != Kind.FLOAT && kind != Kind.INT) {
+            throw new IllegalStateException("只有 FLOAT/INT 字段能有区间：" + key + " 是 " + kind);
+        }
+        // 【零宽区间必须当场炸】（2026-10-31 审查 M-2）range(0.05, 0.05) 的后果是
+        // 「该字段永远被夹成同一个值」，滑块变成零宽度，而全链路一声不响 ——
+        // 那正是本项目最难查的一类：没有异常、没有红、只有观感诡异。
+        if (Double.isNaN(lo) || Double.isNaN(hi) || Double.isInfinite(lo) || Double.isInfinite(hi)
+                || !(lo < hi)) {
+            throw new IllegalStateException("区间非法：" + key + " [" + lo + "," + hi + "]");
+        }
+        // 【INT 端点必须是整数】（2026-10-31 审查 M-1）夹取用 ceil(min)/floor(max)，
+        // 而滑块求端点用 writeRaw（Math.round）—— 非整数端点会让两边差 1，
+        // 症状正是「拖到顶格 → 落盘 11 → 重启被改回 10」。今天四个 INT 字段都是整数端点，
+        // 这条断言把「将来有人写 .range(0, 10.5)」从静默偏差变成类加载期崩溃。
+        if (kind == Kind.INT && (lo != Math.rint(lo) || hi != Math.rint(hi))) {
+            throw new IllegalStateException("INT 字段的区间端点必须是整数：" + key + " [" + lo + "," + hi + "]");
+        }
+        return new SettingsField(key, kind, getState, setState, getConfig, setConfig, same,
+                syncsToConfig, inPreset, runtimeSwitch, lo, hi);
+    }
+
+    /** 本字段是否有合法区间（{@link #min} / {@link #max} 是否有效）。 */
+    public boolean hasRange() {
+        return !Double.isNaN(min) && !Double.isNaN(max);
+    }
+
+    /**
+     * 把原始数值夹进本字段的合法区间；没有区间时原样返回。
+     *
+     * <p>NaN 一律夹到 {@link #min} —— 与 {@code NeovideCursorSettings.clamp(float)} 的
+     * NaN 语义一致（NaN 会同时绕过两个比较，不单独处理就会流进绘制路径，见 H-1 / M-5）。
+     */
+    public double clampRange(double v) {
+        if (!hasRange()) {
+            return v;
+        }
+        if (Double.isNaN(v)) {
+            return min;
+        }
+        return v < min ? min : (v > max ? max : v);
+    }
+
+    /** 整数下界（{@link #range} 已保证 INT 端点是整数，这里只是统一取整口径）。 */
+    private int intLo() {
+        return (int) Math.ceil(min);
+    }
+
+    /** 整数上界；与 {@link #intLo()} 同源，避免两处各写一套取整规则。 */
+    private int intHi() {
+        return (int) Math.floor(max);
+    }
+
+    /**
+     * 按本字段的区间夹 {@code s} 的这个字段（就地写回；无区间时什么都不做）。
+     *
+     * <p>供 {@code NeovideCursorSettings.loadState()} 遍历字段表用 ——
+     * 那里<b>不再出现任何 (lo, hi) 常量</b>。
+     */
+    public void clampStateToRange(NeovideCursorSettings.State s) {
+        if (!hasRange()) {
+            return;
+        }
+        Object v = getState.apply(s);
+        if (kind == Kind.INT) {
+            int i = (Integer) v;
+            int lo = intLo();
+            int hi = intHi();
+            setState.accept(s, i < lo ? lo : (i > hi ? hi : i));
+        } else if (kind == Kind.FLOAT) {
+            setState.accept(s, (float) clampRange((Float) v));
+        }
+    }
+
+    /**
+     * 把原始值直接写进 {@code s}（<b>不做任何校验</b>）。
+     *
+     * <p>仅供两类自用场景：
+     * <ul>
+     *   <li>面板由「字段表的区间」导出滑块刻度端点 —— 需要往临时 State 里放一个端点原始值；</li>
+     *   <li>探针构造「越界/哨兵」夹具 —— 它们要的是<b>绕过</b>校验，否则测的就是校验自己。</li>
+     * </ul>
+     * 业务代码不要用它写用户数据：那等于绕开唯一一层校验。
+     */
+    public void writeRaw(NeovideCursorSettings.State s, Object v) {
+        if (kind == Kind.INT) {
+            setState.accept(s, (int) Math.round(((Number) v).doubleValue()));
+        } else if (kind == Kind.FLOAT) {
+            setState.accept(s, (float) ((Number) v).doubleValue());
+        } else {
+            setState.accept(s, v);
+        }
     }
 
     /** 两个 {@code State} 在这个字段上是否不同。 */
@@ -243,11 +381,29 @@ public final class SettingsField {
      * <p><b>非法值绝不抛异常</b>（宁干净不崩）：解析失败就保持 {@code s} 的现值。
      * 这条是硬要求 —— 自定义预设串可能被手改坏，抛异常会让整页设置打不开。
      *
-     * @return true = 成功写入；false = 内容非法、已忽略
+     * <p><b>量程校验（2026-10-31 下沉）</b>：FLOAT / INT 在类型校验之后按<b>本字段的
+     * 区间</b>（{@link #min} / {@link #max}）夹回。两类「非法」的处置不同：
+     * <ul>
+     *   <li><b>类型非法</b>（NaN / 解析失败 / 非法枚举名 / 非 HEX）→ 保持当前值、不计入 applied；</li>
+     *   <li><b>量程越界</b>（{@code glowLayers=99}）→ 夹回端点、<b>计入</b> applied、留一行 warn。</li>
+     * </ul>
+     * 后者与 {@code NeovideCursorSettings.loadState()} 对同一字段的处理逐位一致 ——
+     * 这正是 H-1 要求的「两条入口共用同一份区间」。
+     *
+     * @return true = 成功写入（含被夹回的）；false = 内容非法、已忽略
      */
     public boolean decode(NeovideCursorSettings.State s, String raw) {
+        return decode(s, raw, null);
+    }
+
+    /**
+     * 同 {@link #decode(NeovideCursorSettings.State, String)}，并把「夹回 / 拒绝」记进报告。
+     *
+     * @param report 可为 {@code null}（只要布尔结果时）
+     */
+    public boolean decode(NeovideCursorSettings.State s, String raw, RestoreReport report) {
         if (raw == null) {
-            return reject(null, "值为 null");
+            return reject(null, "值为 null", report);
         }
         try {
             Object v;
@@ -255,13 +411,13 @@ public final class SettingsField {
                 case FLOAT: {
                     float f = Float.parseFloat(raw.trim());
                     if (Float.isNaN(f) || Float.isInfinite(f)) {
-                        return reject(raw, "不是有限数");
+                        return reject(raw, "不是有限数", report);
                     }
-                    v = f;
+                    v = clampFloat(f, raw, report);
                     break;
                 }
                 case INT: {
-                    v = Integer.parseInt(raw.trim());
+                    v = clampInt(Integer.parseInt(raw.trim()), raw, report);
                     break;
                 }
                 case BOOL: {
@@ -271,14 +427,14 @@ public final class SettingsField {
                     } else if ("0".equals(t) || "false".equalsIgnoreCase(t)) {
                         v = Boolean.FALSE;
                     } else {
-                        return reject(raw, "不是 0/1/true/false");
+                        return reject(raw, "不是 0/1/true/false", report);
                     }
                     break;
                 }
                 case ENUM: {
                     v = resolveEnum(getState.apply(s), raw.trim());
                     if (v == null) {
-                        return reject(raw, "不是合法枚举名");
+                        return reject(raw, "不是合法枚举名", report);
                     }
                     break;
                 }
@@ -290,11 +446,11 @@ public final class SettingsField {
                     // 返回不透明黑色 → **光标变黑**，而 decode 返回 true（声称成功）。
                     // 用户看到的是「切了个预设光标黑了」，且没有任何错误提示。
                     //
-                    // 现在要求 #RRGGBB 或 #AARRGGBB（大小写不限），否则返回 false
+                    // 现在要求 #RRGGBB 或 #RRGGBBAA（大小写不限），否则返回 false
                     // 让调用方保持原值 —— 与 ENUM 分支「非法就不写」的语义一致。
                     String hex = raw.trim();
                     if (!isValidHexColor(hex)) {
-                        return reject(raw, "不是 #RRGGBB / #AARRGGBB");
+                        return reject(raw, "不是 #RRGGBB / #RRGGBBAA", report);
                     }
                     v = hex;
                     break;
@@ -306,16 +462,81 @@ public final class SettingsField {
             }
             setState.accept(s, v);
             return true;
+        } catch (NumberFormatException ex) {
+            // 【2026-10-31 审查 M-5】这不是代码 bug，是**脏数据**的主用例：
+            // `Integer.parseInt("abc")` / `Float.parseFloat("abc")` 就在上面的 try 里抛。
+            // 原来它落到下面那条「带堆栈」的分支，于是用户每应用一次坏预设，
+            // idea.log 里就有一条读起来像崩溃的堆栈 —— 排查的人会去查代码而不是查数据。
+            return reject(raw, "不是数字", report);
         } catch (RuntimeException ex) {
-            // 【必须带堆栈】这一类不可能是「脏数据」—— 脏数据在上面的各分支就已经被
-            // 自己那条 reject 拦下了。能走到这里的只有 setState.accept 里的
-            // NPE / ClassCastException，也就是<b>代码 bug</b>，而它是唯一真正需要堆栈的一类。
-            return reject(raw, "解析抛异常", ex);
+            // 【必须带堆栈】解析失败（NumberFormatException）在上面单独接住了，所以能走到
+            // 这里的只剩 setState.accept 里的 NPE / ClassCastException —— 也就是<b>代码
+            // bug</b>，它是唯一真正需要堆栈的一类。
+            return rejectWithTrace(raw, "解析抛异常", ex, report);
         }
     }
 
     /**
-     * 记录一次「已知键、值非法」的拒绝，并返回 {@code false}。
+     * 按本字段区间夹一个 float，并在真的夹了时留一行 warn + 记进报告。
+     *
+     * @return 夹取后的值（区间内原样返回，<b>不过手</b>）
+     */
+    private float clampFloat(float f, String raw, RestoreReport report) {
+        if (!hasRange()) {
+            return f;
+        }
+        float lo = (float) min;
+        float hi = (float) max;
+        float c = f < lo ? lo : (f > hi ? hi : f);
+        if (c != f) {
+            noteClamped(raw, Float.toString(f), Float.toString(c), report);
+        }
+        return c;
+    }
+
+    /** 按本字段区间夹一个 int；语义同 {@link #clampFloat}。 */
+    private int clampInt(int i, String raw, RestoreReport report) {
+        if (!hasRange()) {
+            return i;
+        }
+        int lo = intLo();
+        int hi = intHi();
+        int c = i < lo ? lo : (i > hi ? hi : i);
+        if (c != i) {
+            noteClamped(raw, Integer.toString(i), Integer.toString(c), report);
+        }
+        return c;
+    }
+
+    /**
+     * 记录一次「已知键、值越界 → 已夹回」。
+     *
+     * <p><b>为什么必须留痕</b>：夹回本质上是「用户存的值被改了」。静默改值正是这条缺陷的
+     * 原始症状（重启后值自己变了）。留一行 warn，用户报问题时能一眼看出「是哪个字段、
+     * 从多少夹到多少」。日志里写<b>字段 key</b>（排查时唯一能对上代码的东西）。
+     */
+    private void noteClamped(String raw, String from, String to, RestoreReport report) {
+        if (report != null && !report.clamped.contains(key)) {
+            // 【L-2，2026-10-31 审查】快照里同一个键写了两次时只记一次 ——
+            // 否则面板会提示「有 2 个参数超出正常范围」，而实际上只有一个参数。
+            report.clamped.add(key);
+        }
+        try {
+            LOG.warn("neovide-cursor: 预设字段 " + key + " 的值越界（" + from + "），已夹回合法区间 ["
+                    + formatBound(min) + "," + formatBound(max) + "] 内的 " + to
+                    + "。原值=[" + shown(raw) + "]");
+        } catch (Throwable ignored) {
+            // 日志失败不得让 decode 抛异常（见 decode 的契约）
+        }
+    }
+
+    /** 记录一次「已知键、值非法」的拒绝，并返回 {@code false}。 */
+    private boolean reject(String raw, String why, RestoreReport report) {
+        return rejectWithTrace(raw, why, null, report);
+    }
+
+    /**
+     * 记录一次拒绝（可附带异常），并返回 {@code false}。
      *
      * <p><b>为什么能确定是「值非法」而不是「缺键」</b>：未知键在
      * {@link #restore}/{@link #restoreSkipping} 的 {@code byKey()} 处就被 continue 掉了，
@@ -323,26 +544,20 @@ public final class SettingsField {
      * 一定等于「这个键存在、但值不合法」—— 这两者必须能区分开：前者是数据坏了要留痕，
      * 后者是版本兼容的正常宽容，不该刷日志（见这两处方法的 javadoc）。
      *
-     * <p><b>日志本身也包了 try/catch</b>：{@code decode} 的第一契约是「绝不抛异常」
-     * （见其 javadoc），日志子系统failure 不能反过来破坏它。
-     */
-    private boolean reject(String raw, String why) {
-        return reject(raw, why, null);
-    }
-
-    /**
-     * 同上，但把异常一起带进日志。
+     * <p><b>只有 {@code catch (RuntimeException)} 那条路径带堆栈</b>：那类失败是代码 bug，
+     * 只留一个类名（{@code NullPointerException}）对定位毫无帮助；脏数据在上面的各分支
+     * 就已经被自己那条 reject 拦下了。
      *
-     * <p>只有 {@code catch (RuntimeException)} 那一条路径用得到 —— 那类失败是代码 bug，
-     * 只留一个类名（{@code NullPointerException}）对定位毫无帮助。
+     * <p><b>日志本身也包了 try/catch</b>：{@code decode} 的第一契约是「绝不抛异常」
+     * （见其 javadoc），日志子系统失败不能反过来破坏它。
      */
-    private boolean reject(String raw, String why, Throwable t) {
-        String shown = raw == null ? "(null)"
-                : (raw.length() <= RAW_LOG_MAX ? raw
-                   : raw.substring(0, RAW_LOG_MAX) + "…(共 " + raw.length() + " 字符)");
+    private boolean rejectWithTrace(String raw, String why, Throwable t, RestoreReport report) {
+        if (report != null && !report.rejected.contains(key)) {
+            report.rejected.add(key);      // 同上：重复键只记一次
+        }
         try {
             String msg = "neovide-cursor: 预设字段 " + key + " 的值非法（" + why
-                    + "），保持当前值。值=[" + shown + "]";
+                    + "），保持当前值。值=[" + shown(raw) + "]";
             if (t == null) {
                 LOG.warn(msg);
             } else {
@@ -354,8 +569,31 @@ public final class SettingsField {
         return false;
     }
 
+    /** 日志里原值的展示形态（超长截断，保留前缀与总长度）。 */
+    private static String shown(String raw) {
+        if (raw == null) {
+            return "(null)";
+        }
+        return raw.length() <= RAW_LOG_MAX ? raw
+                : raw.substring(0, RAW_LOG_MAX) + "…(共 " + raw.length() + " 字符)";
+    }
+
+    /** 区间的展示形态：整数字段不带 `.0`，浮点保留原样。 */
+    private String formatBound(double v) {
+        if (kind == Kind.INT && v == Math.rint(v)) {
+            return Integer.toString((int) v);
+        }
+        return Float.toString((float) v);
+    }
+
     /**
-     * HEX 颜色串是否合法：{@code #RRGGBB} 或 {@code #AARRGGBB}，大小写不限。
+     * HEX 颜色串是否合法：{@code #RRGGBB} 或 {@code #RRGGBBAA}，大小写不限。
+     *
+     * <p><b>9 位的位序是 {@code RR GG BB AA}</b>（末两位 alpha）—— 与
+     * {@code core/NeovideColors.parse} 的解析顺序一致，也是用户 2026-10-30 拍板的口径。
+     * 本方法只判「长度与字符是否十六进制」，位序由绘制层决定；这里把位序写清楚，
+     * 是因为用户看到的提示语就是抄这一句（写反会让人按 {@code #AARRGGBB} 手写，
+     * 得到一个 alpha=0 的全透明光标）。
      *
      * <p>只做格式校验，不校验"颜色是否好看" —— 那是 UI 的事。
      * 这里的目标是挡住「明显不是颜色」的串，避免它流进绘制层变成黑色。
@@ -588,12 +826,13 @@ public final class SettingsField {
         out.add(ints("targetFps", s -> s.targetFps,
                 (s, v) -> s.targetFps = (v == 144) ? 144 : 125,
                 null, null, true));
-        // 斜度（slopeTicks）：0..100，越界回落到 State 的默认值 0（纯矩形拉伸，不斜）。
-        // 回落目标必须与 State 默认一致 —— 原来回落 100，而 State 默认已改成 0，
-        // 两者不一致会让「手改 XML 塞个坏值」的用户得到一个和全新安装不同的观感。
+        // 斜度（slopeTicks）：0..100。
+        // 【2026-10-31 校验下沉】区间改由 .range(0, 100) 表达 —— 越界值的处置从
+        // 「setter 里回落 0」变成「decode/loadState 按区间夹到最近端点」，
+        // 与其余数值字段同一套规则（原先是 999 → 0、-1 → 0 的单向回落，是唯一的例外）。
         out.add(ints("slopeTicks", s -> s.slopeTicks,
-                (s, v) -> s.slopeTicks = (v >= 0 && v <= 100) ? v : 0,
-                null, null));
+                (s, v) -> s.slopeTicks = v,
+                null, null).range(0, 100));
         out.add(bools("overlayFadeOut", s -> s.overlayFadeOut, (s, v) -> s.overlayFadeOut = v,
                 c -> c.overlayFadeOut, (c, v) -> c.overlayFadeOut = v));
 
@@ -614,43 +853,47 @@ public final class SettingsField {
 
         // 【光标尺寸】只进 State（绘制时读 State，不进 CONFIG）
         out.add(ints("cursorWidthPx", s -> s.cursorWidthPx,
-                (s, v) -> s.cursorWidthPx = v, null, null, true));
+                (s, v) -> s.cursorWidthPx = v, null, null, true).range(1, 5));
         out.add(floats("cursorHeightRatio", s -> s.cursorHeightRatio,
-                (s, v) -> s.cursorHeightRatio = v, null, null, true));
+                (s, v) -> s.cursorHeightRatio = v, null, null, true).range(0.3, 1.0));
         // 【颜色域，不进动画预设】用户 2026-10-28 决定：动画预设完全不管颜色。
         // 之前它漏标了（走的是普通 bools），导致切自定义预设会顺带改你的渐变开关。
         out.add(boolsGlobal("rgbGradient", s -> s.rgbGradient,
                 (s, v) -> s.rgbGradient = v));
         out.add(ints("cursorDisappearDelay", s -> s.cursorDisappearDelay, (s, v) -> s.cursorDisappearDelay = v,
-                c -> c.cursorDisappearDelay, (c, v) -> c.cursorDisappearDelay = v));
+                c -> c.cursorDisappearDelay, (c, v) -> c.cursorDisappearDelay = v).range(0, 500));
         out.add(floats("cursorFadeOutDuration", s -> s.cursorFadeOutDuration, (s, v) -> s.cursorFadeOutDuration = v,
-                c -> c.cursorFadeOutDuration, (c, v) -> c.cursorFadeOutDuration = v));
+                c -> c.cursorFadeOutDuration, (c, v) -> c.cursorFadeOutDuration = v).range(0, 1.0));
         out.add(hexColors("tailColor", s -> s.tailColor, (s, v) -> s.tailColor = v,
                 c -> c.tailColor, (c, v) -> c.tailColor = v));
         out.add(floats("tailOpacity", s -> s.tailOpacity, (s, v) -> s.tailOpacity = v,
-                c -> c.tailOpacity, (c, v) -> c.tailOpacity = v));
+                c -> c.tailOpacity, (c, v) -> c.tailOpacity = v).range(0, 1));
         out.add(bools("useShadow", s -> s.useShadow, (s, v) -> s.useShadow = v,
                 c -> c.useShadow, (c, v) -> c.useShadow = v));
         out.add(hexColors("shadowColor", s -> s.shadowColor, (s, v) -> s.shadowColor = v,
                 c -> c.shadowColor, (c, v) -> c.shadowColor = v));
         out.add(floats("glowOpacity", s -> s.glowOpacity, (s, v) -> s.glowOpacity = v,
-                c -> c.glowOpacity, (c, v) -> c.glowOpacity = v));
+                c -> c.glowOpacity, (c, v) -> c.glowOpacity = v).range(0, 1));
         out.add(ints("glowLayers", s -> s.glowLayers, (s, v) -> s.glowLayers = v,
-                c -> c.glowLayers, (c, v) -> c.glowLayers = v));
+                c -> c.glowLayers, (c, v) -> c.glowLayers = v).range(1, 12));
         out.add(floats("shadowBlurFactor", s -> s.shadowBlurFactor, (s, v) -> s.shadowBlurFactor = v,
-                c -> c.shadowBlurFactor, (c, v) -> c.shadowBlurFactor = v));
+                c -> c.shadowBlurFactor, (c, v) -> c.shadowBlurFactor = v).range(0.05, 0.60));
         out.add(floats("trailSize", s -> s.trailSize, (s, v) -> s.trailSize = v,
-                c -> c.trailSize, (c, v) -> c.trailSize = v));
+                c -> c.trailSize, (c, v) -> c.trailSize = v).range(0, 1));
         // stretchRatioK / typingSmoothness 派生 trailFactors，CONFIG 无对应标量
-        out.add(floats("stretchRatioK", s -> s.stretchRatioK, (s, v) -> s.stretchRatioK = v, null, null));
+        out.add(floats("stretchRatioK", s -> s.stretchRatioK, (s, v) -> s.stretchRatioK = v, null, null)
+                .range(1.0, 8.0));
         // 【全局项，不进任何预设】0.9.73 就定了「平滑不参与预设」，但它一直留在快照里 ——
         // 实测后果：切自定义预设会把平滑一起改掉（与文档记载相反）。
         out.add(floatsGlobal("typingSmoothness", s -> s.typingSmoothness,
-                (s, v) -> s.typingSmoothness = v));
+                (s, v) -> s.typingSmoothness = v).range(0, 1));
+        // 动画时长的区间<b>引用</b> NeovideCursorSettings 的公开常量（同一份数字，不抄第二遍）
         out.add(floats("animationLength", s -> s.animationLength, (s, v) -> s.animationLength = v,
-                c -> c.animationLength, (c, v) -> c.animationLength = v));
+                c -> c.animationLength, (c, v) -> c.animationLength = v)
+                .range(NeovideCursorSettings.ANIM_LENGTH_MIN, NeovideCursorSettings.ANIM_LENGTH_MAX));
         out.add(floats("shortAnimationLength", s -> s.shortAnimationLength, (s, v) -> s.shortAnimationLength = v,
-                c -> c.shortAnimationLength, (c, v) -> c.shortAnimationLength = v));
+                c -> c.shortAnimationLength, (c, v) -> c.shortAnimationLength = v)
+                .range(NeovideCursorSettings.SHORT_LENGTH_MIN, NeovideCursorSettings.SHORT_LENGTH_MAX));
         out.add(presetPointer());
 
         return Collections.unmodifiableList(out);
@@ -741,14 +984,39 @@ public final class SettingsField {
     }
 
     /**
+     * 一次快照还原的<b>完整账</b>：写成功几项、夹回哪些、拒绝哪些。
+     *
+     * <p><b>为什么要有它</b>（第 1 批 H-2 的延续）：只返回一个 {@code applied} 数字时，
+     * 调用方无法区分「这个键不在快照里」（旧版本预设，属正常兼容）、「这个键在、值越界被夹回」、
+     * 与「这个键在、值非法被拒」。三种情况用户可见的后果完全不同：
+     * 第一种该静默，第二种<b>必须告诉用户「你的值被改了」</b>（面板据此自愈回写快照，
+     * 否则每点一次下拉都弹一次提示），第三种该留痕。
+     *
+     * <p>下沉之后校验只有一份，这份账也只有一个来源 —— 调用方不再自己重算一遍，
+     * 这正是「不许出现第二份量程表」在<b>报告层</b>的等价要求。
+     */
+    public static final class RestoreReport {
+        /** 真正写进 State 的字段数（<b>含被夹回的</b>；被拒的不算）。 */
+        public int applied;
+        /** 因越界被夹回的字段 key（按快照出现顺序）。 */
+        public final List<String> clamped = new ArrayList<>();
+        /** 因类型非法被拒、保持当前值的字段 key（按快照出现顺序）。 */
+        public final List<String> rejected = new ArrayList<>();
+    }
+
+    /**
      * 把一行快照还原进 {@code s}。
      *
-     * <p>宽容解析：未知键忽略、缺失键保持现值、非法值忽略。
+     * <p>宽容解析：未知键忽略、缺失键保持现值、非法值忽略、越界值夹回。
      * 这样「旧版本存的预设串」在新版本里仍然能用（新字段取当前值）。
      *
      * @return 成功写入的字段数（探针用；0 表示整条非法）
      */
     public static int restore(NeovideCursorSettings.State s, String snapshot) {
+        return restore(s, snapshot, null);
+    }
+
+    private static int restore(NeovideCursorSettings.State s, String snapshot, RestoreReport report) {
         if (s == null || snapshot == null || snapshot.isEmpty()) {
             return 0;
         }
@@ -766,7 +1034,7 @@ public final class SettingsField {
             if (f == null || !f.inPreset) {
                 continue;
             }
-            if (f.decode(s, e.substring(eq + 1))) {
+            if (f.decode(s, e.substring(eq + 1), report)) {
                 applied++;
             }
         }
@@ -795,6 +1063,24 @@ public final class SettingsField {
      * @return 成功写入的字段数
      */
     public static int restoreSkipping(NeovideCursorSettings.State s, String snapshot) {
+        return restoreSkipping(s, snapshot, null);
+    }
+
+    /**
+     * 同 {@link #restoreSkipping}，但返回完整账（{@link RestoreReport}）。
+     *
+     * <p><b>这是面板与 Tools 菜单两条入口共同消费的唯一出口</b>：
+     * 「夹回了哪些字段」由这一层判定，调用方只负责「怎么告诉用户」。
+     * 在此之前，面板自己遍历一遍 {@code SPECS} 再算一次夹回 —— 那就是第二份量程表。
+     */
+    public static RestoreReport restoreSkippingReported(NeovideCursorSettings.State s, String snapshot) {
+        RestoreReport report = new RestoreReport();
+        report.applied = restoreSkipping(s, snapshot, report);
+        return report;
+    }
+
+    private static int restoreSkipping(NeovideCursorSettings.State s, String snapshot,
+                                       RestoreReport report) {
         if (s == null || snapshot == null || snapshot.isEmpty()) {
             return 0;
         }
@@ -816,10 +1102,68 @@ public final class SettingsField {
             if (f.runtimeSwitch) {
                 continue;                   // 运行环境开关：预设无权改动
             }
-            if (f.decode(s, e.substring(eq + 1))) {
+            if (f.decode(s, e.substring(eq + 1), report)) {
                 applied++;
             }
         }
         return applied;
+    }
+
+    // ==================== 颜色快照（第二个下沉点）====================
+
+    /**
+     * 颜色快照的还原结果。
+     *
+     * <p>颜色快照<b>不是</b> {@code key=value} 全字段格式，而是
+     * {@code tailColor=#..;shadowColor=#..} 两个键（见 {@code CursorPresets.parseColorSnapshot}），
+     * 所以它有自己的解析器 —— 但<b>合法性判据必须与字段表同源</b>，
+     * 这就是它放在本类而不是面板里的理由。
+     */
+    public enum ColorRestoreResult {
+        /** 两个颜色都合法且已写入。 */
+        OK,
+        /** 快照里缺 tailColor / shadowColor（整条损坏或不是颜色快照）。 */
+        MISSING_FIELDS,
+        /** 两个键都在，但至少一个不是合法 HEX。 */
+        BAD_FORMAT
+    }
+
+    /**
+     * 把一条<b>颜色预设快照</b>还原进 {@code s}。
+     *
+     * <p><b>为什么必须在这里（U-2）</b>：这条路径原来有两个实现 ——
+     * 面板的 {@code applyColorSnapshot} 调 {@link #isValidHexColor}，
+     * Tools 菜单的 {@code applyCustomColorPreset} 只判 {@code hex == null}。
+     * 于是「同一份坏快照」在面板被拒、在菜单被原样写进 State，
+     * 绘制层 {@code NeovideColors.parse} 解析失败 → <b>光标变黑</b>。
+     *
+     * <p><b>不写半套</b>：两个颜色都合法才一起写。半个颜色写进去 = 用户看到
+     * 「拖尾颜色变了、辉光颜色没变」，比整条拒绝更难排查。
+     *
+     * <p><b>写入前 trim</b>：{@link #isValidHexColor} 内部会 trim（判的是「trim 后是否合法」），
+     * 而绘制层不 trim —— 把带空白的原串写进 State 就是「校验通过、绘制认不出、光标变黑」。
+     */
+    public static ColorRestoreResult restoreColorSnapshot(NeovideCursorSettings.State s, String snapshot) {
+        if (s == null) {
+            return ColorRestoreResult.MISSING_FIELDS;
+        }
+        String[] hex = CursorPresets.parseColorSnapshot(snapshot);
+        if (hex == null) {
+            return ColorRestoreResult.MISSING_FIELDS;
+        }
+        String tail = hex[0].trim();
+        String shadow = hex[1].trim();
+        if (!isValidHexColor(tail) || !isValidHexColor(shadow)) {
+            try {
+                LOG.warn("neovide-cursor: 颜色预设快照里有非法颜色（tailColor=[" + shown(hex[0])
+                        + "] shadowColor=[" + shown(hex[1]) + "]），保持当前值");
+            } catch (Throwable ignored) {
+                // 日志失败不得改变结论
+            }
+            return ColorRestoreResult.BAD_FORMAT;
+        }
+        s.tailColor = tail;
+        s.shadowColor = shadow;
+        return ColorRestoreResult.OK;
     }
 }

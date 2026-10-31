@@ -787,6 +787,19 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private boolean inlayGeometryDirty = false;
 
+    /**
+     * 探针钩子：慢路径「已经给光标 {@code markAt}、还没算出目标几何」的那一刻。
+     *
+     * <p>只有 {@code VCatchRollback} 会设置它（经 {@link CaretAnimatorProbe#setAfterMarkHook}），
+     * 生产环境恒为 {@code null}，代价是一次静态字段读。
+     *
+     * <p><b>为什么需要这个缝</b>：U-M-7 的失败形态是「慢路径中途抛出」，
+     * 而这个抛出点必须落在 {@code markAt} <b>之后</b> —— 落在之前的话，
+     * {@code isAt(...)} 仍为假，下一帧自然就会重算，根本测不到「标志已清 + 戳已标」这个组合。
+     * 探针不能为了制造这个时机去复刻算法（陷阱 3），所以由生产代码提供这个时刻。
+     */
+    static volatile Runnable afterMarkHookForProbe;
+
     public CaretAnimator(@NotNull Editor editor, @NotNull NeovideConfig config) {
         this.editor = editor;
         this.config = config;
@@ -1319,6 +1332,27 @@ public class CaretAnimator implements Disposable, CaretListener {
         wakeUp();
     }
 
+    /**
+     * 成功收尾：把本帧消费掉的重算请求清零。
+     *
+     * <p><b>为什么只能在「活干完」之后调（U-M-7）</b>：这两个标志的语义是
+     * 「下一帧必须重算」。在慢路径正文之前就清零，等于在活还没干的时候宣布它干完了 ——
+     * 中途一旦抛出，标志没了、戳却已经标上（{@code markAt}），下一帧顶层判据认为
+     * 「光标没动」直接走快速路径，拖尾就永久停错位置。
+     *
+     * <p>传入的是<b>本帧开头拍下的快照</b>，不是字段现值：慢路径执行期间没有别的线程
+     * 能改它们（EDT 单线程，事件不会插进本方法），所以只清掉「本帧确实消费过的那几个」，
+     * 不会把期间新置位的请求一起清掉。
+     */
+    private void commitResync(boolean resyncRequested, boolean inlayConsumed) {
+        if (resyncRequested) {
+            forceResync = false;
+        }
+        if (inlayConsumed) {
+            inlayGeometryDirty = false;
+        }
+    }
+
     // ==================== 动画循环 ====================
 
     /** 每帧：重新读取光标位置 → 推进物理 → 局部重绘 */
@@ -1837,9 +1871,17 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             // 【BUG-006】inlay 变过 → 视觉行号 / 列号 / 文档戳都不会变，
             // 但像素几何已经失效（block inlay 把下方文本撑低了）。
-            // 本帧读一次就消费掉；若后面被 IME 判据提前 return，标志保留到下一帧
-            // —— 与 forceResync 同一个位置清零（见下方 forceResync = false 处）。
+            // 本帧读进局部变量；字段本身的清零延到成功收尾（commitResync），
+            // 这样中途抛出时它仍然挂着，下一帧会重来（U-M-7）。
             boolean inlayChanged = inlayGeometryDirty;
+            // 【U-M-7，2026-10-31】本帧要消费的重算请求先记在**局部变量**里，
+            // 真正清零放在成功收尾（见 commitResync）。原来的写法是在进入慢路径正文之前就
+            //     forceResync = false;  inlayGeometryDirty = false;
+            // —— 一旦后面这 500 行里任何一句抛出，就变成「标志已清、活没干完、戳已标」：
+            // 下一帧顶层判据命中 isAt(...) 直接早退，分组号 / glowPadding / 光标尺寸
+            // 永久停在不该停的值上，且此后连异常都不再有（不再进慢路径）。
+            // 唯一的重试源是下一次光标事件 —— 用户静止查看时永不存在。
+            boolean resyncRequested = forceResync;
 
             VisualPosition vp = editor.getCaretModel().getVisualPosition();
             if (!forceResync && !fontScaleChanged && !inlayChanged
@@ -1975,10 +2017,9 @@ public class CaretAnimator implements Disposable, CaretListener {
             }
             imeSkipFrames = 0;
 
-            forceResync = false;
-            // inlay 标志在「已进入慢路径」这一点上与 forceResync 同生共死：
-            // 只有走到这里才清，IME 判据提前 return 时保留给下一帧。
-            inlayGeometryDirty = false;
+            // 【U-M-7】两个标志**不在这里清**：本帧要消费请求已经记进 resyncRequested /
+            // inlayChanged，清零挪到成功收尾的 commitResync(...)。中途抛出时它们保持置位，
+            // 下一帧会重新走慢路径 —— 这才是本方法注释里一直声称的「下一帧会自动重试」。
 
             // 多光标：视觉位置缓存下沉到每个 SpringTrail（isAt / markAt）
 
@@ -2261,7 +2302,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                 // 【inlayChanged 必须在这里出现】逐光标的这道门与顶层早退是两道独立判据：
                 // 只绕开顶层、不带上这一条时，isAt(line, column, stamp) 仍会判定
                 // 「这个光标没动」，像素坐标根本不会重算（VInlay 的 I-1 就是这么红的）。
-                boolean needsUpdate = forceResync
+                boolean needsUpdate = resyncRequested
                         || fontScaleChanged
                         || inlayChanged
                         || !trail.isInitialized()
@@ -2270,6 +2311,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                 if (needsUpdate) {
                     Point cp = editor.visualPositionToXY(cvp);
                     trail.markAt(cvp.line, cvp.column, stamp);
+                    // 【U-M-7 守门】探针在「戳已标、目标几何还没算」的这一刻注入一次异常。
+                    // 生产环境恒为 null，代价只是一次静态字段读。
+                    Runnable markHook = afterMarkHookForProbe;
+                    if (markHook != null) {
+                        markHook.run();
+                    }
 
                     // 【块选区：所有行必须共享同一个 charsMoved】
                     //
@@ -2358,6 +2405,8 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             if (activeTrails.isEmpty()) {
                 logSlowRefresh(startedNanos, false);
+                // 没有任何拖尾 = 本帧的工作已经做完，可以消费请求了。
+                commitResync(resyncRequested, inlayChanged);
                 success = true;
                 return false;
             }
@@ -2391,6 +2440,9 @@ public class CaretAnimator implements Disposable, CaretListener {
             panel.updateGlowRadius(width, height);
             glowPadding = (int) Math.ceil(panel.getGlowWidth()) + 4;
 
+            // 【U-M-7】走到这里才算「这一帧的活干完了」—— 只有此刻才允许消费重算请求。
+            // 中途抛出（见下方 catch）时两个标志保持置位，下一帧会重新走慢路径。
+            commitResync(resyncRequested, inlayChanged);
             logSlowRefresh(startedNanos, changed);
             success = true;
             return changed;

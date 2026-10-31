@@ -18,4 +18,15 @@ public final class CaretAnimatorProbe {
     public static long hiddenTierDelayNs(boolean showing) {
         return CaretAnimator.hiddenTierDelayNs(showing);
     }
+
+    /**
+     * 【U-M-7】在慢路径「已 markAt、未收尾」的那一刻注入一次动作（通常是抛异常）。
+     *
+     * <p>生产恒不调用；只有 {@code VCatchRollback} 用它制造「标志已消费、活没干完」的现场。
+     *
+     * @param hook 要执行的动作；{@code null} = 拆掉钩子
+     */
+    public static void setAfterMarkHook(Runnable hook) {
+        CaretAnimator.afterMarkHookForProbe = hook;
+    }
 }

@@ -121,30 +121,32 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         target.alwaysHighFps = from.alwaysHighFps;
         target.overlayFadeOut = from.overlayFadeOut;
 
-        target.cursorDisappearDelay = clamp(from.cursorDisappearDelay, 0, 500);
-        target.cursorFadeOutDuration = clamp(from.cursorFadeOutDuration, 0f, 1.0f);
+        // 【2026-10-31 校验下沉】数值字段一律**原样拷贝**，区间夹取统一放在本方法末尾
+        // 的字段表遍历里（见「统一夹取」段）。原来这里每个字段各写一行
+        // `clamp(from.x, lo, hi)`，与字段表是两份数字 —— 正是「补了 4 项忘了 5 项」的病根。
+        target.cursorDisappearDelay = from.cursorDisappearDelay;
+        target.cursorFadeOutDuration = from.cursorFadeOutDuration;
 
         target.tailColor = sanitizeColor(from.tailColor, new NeovideConfig().tailColor);
-        target.tailOpacity = clamp(from.tailOpacity, 0f, 1f);
+        target.tailOpacity = from.tailOpacity;
 
         target.useShadow = from.useShadow;
         target.shadowColor = sanitizeColor(from.shadowColor, new NeovideConfig().shadowColor);
 
-        target.glowOpacity = clamp(from.glowOpacity, 0f, 1f);
-        target.glowLayers = clamp(from.glowLayers, 1, 12);
-        target.shadowBlurFactor = clamp(from.shadowBlurFactor, 0.05f, 0.60f);
+        target.glowOpacity = from.glowOpacity;
+        target.glowLayers = from.glowLayers;
+        target.shadowBlurFactor = from.shadowBlurFactor;
 
-        target.trailSize = clamp(from.trailSize, 0f, 1f);
-        target.stretchRatioK = clamp(from.stretchRatioK, 1.0f, 8.0f);
+        target.trailSize = from.trailSize;
+        target.stretchRatioK = from.stretchRatioK;
 
         // 17/18：0.9.5 新增的两个「动画时序」字段（契约 §7.1）—— 也必须容忍缺省与越界。
         // 老 XML 里没有这两项 → 平台按字段初值（= NeovideConfig 现值）填充，行为不变。
-        target.animationLength = clamp(from.animationLength, ANIM_LENGTH_MIN, ANIM_LENGTH_MAX);
-        target.shortAnimationLength =
-                clamp(from.shortAnimationLength, SHORT_LENGTH_MIN, SHORT_LENGTH_MAX);
+        target.animationLength = from.animationLength;
+        target.shortAnimationLength = from.shortAnimationLength;
 
         // 19（0.9.6 / M4）：输入平滑。老 XML 没有这一项 → 平台填字段初值 0f = 行为不变。
-        target.typingSmoothness = clamp(from.typingSmoothness, 0f, 1f);
+        target.typingSmoothness = from.typingSmoothness;
         // 【第二轮审查 F1，blocker】老用户的 animPresetBase 可能是 0..6（旧版有 7 个预设）。
         // 0.9.10 精简到 3 个后，如果只把上界改成 2，老下标 3..6 会被 clamp 成 2 = 「纯平滑输入」
         // —— 那是**关辉光**的预设。用户会莫名其妙失去辉光，下拉还自称他选的就是这个。
@@ -222,20 +224,31 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         //
         // 用户自己机器上若存着 82，归到 0 正是他要的（他一直说不要斜）。
         // 用户真正手动调过的其它值（0-81、83-100）保持原样 —— 那是他的选择。
-        if (from.slopeTicks == 82) {
-            target.slopeTicks = 0;        // 0.9.80 的出厂默认，不是用户选择 → 归到新默认
-        } else if (from.slopeTicks >= 0 && from.slopeTicks <= 100) {
-            target.slopeTicks = from.slopeTicks;
-        } else {
-            target.slopeTicks = 0;        // 越界 / 旧值 -1 → 新默认（纯矩形，不斜）
-        }
+        //
+        // 【2026-10-31】越界值的处置交给末尾的「统一夹取」：它按字段表的区间夹到**最近端点**
+        // （-1 → 0、999 → 100）。原来这里是「越界一律回落 0」，是所有数值字段里唯一的例外；
+        // 面板侧的预设夹回一直是「夹到端点」，两条入口因此对 999 给出不同结果。
+        target.slopeTicks = (from.slopeTicks == 82) ? 0 : from.slopeTicks;
 
         target.diagLogging = from.diagLogging;
         target.multiCursorNoGlow = from.multiCursorNoGlow;
-        // 范围 clamp 与 loadState 其他数值字段一致（越界值不能进运行期）
-        target.cursorWidthPx = clamp(from.cursorWidthPx, 1, 5);
-        target.cursorHeightRatio = clamp(from.cursorHeightRatio, 0.3f, 1.0f);
+        target.cursorWidthPx = from.cursorWidthPx;
+        target.cursorHeightRatio = from.cursorHeightRatio;
         target.rgbGradient = from.rgbGradient;
+
+        // ==================== 统一夹取（区间只来自字段表）====================
+        //
+        // 【为什么放在最后、为什么遍历字段表】区间是「这个字段的合法取值范围」这一数据契约，
+        // 唯一来源是 SettingsField 每个字段自己的 .range(lo, hi)。本方法不再出现任何
+        // (lo, hi) 字面量 —— 否则就是同一语义的第二份定义（纪律四-J 第 2 条）。
+        //
+        // 保留在上面、<b>不属于区间</b>的几处特殊语义：
+        //   · trailMode 的 null 回落、两个预设下标越界回落（依赖数组长度，不是数值量程）；
+        //   · slopeTicks == 82 的一次性迁移（历史常量）；
+        //   · targetFps 的白名单（setter 自带 125/144 校验，不是连续区间）。
+        for (SettingsField f : SettingsField.FIELDS) {
+            f.clampStateToRange(target);
+        }
 
         state = target;
 
@@ -785,10 +798,6 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
 
     // ==================== 小工具 ====================
 
-    private static int clamp(int v, int lo, int hi) {
-        return v < lo ? lo : (v > hi ? hi : v);
-    }
-
     private static float clamp(float v, float lo, float hi) {
         // NaN 会同时绕过两个比较，必须单独处理：否则 NaN 会进绘制路径
         if (Float.isNaN(v)) {
@@ -798,24 +807,26 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
     }
 
     /**
-     * 颜色串校验：非 {@code #RRGGBB} 的一律退回 {@link NeovideConfig} 里的默认值。
+     * 颜色串校验：不合法的颜色串一律退回 {@link NeovideConfig} 里的默认值。
      *
      * <p>为什么不能放过坏值：{@code NeovideColors.parse} 对非法串<b>静默返回黑色</b> ——
      * 用户的拖尾会毫无提示地变黑，比"用回默认色"难排查得多。
+     *
+     * <p><b>合法性判据只有一份（U-3，2026-10-31）</b>：直接复用
+     * {@link SettingsField#isValidHexColor(String)}，接受 {@code #RRGGBB} <b>与</b>
+     * {@code #RRGGBBAA}。原来这里自带一套「只收 7 位」的规则，与字段表那条
+     * （收 7/9 位）分家 —— 后果是 9 位 {@code #RRGGBBAA} <b>应用后能生效、重启被打回默认色</b>，
+     * 用户看到的是「颜色自己变回去了」，而两条校验各自都「没错」。
+     *
+     * <p><b>9 位的语义</b>（用户 2026-10-30 拍板）：按 {@code #RRGGBBAA} 解释，末两位是 alpha，
+     * 由 {@code NeovideColors.parse} 与 {@code tailOpacity} 相乘 —— 那条解析本来就按
+     * {@code RR GG BB AA} 读，所以这里只需放开入口，<b>不动绘制语义</b>。
      */
     private static String sanitizeColor(String value, String fallback) {
-        if (value == null) {
+        if (!SettingsField.isValidHexColor(value)) {
             return fallback;
         }
         String v = value.trim();
-        if (v.length() != 7 || v.charAt(0) != '#') {
-            return fallback;
-        }
-        for (int i = 1; i < 7; i++) {
-            if (Character.digit(v.charAt(i), 16) < 0) {
-                return fallback;
-            }
-        }
         return "#" + v.substring(1).toUpperCase(java.util.Locale.ROOT);
     }
 

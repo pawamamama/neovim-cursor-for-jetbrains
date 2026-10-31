@@ -402,36 +402,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
     }
 
-    private static final int DELAY_MIN = 0;
-    private static final int DELAY_MAX = 500;
     private static final int DELAY_STEP = 50;
 
-    private static final int FADE_MIN = 0;
-    private static final int FADE_MAX = 1000;
     private static final int FADE_STEP = 25;
 
-    private static final int PCT_MIN = 0;
-    private static final int PCT_MAX = 100;
     private static final int PCT_STEP = 5;
 
-    private static final int LAYERS_MIN = 1;
-    private static final int LAYERS_MAX = 12;
     private static final int LAYERS_STEP = 1;
 
-    private static final int BLUR_MIN = 5;
-    private static final int BLUR_MAX = 60;
-    private static final int BLUR_STEP = 5;
-
-    private static final int STRETCH_MIN = 10;
-    private static final int STRETCH_MAX = 80;
     private static final int STRETCH_STEP = 5;
 
-    private static final int ANIM_MIN = 5;
-    private static final int ANIM_MAX = 35;
     private static final int ANIM_STEP = 1;
 
-    private static final int SHORT_MIN = 2;
-    private static final int SHORT_MAX = 25;
     private static final int SHORT_STEP = 1;
 
     /**
@@ -445,115 +427,155 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      *
      * <p><b>面板视觉顺序</b>由 {@code build*Group} 里各 {@code addSlider(...)} 的
      * 调用顺序决定，与本数组顺序无关。
+     *
+     * <p><b>端点不在这里写（2026-10-31 校验下沉）</b>：每条刻度的 {@code [min,max]}
+     * 由 {@link SettingsField} 该字段自己的区间<b>导出</b>（见 {@link #spec}），
+     * 本类不再保留任何端点字面量。理由：量程是数据契约，唯一来源必须是字段表；
+     * 面板里再抄一份，就是「同一语义存在于两处」——下沉前的 13 个字段 × 2 个端点
+     * 共 26 个数字，正是「改了字段忘了改滑块」这类缺陷的温床。
      */
-    private static final SliderSpec[] SPECS = {
-            // 1. 淡出前保持时长：刻度 = 毫秒
-            new SliderSpec("cursorDisappearDelay", DELAY_MIN, DELAY_MAX, DELAY_STEP, " ms",
-                    s -> s.cursorDisappearDelay,
-                    (s, v) -> s.cursorDisappearDelay = v,
-                    (c, v) -> v + " ms",
-                    v -> String.valueOf(v)),
+    private static final SliderSpec[] SPECS = buildSpecs();
 
-            // 2. 淡出时长：刻度 / 1000f = 秒
-            new SliderSpec("cursorFadeOutDuration", FADE_MIN, FADE_MAX, FADE_STEP, " ms",
-                    s -> Math.round(s.cursorFadeOutDuration * 1000f),
-                    (s, v) -> s.cursorFadeOutDuration = v / 1000f,
-                    (c, v) -> v + " ms",
-                    v -> String.valueOf(v)),
+    /**
+     * 由字段表的区间导出一条滑块规格。
+     *
+     * <p>做法：把字段区间的两个端点原始值分别写进一个临时 {@code State}，
+     * 再用该字段自己的 {@code readTick} 换算成刻度。两个端点<b>取小/取大排序</b> ——
+     * 有的刻度是反的（{@code shadowBlurFactor}：锐度 0 = 外扩 0.60、锐度 100 = 外扩 0.05），
+     * 排序后 {@code JSlider} 的 min/max 才是合法的。
+     */
+    private static SliderSpec spec(String key, int step, String unitSuffix,
+                                   java.util.function.ToIntFunction<NeovideCursorSettings.State> readTick,
+                                   java.util.function.BiConsumer<NeovideCursorSettings.State, Integer> writeTick,
+                                   java.util.function.BiFunction<NeovideCursorConfigurable, Integer, String> valueText,
+                                   IntFunction<String> tickText) {
+        SettingsField f = SettingsField.byKey(key);
+        if (f == null || !f.hasRange()) {
+            // 宁可类加载时立刻炸，也不要静默生成一个没有量程的滑块 ——
+            // 那会让越界值绕过唯一一层校验（与 loadState 的区间不再是同一份）。
+            throw new IllegalStateException(
+                    "SPECS 的字段 " + key + " 在字段表里没有区间：量程只有一份，端点必须由它导出");
+        }
+        int t1 = readTick.applyAsInt(stateWith(f, f.min));
+        int t2 = readTick.applyAsInt(stateWith(f, f.max));
+        return new SliderSpec(key, Math.min(t1, t2), Math.max(t1, t2), step, unitSuffix,
+                readTick, writeTick, valueText, tickText);
+    }
 
-            // 3. 拖尾不透明度：刻度 / 100f
-            new SliderSpec("tailOpacity", PCT_MIN, PCT_MAX, PCT_STEP, "",
-                    s -> Math.round(s.tailOpacity * 100f),
-                    (s, v) -> s.tailOpacity = v / 100f,
-                    (c, v) -> fmt2(v / 100f),
-                    v -> fmt2(v / 100f)),
+    /** 造一个只有这个字段被写成 {@code raw} 的临时 State（{@link #spec} 求端点用）。 */
+    private static NeovideCursorSettings.State stateWith(SettingsField f, double raw) {
+        NeovideCursorSettings.State probe = new NeovideCursorSettings.State();
+        f.writeRaw(probe, raw);
+        return probe;
+    }
 
-            // 4. 辉光峰值不透明度：刻度 / 100f
-            new SliderSpec("glowOpacity", PCT_MIN, PCT_MAX, PCT_STEP, "",
-                    s -> Math.round(s.glowOpacity * 100f),
-                    (s, v) -> s.glowOpacity = v / 100f,
-                    (c, v) -> fmt2(v / 100f),
-                    v -> fmt2(v / 100f)),
+    private static SliderSpec[] buildSpecs() {
+        java.util.List<SliderSpec> out = new java.util.ArrayList<>();
 
-            // 5. 辉光层数：刻度 = 层数
-            new SliderSpec("glowLayers", LAYERS_MIN, LAYERS_MAX, LAYERS_STEP, " 层",
-                    s -> s.glowLayers,
-                    (s, v) -> s.glowLayers = v,
-                    (c, v) -> v + " 层",
-                    v -> String.valueOf(v)),
+        // 1. 淡出前保持时长：刻度 = 毫秒
+        out.add(spec("cursorDisappearDelay", DELAY_STEP, " ms",
+                s -> s.cursorDisappearDelay,
+                (s, v) -> s.cursorDisappearDelay = v,
+                (c, v) -> v + " ms",
+                v -> String.valueOf(v)));
 
-            // 6. 辉光锐度（0.9.6 / M6）：刻度 **0..100 = 锐度**，存储仍是 shadowBlurFactor（外扩 0.05..0.60）。
-            //    0 ⇒ 外扩 0.60（最柔）、100 ⇒ 外扩 0.05（最锐）—— 向右拖 = 更锐，方向符合直觉。
-            //    为什么不做成第二个滑块：那会多一个「同一物理量的两个旋钮」，用户不知道听谁的；
-            //    而「锐度」正是用户说「高对比」时的直觉语义（外扩窄 = 边缘锐）。
-            new SliderSpec("shadowBlurFactor", 0, 100, 1, "",
-                    s -> sharpnessOf(s.shadowBlurFactor),
-                    (s, v) -> s.shadowBlurFactor = blurOfSharpness(v),
-                    (c, v) -> "锐 " + v + "（外扩 " + fmt2(blurOfSharpness(v)) + "）",
-                    v -> v == 0 ? "柔" : (v == 100 ? "锐" : String.valueOf(v))),
+        // 2. 淡出时长：刻度 / 1000f = 秒
+        out.add(spec("cursorFadeOutDuration", FADE_STEP, " ms",
+                s -> Math.round(s.cursorFadeOutDuration * 1000f),
+                (s, v) -> s.cursorFadeOutDuration = v / 1000f,
+                (c, v) -> v + " ms",
+                v -> String.valueOf(v)));
 
-            // 7. 拖尾密度：刻度 / 100f
-            new SliderSpec("trailSize", PCT_MIN, PCT_MAX, PCT_STEP, "",
-                    s -> Math.round(s.trailSize * 100f),
-                    (s, v) -> s.trailSize = v / 100f,
-                    (c, v) -> fmt2(v / 100f),
-                    v -> fmt2(v / 100f)),
+        // 3. 拖尾不透明度：刻度 / 100f
+        out.add(spec("tailOpacity", PCT_STEP, "",
+                s -> Math.round(s.tailOpacity * 100f),
+                (s, v) -> s.tailOpacity = v / 100f,
+                (c, v) -> fmt2(v / 100f),
+                v -> fmt2(v / 100f)));
 
-            // 8. 拖尾拉伸强度：刻度 / 10f = 倍率（标签要显示派生时长，故用实例方法）
-            new SliderSpec("stretchRatioK", STRETCH_MIN, STRETCH_MAX, STRETCH_STEP, "",
-                    s -> Math.round(s.stretchRatioK * 10f),
-                    (s, v) -> s.stretchRatioK = v / 10f,
-                    (c, v) -> c.stretchText(v / 10f),
-                    v -> String.format(Locale.ROOT, "%.1f×", v / 10f)),
+        // 4. 辉光峰值不透明度：刻度 / 100f
+        out.add(spec("glowOpacity", PCT_STEP, "",
+                s -> Math.round(s.glowOpacity * 100f),
+                (s, v) -> s.glowOpacity = v / 100f,
+                (c, v) -> fmt2(v / 100f),
+                v -> fmt2(v / 100f)));
 
-            // 8b. 斜度（0.9.79 拆自 stretchRatioK 的第二个职责）
-            //
-            // 刻度 -1 = 「沿用拉伸强度」（默认，升级不掉观感）；
-            // 0 = 四角等速（纯矩形）；100 = 极端梯度。
-            //
-            // 拖动时把 -1「点亮」成实际值：用户一旦碰它就是要覆盖 k 的推导。
-            new SliderSpec("slopeTicks", 0, 100, 5, "",
-                    s -> s.slopeTicks,
-                    (s, v) -> s.slopeTicks = v,
-                    (c, v) -> v + "%",
-                    v -> v + "%"),
+        // 5. 辉光层数：刻度 = 层数
+        out.add(spec("glowLayers", LAYERS_STEP, " 层",
+                s -> s.glowLayers,
+                (s, v) -> s.glowLayers = v,
+                (c, v) -> v + " 层",
+                v -> String.valueOf(v)));
 
-            // 9. 跨行动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
-            new SliderSpec("animationLength", ANIM_MIN, ANIM_MAX, ANIM_STEP, " s",
-                    s -> Math.round(s.animationLength * 100f),
-                    (s, v) -> s.animationLength = v / 100f,
-                    (c, v) -> fmt2(v / 100f) + " s",
-                    v -> fmt2(v / 100f)),
+        // 6. 辉光锐度（0.9.6 / M6）：刻度 **0..100 = 锐度**，存储仍是 shadowBlurFactor（外扩 0.05..0.60）。
+        //    0 ⇒ 外扩 0.60（最柔）、100 ⇒ 外扩 0.05（最锐）—— 向右拖 = 更锐，方向符合直觉。
+        //    端点由字段区间 (0.05, 0.60) 反向换算得到，排序后仍是 {0, 100}。
+        out.add(spec("shadowBlurFactor", 1, "",
+                s -> sharpnessOf(s.shadowBlurFactor),
+                (s, v) -> s.shadowBlurFactor = blurOfSharpness(v),
+                (c, v) -> "锐 " + v + "（外扩 " + fmt2(blurOfSharpness(v)) + "）",
+                v -> v == 0 ? "柔" : (v == 100 ? "锐" : String.valueOf(v))));
 
-            // 10. 短动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
-            new SliderSpec("shortAnimationLength", SHORT_MIN, SHORT_MAX, SHORT_STEP, " s",
-                    s -> Math.round(s.shortAnimationLength * 100f),
-                    (s, v) -> s.shortAnimationLength = v / 100f,
-                    (c, v) -> fmt2(v / 100f) + " s",
-                    v -> fmt2(v / 100f)),
+        // 7. 拖尾密度：刻度 / 100f
+        out.add(spec("trailSize", PCT_STEP, "",
+                s -> Math.round(s.trailSize * 100f),
+                (s, v) -> s.trailSize = v / 100f,
+                (c, v) -> fmt2(v / 100f),
+                v -> fmt2(v / 100f)));
 
-            // 11. 输入平滑：刻度 = 百分比（0.9.6 / M4 新增）。它只压平短跳的四角梯度，
-            // 不改任何总时长 —— 派生公式见 NeovideCursorSettings#deriveTrailFactors(float, float)。
-            new SliderSpec("typingSmoothness", PCT_MIN, PCT_MAX, PCT_STEP, " %",
-                    s -> Math.round(s.typingSmoothness * 100f),
-                    (s, v) -> s.typingSmoothness = v / 100f,
-                    (c, v) -> v + " %",
-                    v -> v + "%"),
+        // 8. 拖尾拉伸强度：刻度 / 10f = 倍率（标签要显示派生时长，故用实例方法）
+        out.add(spec("stretchRatioK", STRETCH_STEP, "",
+                s -> Math.round(s.stretchRatioK * 10f),
+                (s, v) -> s.stretchRatioK = v / 10f,
+                (c, v) -> c.stretchText(v / 10f),
+                v -> String.format(Locale.ROOT, "%.1f×", v / 10f)));
 
-            // ---- 12. 光标宽度（1–5 px）----
-            new SliderSpec("cursorWidthPx", 1, 5, 1, " px",
-                    s -> s.cursorWidthPx,
-                    (s, v) -> s.cursorWidthPx = v,
-                    (c, v) -> v + " px",
-                    v -> String.valueOf(v)),
+        // 8b. 斜度（0.9.79 拆自 stretchRatioK 的第二个职责）：0 = 四角等速（纯矩形），
+        // 100 = 极端梯度。区间端点在字段表里。
+        out.add(spec("slopeTicks", 5, "",
+                s -> s.slopeTicks,
+                (s, v) -> s.slopeTicks = v,
+                (c, v) -> v + "%",
+                v -> v + "%"));
 
-            // ---- 13. 光标高度（30–100 % 行高）----
-            new SliderSpec("cursorHeightRatio", 30, 100, 10, " %",
-                    s -> Math.round(s.cursorHeightRatio * 100f),
-                    (s, v) -> s.cursorHeightRatio = v / 100f,
-                    (c, v) -> v + " %",
-                    v -> v + "%"),
-    };
+        // 9. 跨行动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
+        out.add(spec("animationLength", ANIM_STEP, " s",
+                s -> Math.round(s.animationLength * 100f),
+                (s, v) -> s.animationLength = v / 100f,
+                (c, v) -> fmt2(v / 100f) + " s",
+                v -> fmt2(v / 100f)));
+
+        // 10. 短动画时长：刻度 / 100f = 秒（0.9.5 新增可调，契约 §7.1）
+        out.add(spec("shortAnimationLength", SHORT_STEP, " s",
+                s -> Math.round(s.shortAnimationLength * 100f),
+                (s, v) -> s.shortAnimationLength = v / 100f,
+                (c, v) -> fmt2(v / 100f) + " s",
+                v -> fmt2(v / 100f)));
+
+        // 11. 输入平滑：刻度 = 百分比（0.9.6 / M4 新增）。它只压平短跳的四角梯度，
+        // 不改任何总时长 —— 派生公式见 NeovideCursorSettings#deriveTrailFactors(float, float)。
+        out.add(spec("typingSmoothness", PCT_STEP, " %",
+                s -> Math.round(s.typingSmoothness * 100f),
+                (s, v) -> s.typingSmoothness = v / 100f,
+                (c, v) -> v + " %",
+                v -> v + "%"));
+
+        // ---- 12. 光标宽度 ----
+        out.add(spec("cursorWidthPx", 1, " px",
+                s -> s.cursorWidthPx,
+                (s, v) -> s.cursorWidthPx = v,
+                (c, v) -> v + " px",
+                v -> String.valueOf(v)));
+
+        // ---- 13. 光标高度 ----
+        out.add(spec("cursorHeightRatio", 10, " %",
+                s -> Math.round(s.cursorHeightRatio * 100f),
+                (s, v) -> s.cursorHeightRatio = v / 100f,
+                (c, v) -> v + " %",
+                v -> v + "%"));
+
+        return out.toArray(new SliderSpec[0]);
+    }
 
     // ==================== 预览副本 + 基线 + 抑制标志 ====================
 
@@ -2107,7 +2129,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 两条路径语义必须一致，否则「菜单切预设安全、面板切预设危险」。
             // 【runtimeSwitch 重构】跳过清单已搬进字段自身（f.runtimeSwitch），
             // 调用方不再传数组，两条路径也不可能再各自维护一份。
-            int applied = SettingsField.restoreSkipping(pending, e.snapshot);
+            SettingsField.RestoreReport report =
+                    SettingsField.restoreSkippingReported(pending, e.snapshot);
+            int applied = report.applied;
             // 【P-H-3，2026-10-31 第 3 批审查】applied == 0 = 这条快照一个字段都解不出来
             // （整条损坏）。此时若照写 animCustomName，下拉会显示「已切换到 X」，
             // 而实际一个参数都没变 —— 显示层撒谎。
@@ -2134,25 +2158,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 }
                 return;
             }
-            // 【P-M-5，2026-10-31】快照里的数值必须过一遍量程。
-            // 上面刚做的 restoreSkipping 走的是 SettingsField.decode，它只拒 NaN/Inf
-            // 与解析失败，**不 clamp**；真正的 clamp 只在下次启动的 loadState 里发生。
-            // 于是手改/旧版写下的 glowLayers=99 会：进 pending → 应用 → 落盘 99，
-            // 同一会话里滑块显示 12、输入框显示 99（syncAllControlsFromPending 写的是 exact），
-            // 重启后 loadState 悄悄改回 12 —— 用户看到「值自己变了」。
-            // 这里补上第二条入口的同一套规则：越界就夹回，并留日志 + 提示。
-            java.util.List<String> clamped = clampPresetNumerics(pending);
-            if (!clamped.isEmpty()) {
-                // 【自愈：把夹回值写回这一条自定义预设】（2026-10-31 审查实测）
-                // 不回写的话，用户在这个坏预设上**每点一次下拉就弹一次模态警告**，
-                // 直到他手动拖一次滑块（那才会触发 afterPendingEdited 把快照重写）。
-                // 「站在自定义预设上编辑 → 快照实时保存」本来就是这条路径的既定语义
-                // （见 afterPendingEdited 分支 A），而夹回正是一次由用户操作引起的编辑。
-                // 三参 put 会保留父引用，不会把「我是谁的孩子」改掉。
+            // 【P-M-5 / U-1，2026-10-31 校验下沉】快照里的数值**已经由下沉层夹回**：
+            // SettingsField.decode 现在按字段自己的区间夹取（与 loadState 同一份区间）。
+            // 面板不再自己遍历 SPECS 算第二遍 —— 这里只消费它返回的报告：
+            //   ① 有字段被夹回 → 自愈回写快照 + 给用户一行提示；
+            //   ② 「夹了哪些」由唯一一层判定，两条入口（面板 / Tools）不可能给出不同答案。
+            //
+            // 自愈回写的理由不变（2026-10-31 审查实测）：不回写的话，用户在这个坏预设上
+            // **每点一次下拉就弹一次模态警告**，直到他手动拖一次滑块。
+            // 「站在自定义预设上编辑 → 快照实时保存」本来就是这条路径的既定语义，
+            // 而夹回正是一次由用户操作引起的编辑。三参 put 会保留父引用。
+            if (!report.clamped.isEmpty()) {
                 pending.customAnimPresets = CustomPresets.put(
                         pending.customAnimPresets, e.name, SettingsField.snapshot(pending));
             }
-            reportClampedNumerics(e.name, clamped);
+            reportClampedNumerics(e.name, report.clamped);
             pending.animCustomName = e.name;
         }
         syncAllControlsFromPending();
@@ -2646,7 +2666,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             } else {
                 // 目标是另一个自定义预设 → 写它**当前**的快照（继承语义，用户 2026-10-29 拍板）。
                 // 用 restoreSkipping：快照里的设备开关不该被恢复动作改写。
-                int applied = SettingsField.restoreSkipping(pending, base.custom.snapshot);
+                SettingsField.RestoreReport report =
+                        SettingsField.restoreSkippingReported(pending, base.custom.snapshot);
+                int applied = report.applied;
                 // 【P-H-3 同一缺陷的第二处】整条快照损坏时「恢复」其实什么都没做，
                 // 但按钮与下拉仍然显示一切正常 —— 必须告诉用户，并保持原值不动。
                 if (applied == 0) {
@@ -2655,9 +2677,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                                     + "恢复未执行，当前设置保持不变。", false);
                     return;
                 }
-                // 【P-M-5，2026-10-31】与 onAnimPresetPicked 的自定义分支同一条判据：
-                // 恢复出来的数值同样要过量程（restoreSkipping 只做类型校验，不 clamp）。
-                reportClampedNumerics(base.custom.name, clampPresetNumerics(pending));
+                // 【P-M-5 / U-1，2026-10-31 校验下沉】与 onAnimPresetPicked 的自定义分支
+                // 同一条判据：越界值由下沉层（SettingsField.decode）按字段区间夹回，
+                // 这里只消费报告 —— 面板不再自己算第二遍。
+                reportClampedNumerics(base.custom.name, report.clamped);
             }
 
             // 【不动 animCustomName、不动 customAnimPresets】
@@ -2719,97 +2742,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     // ==================== 快照校验（P-M-5 / P-M-6 / P-M-3，2026-10-31）====================
 
     /**
-     * 把 {@code s} 里越界的数值字段夹回面板量程。
-     *
-     * <p><b>这是 P-M-5 在「面板路径」的唯一实现。</b>另有一条入口 —— Tools 菜单的
-     * {@code ui/CursorPresetApplier.applyCustomAnimPreset()} —— 不在本轮白名单内，
-     * <b>仍带同一缺陷</b>（已登记在 `plans/batch3-fix2.md` §七「已知未修」）。
-     * 不要把这句读成「全项目已修完」。
-     *
-     * <h2>它解决的是什么</h2>
-     *
-     * <p>同一个字段有两条入口：启动时的 {@code loadState()}（有 clamp）与
-     * 预设还原的 {@code SettingsField.decode()}（<b>只做类型校验，不 clamp</b>）。
-     * 一条设防一条不设防，于是手改/旧版写下的 {@code glowLayers=99} 会一路进 State、
-     * 进 CONFIG、落盘；直到下次启动才被 loadState 悄悄改回 12 —— 用户看到「值自己变了」。
-     *
-     * <h2>为什么量程取自 {@link #SPECS} 而不是另写一张表</h2>
-     *
-     * <p>{@code SPECS} 就是面板构建滑块时用的那张表：它已经携带了每个数值字段的
-     * 合法刻度区间（{@code min/max}）与「原始值 ↔ 刻度」的双向换算
-     * （{@code readTick/writeTick}）。再写一张量程表就是「同一语义存在于两处」，
-     * 正是纪律四-J 第 2 条要消灭的形态。
-     *
-     * <p>两张表的量程**逐项一致**（`plans/batch3-fix2.md` §0.2 有对照表），
-     * 所以「面板夹回的值」与「loadState 夹回的值」是一样的；{@code VBatch3Medium} 的 N-1
-     * 直接拿 {@code loadState} 当 oracle 验这一点，不抄任何数字。
-     *
-     * <h2>为什么用「原始值 vs 端点原始值」比较，而不是直接比刻度</h2>
-     *
-     * <p>有两处会骗人：
-     * <ul>
-     *   <li>{@code shadowBlurFactor} 的刻度是<b>反的</b>（锐度 0 = 最柔 0.60，
-     *       锐度 100 = 最锐 0.05），且 {@code sharpnessOf} 自己就把输入夹进了 0..100 ——
-     *       只比刻度的话，一个 1e9 的外扩幅度会「看起来合法」而永远不被修正。</li>
-     *   <li>{@code animationLength} 等字段的刻度是「秒 × 100」，浮点往返会有末位差。
-     *       拿原始值比端点，比较的是同一批换算结果，没有第二套舍入。</li>
-     * </ul>
-     *
-     * <h2>为什么是 clamp 而不是「整条预设拒绝」</h2>
-     *
-     * <p>条目名就叫「快照不 clamp」，而 {@code loadState} 的语义也是 clamp 到合法区间。
-     * 整条拒绝会让一份「只有一个字段越界」的老预设<b>全部失效</b>，那是用户可感知的
-     * 行为变化。clamp 之后「应用的值 == 重启后读回的值」，用户再也看不到「值自己变了」。
-     *
-     * @return 被夹过的字段名（按 {@code SPECS} 顺序；空列表 = 全都合法）
-     */
-    private static java.util.List<String> clampPresetNumerics(NeovideCursorSettings.State s) {
-        java.util.List<String> clamped = new java.util.ArrayList<>();
-        for (SliderSpec sp : SPECS) {
-            SettingsField f = SettingsField.byKey(sp.key);
-            if (f == null || !(f.readState(s) instanceof Number)) {
-                continue;                       // 理论上不会发生：SPECS 与 FIELDS 同源
-            }
-            // 【必须跳过运行环境开关】（2026-10-31 审查）`cursorWidthPx` / `cursorHeightRatio`
-            // 也在 SPECS 里（它们有滑块），但它们是**设备级**开关，预设还原根本无权改
-            // （restoreSkipping 整段跳过，见 SettingsField.runtimeSwitch 的注释）。
-            // 不跳过的话，一份值越界的 pending 会在「切一次动画预设」时被悄悄改写这些字段 ——
-            // 与「预设不得改设备开关」这条不变量正好相反。
-            if (f.runtimeSwitch) {
-                continue;
-            }
-            double raw = ((Number) f.readState(s)).doubleValue();
-            double rawAtMin = rawAtTick(sp, f, sp.min);
-            double rawAtMax = rawAtTick(sp, f, sp.max);
-            if (Double.isNaN(raw) || Double.isNaN(rawAtMin) || Double.isNaN(rawAtMax)) {
-                // 读不出端点就不夹：猜一个区间去改用户的值，比不改更糟。
-                continue;
-            }
-            double lo = Math.min(rawAtMin, rawAtMax);
-            double hi = Math.max(rawAtMin, rawAtMax);
-            if (raw >= lo && raw <= hi) {
-                continue;                       // 合法：一位都不动（观感零变化）
-            }
-            // 越界方向决定夹到哪一端 —— 端点原始值可能是反序的（锐度就是这样）。
-            boolean minIsLow = rawAtMin <= rawAtMax;
-            int targetTick = (raw < lo)
-                    ? (minIsLow ? sp.min : sp.max)
-                    : (minIsLow ? sp.max : sp.min);
-            sp.writeTick.accept(s, targetTick);
-            clamped.add(sp.key);
-        }
-        return clamped;
-    }
-
-    /** 把刻度 {@code tick} 写进一个临时 State 再读回原始值 —— 只为拿端点，不改 {@code s}。 */
-    private static double rawAtTick(SliderSpec sp, SettingsField f, int tick) {
-        NeovideCursorSettings.State probe = new NeovideCursorSettings.State();
-        sp.writeTick.accept(probe, tick);
-        Object v = f.readState(probe);
-        return v instanceof Number ? ((Number) v).doubleValue() : Double.NaN;
-    }
-
-    /**
      * 把「夹回」这件事告诉用户与日志（P-M-5）。
      *
      * <p><b>为什么不能只夹不报</b>：夹回本质上是「用户存的值被改了」。静默改值正是
@@ -2837,46 +2769,29 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /**
      * 把自定义颜色预设的快照写进 {@code s}。
      *
-     * <p><b>这是 P-M-6 / P-M-3 在「面板路径」的唯一判据。</b>Tools 菜单的
-     * {@code ui/CursorPresetApplier.applyCustomColorPreset()} 同样不在本轮白名单内，
-     * <b>仍只判 {@code hex == null}、不校验 HEX</b>（已登记在 `plans/batch3-fix2.md` §七）。
+     * <p><b>校验已下沉（U-2，2026-10-31）</b>：真正的判据在
+     * {@link SettingsField#restoreColorSnapshot}，与 Tools 菜单那条入口<b>同一个实现</b>。
+     * 这里只做一件事：把下沉层的结果翻译成<b>给用户看的中文原因</b>
+     * （设置层不该产出界面文案，界面层不该重复判定合法性）。
      *
-     * <h2>为什么要单独一个函数</h2>
-     *
-     * <p>颜色快照有<b>两条</b>入口（下拉选中、恢复默认值），原来各写一遍
-     * {@code parseColorSnapshot} + 两个赋值，于是「坏快照怎么办」也有两份答案：
-     * 一条只刷新，另一条连刷新都没有，两条都不出声。
-     *
-     * <h2>校验口径从哪来</h2>
-     *
-     * <p>直接调 {@link SettingsField#isValidHexColor(String)} —— 就是动画快照那条路径
-     * （{@code SettingsField.decode} 的 HEX 分支）用的同一个函数，0.9.74 专为
-     * 「坏颜色流进绘制层变黑」加的那一个。这里不新写任何规则。
-     * 它接受 {@code #RRGGBB} 与 {@code #AARRGGBB}，所以 9 位 RGBA 仍然合法
-     * （本轮只挡「根本不是颜色」的串，不收紧口径）。
+     * <p>历史（保留作教材）：本方法曾经自己调 {@code isValidHexColor}，
+     * 而 Tools 菜单的 {@code applyCustomColorPreset} 只判 {@code hex == null} ——
+     * 同一份坏快照，面板拒绝、菜单照写，写入后绘制层解析失败 → 光标变黑。
+     * 「校验写在调用方」的代价就是每多一个入口就多一个洞。
      *
      * @return {@code null} = 已成功写入；否则是给用户看的失败原因
      */
     private static String applyColorSnapshot(NeovideCursorSettings.State s,
                                              CustomPresets.Entry e) {
-        String[] hex = CursorPresets.parseColorSnapshot(e.snapshot);
-        if (hex == null) {
-            return "的内容已损坏（缺少颜色字段）";
+        switch (SettingsField.restoreColorSnapshot(s, e.snapshot)) {
+            case OK:
+                return null;
+            case MISSING_FIELDS:
+                return "的内容已损坏（缺少颜色字段）";
+            case BAD_FORMAT:
+            default:
+                return "的颜色格式非法（不是 #RRGGBB / #RRGGBBAA）";
         }
-        // 【必须 trim 后再写】isValidHexColor 内部会 trim（它判的是「trim 后是否合法」），
-        // 而绘制层的 NeovideColors.parse **不 trim** —— 直接把原串写进 State 的话，
-        // 快照里一个 ` #123456`（前导空格）会：校验通过 → 落盘 → 绘制时认不出来 → 光标变黑。
-        // 动画快照那条路径（SettingsField.decode 的 HEX 分支）本来就是「trim 后再赋值」，
-        // 这里对齐同一口径。
-        String tail = hex[0].trim();
-        String shadow = hex[1].trim();
-        if (!SettingsField.isValidHexColor(tail) || !SettingsField.isValidHexColor(shadow)) {
-            return "的颜色格式非法（不是 #RRGGBB / #AARRGGBB）";
-        }
-        // 两个都合法才写 —— 「不写半套颜色」是这条路径从 0.9.x 起就有的承诺。
-        s.tailColor = tail;
-        s.shadowColor = shadow;
-        return null;
     }
 
     /** 当前颜色预设的「恢复默认值」目标（与 {@link #currentAnimBase()} 同构）。 */

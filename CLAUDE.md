@@ -63,8 +63,8 @@ do not hold back on token usage.
 ## 规模（实测 · 2026-10-31，命令见本节末尾）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    36 文件 / 20,178 行
-探针       tools/settings-probe/*.java        123 文件 / 30,605 行（108 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/    36 文件 / 20,547 行
+探针       tools/settings-probe/*.java        125 文件 / 31,690 行（110 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
 
@@ -103,7 +103,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         108 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank）/ **ALL PASS（0 失败）**
+探针         110 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback）/ **ALL PASS（0 失败）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）

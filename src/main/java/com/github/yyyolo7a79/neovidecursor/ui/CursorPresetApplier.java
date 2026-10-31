@@ -1,7 +1,9 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
 import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
+import com.github.yyyolo7a79.neovidecursor.settings.CustomPresets;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.github.yyyolo7a79.neovidecursor.settings.SettingsField;
 import com.intellij.openapi.diagnostic.Logger;
 
 /**
@@ -98,8 +100,7 @@ public final class CursorPresetApplier {
             return false;
         }
         NeovideCursorSettings.State s = svc.getState();
-        String snap = com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
-                .get(s.customAnimPresets, name);
+        String snap = CustomPresets.get(s.customAnimPresets, name);
         if (snap == null) {
             return false;                       // 名字不存在（可能在别处被删了）
         }
@@ -113,13 +114,17 @@ public final class CursorPresetApplier {
         // 这四个是「运行环境开关」，不是「观感参数」—— 不该被预设快照带走。
         // 【runtimeSwitch 重构】跳过清单已搬进字段自身（f.runtimeSwitch），
         // 调用方不再传数组 —— 判定标准见 SettingsField.runtimeSwitch 的 javadoc。
-        int applied = com.github.yyyolo7a79.neovidecursor.settings.SettingsField
-                .restoreSkipping(s, snap);
+        //
+        // 【U-1，2026-10-31 校验下沉】这里以前只拿到一个 applied 数字，而且**不 clamp**：
+        // 菜单选中一条 glowLayers=99 的预设 → 99 直接进 State 并落盘 → 重启被 loadState
+        // 夹回 12 →「值自己变了」。现在量程校验在 SettingsField.decode 里，与面板入口
+        // 走同一个实现；这里只消费它返回的报告（夹回了几项 / 拒绝了几项）。
+        SettingsField.RestoreReport report = SettingsField.restoreSkippingReported(s, snap);
+        int applied = report.applied;
         // 【H-2，2026-10-30】返回值以前被直接丢弃，于是「整条快照全坏」与「全部应用成功」
         // 在调用方看起来完全一样：都写名字、都落盘、都打「已应用」、都返回 true。
         // 用户看到的是「下拉说切成功了、日志说成功了，实际一个参数都没变」。
-        int total = com.github.yyyolo7a79.neovidecursor.settings.SettingsField
-                .PRESET_FIELDS.size();
+        int total = SettingsField.PRESET_FIELDS.size();
         if (applied == 0) {
             LOG.warn("neovide-cursor: 自定义预设 " + name
                     + " 里没有任何可应用的字段（快照可能已损坏），"
@@ -133,6 +138,16 @@ public final class CursorPresetApplier {
             // 只写「值非法」会把正常的向后兼容报成故障，维护者会去查不存在的问题。
             LOG.warn("neovide-cursor: 自定义预设 " + name + " 只应用了 "
                     + applied + "/" + total + " 项（缺失的键与非法值都保持当前值）");
+        }
+        if (!report.clamped.isEmpty()) {
+            // 夹回是「用户存的值被改了」，必须留痕 —— 否则就是这条缺陷的原始症状
+            // （重启后值自己变了，而日志里一个字都没有）。
+            LOG.warn("neovide-cursor: 自定义预设 " + name + " 里有 " + report.clamped.size()
+                    + " 个参数越界，已按合法区间夹回：" + String.join("、", report.clamped));
+        }
+        if (!report.rejected.isEmpty()) {
+            LOG.warn("neovide-cursor: 自定义预设 " + name + " 里有 " + report.rejected.size()
+                    + " 个参数类型非法，已保持当前值：" + String.join("、", report.rejected));
         }
         s.animCustomName = name;
         svc.persistQuietly();
@@ -216,14 +231,35 @@ public final class CursorPresetApplier {
             return false;
         }
         NeovideCursorSettings.State s = svc.getState();
-        String[] hex = CursorPresets.parseColorSnapshot(
-                com.github.yyyolo7a79.neovidecursor.settings.CustomPresets
-                        .get(s.customColorPresets, name));
-        if (hex == null) {
+        // 【U-2，2026-10-31 校验下沉】原来这里只判 `hex == null`，**不校验 HEX**：
+        // 菜单选中一条 tailColor=not-a-color 的预设 → 原样写进 State →
+        // 绘制层 NeovideColors.parse 解析失败 → **光标变黑**，零提示。
+        // 面板那条入口早就调 isValidHexColor 了 —— 同一份坏快照两条入口两种结果。
+        // 现在两边都走 SettingsField.restoreColorSnapshot（唯一判据）。
+        // 【L-1，2026-10-31 审查】「名字不存在」与「快照损坏」必须分开报：
+        // 前者是「这条预设可能在别处被删了」，后者是「你的数据坏了」。
+        // 合并成一句「内容已损坏」会让用户去重建一份其实完好、只是被删掉的数据 ——
+        // 动画那条入口（applyCustomAnimPreset）早就有独立分支，两条要一致。
+        String snap = CustomPresets.get(s.customColorPresets, name);
+        if (snap == null) {
+            LOG.warn("neovide-cursor: 自定义颜色预设 " + name
+                    + " 不存在（可能在别处被删了），本次不应用");
             return false;
         }
-        s.tailColor = hex[0];
-        s.shadowColor = hex[1];
+        switch (SettingsField.restoreColorSnapshot(s, snap)) {
+            case OK:
+                break;
+            case MISSING_FIELDS:
+                LOG.warn("neovide-cursor: 自定义颜色预设 " + name
+                        + " 的内容已损坏（缺少颜色字段），本次不应用、不写名字、不落盘");
+                return false;
+            case BAD_FORMAT:
+            default:
+                LOG.warn("neovide-cursor: 自定义颜色预设 " + name
+                        + " 的颜色格式非法（不是 #RRGGBB / #RRGGBBAA），"
+                        + "本次不应用、不写名字、不落盘");
+                return false;
+        }
         s.colorCustomName = name;
         svc.persistQuietly();
         NeovideCaretManager.applyConfig();

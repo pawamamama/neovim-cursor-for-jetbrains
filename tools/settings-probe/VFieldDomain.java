@@ -204,24 +204,33 @@ public final class VFieldDomain {
         }
     }
 
-    /** 把某个字段改到一个与当前不同的值。 */
+    /**
+     * 把某个字段改到一个与当前不同的值。
+     *
+     * <p><b>2026-10-31 改用 {@link SettingsField#writeRaw} 而不是 {@code decode}</b>：
+     * 校验下沉之后 {@code decode} 会按字段区间<b>夹回</b>，于是「当前值正好在端点」的字段
+     * （例如内置预设的 {@code tailOpacity=1.0}、{@code trailSize=1.0}）扰动 +0.01 会被夹回原值
+     * → 本方法看不出变化 → D-1 误判成「预设不写这个字段」。
+     * 夹具的职责是「改成一个不同的值」，不是「走一遍校验」；绕过校验才是它该做的事。
+     * <b>断言本身一个字没改。</b>
+     */
     private static void perturb(SettingsField f, NeovideCursorSettings.State s) {
         Object cur = f.readState(s);
         switch (f.kind) {
             case BOOL:
-                f.decode(s, Boolean.TRUE.equals(cur) ? "0" : "1");
+                f.writeRaw(s, !Boolean.TRUE.equals(cur));
                 break;
             case INT:
-                f.decode(s, String.valueOf(((Integer) cur) + 1));
+                f.writeRaw(s, ((Integer) cur) + 1);
                 break;
             case FLOAT:
-                f.decode(s, String.valueOf(((Float) cur) + 0.01f));
+                f.writeRaw(s, ((Float) cur) + 0.01f);
                 break;
             case HEX:
-                f.decode(s, "#123456".equalsIgnoreCase((String) cur) ? "#654321" : "#123456");
+                f.writeRaw(s, "#123456".equalsIgnoreCase((String) cur) ? "#654321" : "#123456");
                 break;
             case ENUM:
-                f.decode(s, "AFTERIMAGE");
+                f.writeRaw(s, com.github.yyyolo7a79.neovidecursor.core.NeovideConfig.TrailMode.AFTERIMAGE);
                 break;
             default:
                 break;
