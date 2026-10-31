@@ -87,8 +87,13 @@ import java.util.function.IntFunction;
 public final class NeovideCursorConfigurable extends BoundConfigurable
         implements SearchableConfigurable, ProbeFacade {
 
-    /** 配置页 id —— 必须是插件 id 前缀（官方原话 "The FQN should be based on the plugin id"）。 */
-    /** 0.9.7 起 fork 独立 id（与 plugin.xml 的 applicationConfigurable id 必须一致）。 */
+    /**
+     * 配置页 id。
+     *
+     * <p>必须是插件 id 前缀（官方原话 "The FQN should be based on the plugin id"）。
+     * 0.9.7 起用 fork 的独立 id —— 与 {@code plugin.xml} 的 {@code applicationConfigurable}
+     * 的 {@code id} 必须一致。
+     */
     public static final String ID = "com.pawamamama.neovidecursor.settings";
 
     /** 页面名称。**同时**写在 plugin.xml 的 displayName 里（平台取名字时不必实例化本类）。 */
@@ -110,6 +115,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private static final String PERSIST_FAILED_MESSAGE =
             "本次设置已应用到当前会话，但未能写入磁盘。"
             + "重启 IDE 后会恢复为上一次成功保存的值。";
+
+    /** 【P-M-1】apply() 中途抛出的标题。与落盘失败（P-C-1）是两种不同的失败，文案分开。 */
+    private static final String APPLY_FAILED_TITLE = "应用失败";
+
+    private static final String APPLY_FAILED_MESSAGE =
+            "设置没能完整写入，已回滚到应用前的状态。"
+            + "你的修改仍保留在面板里，可以再点一次「应用」。";
+
+    /** 【P-M-1】回滚后补写磁盘未确认时的文案 —— 不能再说「已回滚到应用前」而不提磁盘。 */
+    private static final String APPLY_FAILED_MESSAGE_DISK =
+            "设置没能完整写入，内存已回滚到应用前的状态。"
+            + "但回滚后的磁盘写入未确认 —— 重启 IDE 后可能仍是这次改动前的值，"
+            + "请再点一次「应用」。";
 
     /** 预设快照损坏时的标题（P-H-3）。 */
     private static final String PRESET_BROKEN_TITLE = "无法应用预设";
@@ -312,7 +330,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     private static final HyperlinkEventAction NO_LINK = HyperlinkEventAction.HTML_HYPERLINK_INSTANCE;
 
-    /** 下拉末项的动态后缀（0.9.6 / M5）：{基准预设名} + 本后缀。 */
     /** 「恢复为默认值」按钮的文案模板。 */
     private static final String RESTORE_TPL = "恢复为「%s」默认值";
 
@@ -733,6 +750,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private boolean paintDiag;
 
+    /**
+     * 探针专用（P-M-1）：在 A5.5 之后、落盘三态判断之前注入一次动作（通常抛异常）。
+     *
+     * <p>生产恒为 {@code null}，代价只是一次实例字段读。
+     */
+    private Runnable applyFaultForProbe;
+
+    /** 探针用（P-M-1）：注入一次 apply 中途故障；{@code null} = 拆除。 */
+    public void setApplyFaultForProbe(Runnable r) {
+        this.applyFaultForProbe = r;
+    }
+
     /** 「性能诊断」复选框组件本身。T3-2：它才是勾选状态的真相源（字段会陈旧）。 */
     private JBCheckBox paintDiagCheck;
 
@@ -864,14 +893,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     /**
-     * 把光标宽高推给两个预览窗 —— 拖动滑块时立即生效，不需要点「应用」。
+     * 把光标尺寸 / 渐变 / 彩虹三项推给三个预览窗 —— 拖动滑块时立即生效，不需要点「应用」。
+     *
+     * <p><b>名字为什么从 syncPreviewCursorSize 改过来（P-L-16）</b>：它经 {@code pushStyleTo}
+     * 推的不止尺寸，还有渐变与彩虹。旧名字与行为不符，正是纪律四-J ③「名字与行为不符 → 改名」。
      *
      * <p><b>为什么预览可以实时、编辑器不行</b>：预览是面板内部的 Swing 组件，
      * 改它不涉及任何持久化状态；而真实编辑器的光标尺寸是持久级配置，
      * 必须在点「应用 / OK」后才写进 State —— 这是面板的语义边界，不能被预览带偏。
      * 所以「实时」只到这里为止。
      */
-    private void syncPreviewCursorSize() {
+    private void syncPreviewStyle() {
         pushStyleTo(inlinePreview);
         pushStyleTo(crossPreview);
         pushStyleTo(glowPreview);
@@ -883,7 +915,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p><b>为什么抽成一个方法</b>：加第三个预览窗时，若沿用原来「每个预览各写一段」
      * 的写法，同一组三项调用要在三处复制。将来加第四个预览就会漏推其中一项，
      * 而「漏推」的症状正是本标签页要修的同类问题 —— 预览不跟随、用户盲调。
-     * 现在推送点只有这一处，加预览只需在 {@link #syncPreviewCursorSize()} 里加一行。
+     * 现在推送点只有这一处，加预览只需在 {@link #syncPreviewStyle()} 里加一行。
      *
      * <p>传 {@code null} 直接返回：三个预览都是懒创建，没建过的那个就是 null。
      */
@@ -912,7 +944,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         try {
             CursorPresets.ColorPreset p = CursorPresetApplier.matchColorPreset(pending);
             return p != null && p.rgbWash();
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
+            // 【P-L-11】吞了要留痕：将来 matchColorPreset 因字段改动抛异常时，
+            // 否则预览会永远走双拼/纯色且没有任何线索。
+            try {
+                LOG.warn("neovide-cursor: isRainbowSelected 判定失败，按非彩虹处理", t);
+            } catch (Throwable ignored) {
+                // 日志子系统不可用：不能反过来连累预览
+            }
             return false;
         }
     }
@@ -933,7 +972,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             return;
         }
         syncPreviewAnimation();
-        syncPreviewCursorSize();
+        syncPreviewStyle();
         previewConfig.tailColor = pending.tailColor;
         previewConfig.tailOpacity = pending.tailOpacity;
         previewConfig.useShadow = pending.useShadow;
@@ -989,6 +1028,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 构建面板是【程序化装载】，不是用户编辑 —— 期间禁止自动派生自定义预设。
         // 否则一份「与当前内置常量不同」的历史 state（例如刚被 Tools 改过）
         // 会在打开设置页时凭空多出一个副本，并让 isModified() 恒为真。
+        // 【P-M-9】保存前值：本方法可能被一条已处于抑制态的调用链嵌套进入，
+        // 硬置 false 会把外层标志清掉（嵌套后外层剩余语句被当成「用户编辑」）。
+        boolean prevDerive = suppressDerive;
         suppressDerive = true;
         try {
             // 契约 §3.4：平台可能只调 createPanel 不调 reset —— 所以这里也要开一次会话。
@@ -1014,7 +1056,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             colorPresetItems.addAll(colorPresetNames());
             colorPresetItems.add(CursorPresets.CUSTOM_COLOR_LABEL);   // 颜色不参与预设语义，末项只是兜底
 
-            // ---------- 6 个标签页 = 6 个内层 DialogPanel ----------
+            // ---------- 7 个标签页 = 7 个内层 DialogPanel ----------
             //
             // 【为什么是「每个标签页一个独立 DialogPanel」而不是「一个 DialogPanel 里
             //   塞 JTabbedPane + panel{...}」】
@@ -1128,7 +1170,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            // 登记之后，外层的 apply / reset / isModified 才会覆盖这 6 个内层。
+            // 登记之后，外层的 apply / reset / isModified 才会覆盖这 7 个内层。
             // 漏掉这一步的症状是「控件能改、点应用没反应」—— 与陷阱 2（字段接通了
             // ≠ 字段生效了）同类的静默失效，所以放在 return 之前且不可省略。
             outer.registerIntegratedPanel(tabMaster);
@@ -1140,7 +1182,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             outer.registerIntegratedPanel(tabDiag);
             return outer;
         } finally {
-            suppressDerive = false;
+            suppressDerive = prevDerive;      // 【P-M-9】恢复前值，嵌套时不清掉外层
         }
     }
 
@@ -1201,9 +1243,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 全部顶在最左（用户原话：「预设控件对齐可以吗，有空间」）。
         //
         // 【现在】① 收进 group（组自带一张网格）；② 每行声明 RowLayout.PARENT_GRID
-        // （平台定义：整行参与父网格，用于「列对齐的表单」）；③ 动作行最前面放一个
-        // 空 cell 占住标签列，第一个按钮才会落到「下拉」那一列。
-        // 实测列位（离线原型）：标签 21 / 下拉 77 / 恢复与动作首列 180 / 次列 280 / 末列 367。
+        // （平台定义：整行参与父网格，用于「列对齐的表单」）；③ 动作行最前面放一个空 cell。
+        //
+        // 【这个空 cell 占的是「下拉」列，不是「标签」列（P-L-3 更正）】
+        // {@code row("")} 已经自动补了一个标签列 cell，所以后面这个显式 {@code cell()}
+        // 落在第二列（下拉列）。**不要删它** —— 删掉后三个按钮会整体左移一列。
+        // 实测列位（plans/panel-refactor.md:276）：标签 21 / 下拉 97 /
+        // 恢复与动作首列 220（按钮与「恢复默认值」同列）。
         panel.group("预设", true, g -> {
             // 动画预设：下拉 + 它自己的「恢复默认值」（一键恢复的语义不变：
             // 把该预设已保存的值重新写进 pending，落库仍由「应用 / OK」完成）。
@@ -1225,7 +1271,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 「重命名」「删除」只对自定义预设可用 —— 内置预设永久只读，按钮置灰。
             g.row("", row -> {
                 row.layout(RowLayout.PARENT_GRID);
-                row.cell();                     // 占住标签列 → 按钮与下拉同列起
+                row.cell();                     // 占住【下拉】列（标签列由 row("") 自动补）→ 按钮从第三列起
                 animNewBtn = new javax.swing.JButton("新建预设…");
                 animNewBtn.addActionListener(e -> createCustomPreset());
                 row.cell(animNewBtn);
@@ -1776,6 +1822,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         b.slider = cell.getComponent();
         // 吸附开关：拖动只落在刻度上（契约 §1.4；paintTicks=false 不影响吸附）
         b.slider.setSnapToTicks(true);
+        // 【P-L-9】DSL 的 slider() 不设初值，JSlider 默认停在 50 —— 平台若只调
+        // createPanel 不调 reset（buildSearchableOptions 的后台路径），控件会与 pending 脱节。
+        // 这里按 pending 显式初始化；此刻 ChangeListener 还没挂（见下方「修法 1」），无副作用。
+        b.slider.setValue(snapToTick(spec.readTick.applyAsInt(pending),
+                spec.min, spec.max, spec.step));
 
         // ---- 2) 缺陷 2 的修法：只给 min / mid / max 三个关键刻度（契约 §2.2）----
         // labelTable 的条目数 = (max-min)/majorTickSpacing + 1，原来是 51 / 101 / 201 条 → 挤成一团。
@@ -1837,13 +1888,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             }
             int v = b.slider.getValue();                 // 已被 JSlider 吸附过
             spec.writeTick.accept(pending, v);           // ① 写 pending（脏标记需要）
-            valueLabel.setText(spec.valueText.apply(this, v));   // ② 右侧标签实时跟随 ← 缺陷 1
-            syncTextFieldIfDifferent(b, v);              // ③ 输入框文字同步
-            refreshDerivedHints();
-            // ④ 预设下拉的显示必须跟着变（t7 / R-02）。
-            //    pending 一变，原先匹配上的预设就可能不再匹配 → 必须重算，
-            //    否则下拉继续显示「原版粉色」，而实际值早已不是它（显示层撒谎）。
-            refreshPresetDisplay();
+            // 【P-L-7】写 pending 之后的界面刷新包一层：中途抛出会停在
+            // 「数据已改、界面半更新」的混合态。当前没有已知抛点，属结构性防护。
+            try {
+                valueLabel.setText(spec.valueText.apply(this, v));   // ② 右侧标签实时跟随 ← 缺陷 1
+                syncTextFieldIfDifferent(b, v);              // ③ 输入框文字同步
+                refreshDerivedHints();
+                // ④ 预设下拉的显示必须跟着变（t7 / R-02）。
+                //    pending 一变，原先匹配上的预设就可能不再匹配 → 必须重算，
+                //    否则下拉继续显示「原版粉色」，而实际值早已不是它（显示层撒谎）。
+                refreshPresetDisplay();
+            } catch (Throwable t) {
+                LOG.warn("neovide-cursor: 滑块刷新失败（pending 已写入 " + v + "）", t);
+            }
         });
 
         if (enabledIf != null) {
@@ -1930,6 +1987,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     /** 方向 1：滑块 → 输入框。只改文字，不碰 pending。 */
     private void syncTextFieldIfDifferent(SliderBinding b, int v) {
+        boolean prevSync = syncingControls;      // 【P-M-9】保存前值，嵌套时不清掉外层
         syncingControls = true;
         try {
             String txt = String.valueOf(v);
@@ -1937,7 +1995,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 b.textField.setText(txt);
             }
         } finally {
-            syncingControls = false;
+            syncingControls = prevSync;
         }
     }
 
@@ -1956,6 +2014,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         } catch (NumberFormatException ex) {
             return;
         }
+        boolean prevSync = syncingControls;      // 【P-M-9】保存前值
         syncingControls = true;
         try {
             int snapped = snapToTick(v, b.spec.min, b.spec.max, b.spec.step);
@@ -1963,7 +2022,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 b.slider.setValue(snapped);
             }
         } finally {
-            syncingControls = false;
+            syncingControls = prevSync;
         }
         // 标签显示【用户输入】而不是滑块值（契约 §6.1 / B-2b）
         b.valueLabel.setText(b.spec.valueText.apply(this, v));
@@ -1987,12 +2046,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             }
         }
         int clamped = Math.max(b.spec.min, Math.min(b.spec.max, v));
+        boolean prevSync = syncingControls;      // 【P-M-9】保存前值
         syncingControls = true;
         try {
             b.textField.setText(String.valueOf(clamped));
             b.slider.setValue(snapToTick(clamped, b.spec.min, b.spec.max, b.spec.step));
         } finally {
-            syncingControls = false;
+            syncingControls = prevSync;
         }
         b.spec.writeTick.accept(pending, clamped);
         b.valueLabel.setText(b.spec.valueText.apply(this, clamped));
@@ -2000,7 +2060,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         refreshPresetDisplay();      // t7 / R-02：失焦规整也会改 pending，下拉必须重算
     }
 
-    /** 把 {@code pending} 灌进全部控件（reset / 预设应用共用）。 */
     /**
      * 把 {@code pending} 灌进全部控件（reset / 预设应用 / 预设恢复共用）。
      *
@@ -2023,6 +2082,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      */
     private void syncAllControlsFromPending() {
         boolean prevSuppress = suppressDerive;
+        boolean prevSync = syncingControls;      // 【P-M-9】syncingControls 也要保存前值
         suppressDerive = true;
         syncingControls = true;
         try {
@@ -2065,7 +2125,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             refreshDerivedHints();
             refreshPresetDisplay();
         } finally {
-            syncingControls = false;
+            syncingControls = prevSync;         // 【P-M-9】恢复前值，嵌套时不清掉外层
             suppressDerive = prevSuppress;      // ← 同一个 finally 里恢复，异常时也不会漏
             // reset() / 切预设 / apply() 之后也要刷预览 ——
             // syncingControls 已复位，refreshPreviews 里改控件不会造成回环。
@@ -2302,6 +2362,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         NeovideCursorSettings.State view = deepCopy(pending);
         b.spec.writeTick.accept(view, inputTick);
         CursorPresets.AnimPreset a = CursorPresetApplier.matchAnimPreset(view);
+        boolean prevSync = syncingControls;      // 【P-M-9】保存前值
         syncingControls = true;
         try {
             // 无匹配 → -1（空白）。2026-10-28 之前这里借用「自定义（未保存）」占位项的下标，
@@ -2309,7 +2370,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             animPresetCombo.setSelectedIndex(
                     a == null ? -1 : indexOfAnim(a));
         } finally {
-            syncingControls = false;
+            syncingControls = prevSync;
         }
     }
 
@@ -2369,6 +2430,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 2026-10-28：不再追加「自定义（未保存）」占位项 —— 无匹配时用 -1（空白）表达，
         // 理由见 CUSTOM_ANIM_PLACEHOLDER 删除处的注释。
 
+        boolean prevSync = syncingControls;      // 【P-M-9】保存前值
         syncingControls = true;
         try {
             replaceModel(animPresetCombo, animPresetItems, names);
@@ -2407,7 +2469,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             refreshRestoreButtonText();
             refreshCustomButtons();
         } finally {
-            syncingControls = false;
+            syncingControls = prevSync;
         }
     }
 
@@ -3336,19 +3398,27 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 【P-C-1】重新装载配置 = 接受当前内存态为新基准，清掉落盘失败标记，
         // 否则 isModified() 会永远为真（用户改不动、关不掉）。
         persistFailed = false;
+        // 【P-L-8】paintDiag 不走 bindCheck（它不是 State 字段），reset 也必须手工复位 ——
+        // 否则「取消对话框再打开」时复选框显示的值与真实值可能不一致。
+        paintDiag = NeovideCaretManager.isPaintDisabled();
+        if (paintDiagCheck != null) {
+            paintDiagCheck.setSelected(paintDiag);
+        }
         // 打开/重开会话：pending 与 baseline 同源取当前 state（EditSession 保证同源）
         session.openAt(currentState());
         syncSessionViews();
         graphReset(pending);
 
         // 程序化回灌期间抑制监听器：否则吸附会把「精确值」改写成「刻度值」（B-2 变体）
+        boolean prevSync = syncingControls;      // 【P-M-9】保存前值
+        boolean prevDerive = suppressDerive;
         syncingControls = true;
         suppressDerive = true;      // 装载历史配置不是「用户编辑」，不派生副本
         try {
             super.reset();          // DialogPanel 按 pending 刷所有绑定控件
         } finally {
-            syncingControls = false;
-            suppressDerive = false;
+            syncingControls = prevSync;
+            suppressDerive = prevDerive;
         }
         syncAllControlsFromPending();
     }
@@ -3376,13 +3446,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         colorBindings.pushAll(pending);
 
         // A2：DialogPanel 把绑定控件的值写进 pending（滑块先、输入框后 —— 见 addSlider 的注释）
+        boolean prevSyncA2 = syncingControls;      // 【P-M-9】保存前值
+        boolean prevDeriveA2 = suppressDerive;
         syncingControls = true;
         suppressDerive = true;
         try {
             super.apply();
         } finally {
-            syncingControls = false;
-            suppressDerive = false;
+            syncingControls = prevSyncA2;
+            suppressDerive = prevDeriveA2;
         }
 
         // A2.5：复选框 / 下拉的改动也要有落脚点（团队审查 T3-1 / T3-3）。
@@ -3401,75 +3473,159 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         if (svc == null) {
             return;
         }
+        // 【P-L-10】会话已关闭（dispose 后 baseline 置 null）时不该再 apply：
+        // SettingsField.differs 没有空检查（dirtyAnyField 有），继续走会 NPE。
+        if (baseline == null) {
+            LOG.warn("neovide-cursor: apply() 在会话已关闭（baseline=null）时被调用，忽略");
+            return;
+        }
         NeovideCursorSettings.State target = svc.getState();
 
-        // A3：逐字段脏标记合并（缺陷 3 的修法本体）—— 从 {@link SettingsField#FIELDS} 派生。
+        // 【P-M-1，2026-10-31 第 3 批收尾】整份快照：A3..A5.5 任一处抛出都回滚到这里。
         //
-        // 【0.9.9 / B2：为什么改成遍历表】
-        // 这里原来是 20 段手写的 if，每段自己记得用哪种比较（float 用 Float.compare、
-        // 颜色用 equalsIgnoreCase、其余用 !=）。它是「加一个参数要改 8 处」的第 6 处，
-        // 而漏掉的后果是静默的：存了但读不到、改了但应用按钮不亮。
-        // 现在比较语义由表项的 same 函数各自携带，遍历只负责「不同就拷」。
+        // 【为什么是整份快照而不是「已写字段清单」】
+        // 逐字段清单是第二份要与 SettingsField.FIELDS 同步的清单 —— 正是本项目反复踩的
+        // 「同一语义两处维护」病根（陷阱 7）。State.copyFrom 本来就要跟随字段表更新
+        // （六层链路的要求），复用它不会多出一份会漏的清单。
         //
-        // 【语义一字未改】每个字段用的比较函数与旧代码逐条对应：
-        //   float → Float.compare（NaN / -0.0f 两个边界都对）
-        //   HEX   → equalsIgnoreCase（sanitizeColor 统一大写，手改 XML 可能留小写）
-        //   其余  → 值比较
-        for (SettingsField sf
-                : SettingsField.FIELDS) {
-            if (sf.differs(pending, baseline)) {
-                sf.copy(pending, target);
+        // 【为什么不是「先写副本、成功后替换引用」】
+        // NeovideCursorSettings.getState() 明确返回内部对象（不新建、不复制），
+        // 换引用会让 Tools 菜单 / CONFIG 同步持有的旧引用全部失效。
+        NeovideCursorSettings.State rollback = deepCopy(target);
+        boolean paintDiagBefore = NeovideCaretManager.isPaintDisabled();
+        // 落盘结果在 try 内赋值、在 try 外判定 —— 两种失败的语义在结构上分开（java-reviewer L-1）。
+        NeovideCursorSettings.PersistResult persisted;
+
+        try {
+            // A3：逐字段脏标记合并（缺陷 3 的修法本体）—— 从 {@link SettingsField#FIELDS} 派生。
+            //
+            // 【0.9.9 / B2：为什么改成遍历表】
+            // 这里原来是 20 段手写的 if，每段自己记得用哪种比较（float 用 Float.compare、
+            // 颜色用 equalsIgnoreCase、其余用 !=）。它是「加一个参数要改 8 处」的第 6 处，
+            // 而漏掉的后果是静默的：存了但读不到、改了但应用按钮不亮。
+            // 现在比较语义由表项的 same 函数各自携带，遍历只负责「不同就拷」。
+            //
+            // 【语义一字未改】每个字段用的比较函数与旧代码逐条对应：
+            //   float → Float.compare（NaN / -0.0f 两个边界都对）
+            //   HEX   → equalsIgnoreCase（sanitizeColor 统一大写，手改 XML 可能留小写）
+            //   其余  → 值比较
+            for (SettingsField sf
+                    : SettingsField.FIELDS) {
+                if (sf.differs(pending, baseline)) {
+                    sf.copy(pending, target);
+                }
             }
-        }
 
-        // 21（0.9.9 / 自定义预设）：内置预设【永久只读】，用户改动不污染它。
-        //
-        // 【模型对比】
-        //   0.9.8：改动写进「该内置预设的覆盖值」→ 内置被污染 → 需要「（已修改）」后缀
-        //          + 「恢复为默认值」按钮来收场。
-        //   0.9.9：改动只落在<b>当前这个自定义预设</b>上；如果当前选的是内置预设，
-        //          那么在拖动那一刻就已经派生出了一份副本（见 syncCustomPresetIfNeeded），
-        //          内置那个一位数都不动。于是「已修改」概念消失。
-        //
-        // 这里只做「把 pending 里的自定义预设表/当前名同步到 target」这一件事。
-        if (!SettingsField
-                .textSame(pending.customAnimPresets, baseline.customAnimPresets)) {
-            target.customAnimPresets = pending.customAnimPresets;
-        }
-        if (!SettingsField
-                .textSame(pending.animCustomName, baseline.animCustomName)) {
-            target.animCustomName = pending.animCustomName;
-        }
-        // 2026-10-29：颜色预设三件套（与动画同一套脏合并纪律）
-        if (!SettingsField
-                .textSame(pending.customColorPresets, baseline.customColorPresets)) {
-            target.customColorPresets = pending.customColorPresets;
-        }
-        if (!SettingsField
-                .textSame(pending.colorCustomName, baseline.colorCustomName)) {
-            target.colorCustomName = pending.colorCustomName;
-        }
-        if (pending.colorPresetBase != baseline.colorPresetBase) {
-            target.colorPresetBase = pending.colorPresetBase;
-        }
+            // 21（0.9.9 / 自定义预设）：内置预设【永久只读】，用户改动不污染它。
+            //
+            // 【模型对比】
+            //   0.9.8：改动写进「该内置预设的覆盖值」→ 内置被污染 → 需要「（已修改）」后缀
+            //          + 「恢复为默认值」按钮来收场。
+            //   0.9.9：改动只落在<b>当前这个自定义预设</b>上；如果当前选的是内置预设，
+            //          那么在拖动那一刻就已经派生出了一份副本（见 syncCustomPresetIfNeeded），
+            //          内置那个一位数都不动。于是「已修改」概念消失。
+            //
+            // 这里只做「把 pending 里的自定义预设表/当前名同步到 target」这一件事。
+            if (!SettingsField
+                    .textSame(pending.customAnimPresets, baseline.customAnimPresets)) {
+                target.customAnimPresets = pending.customAnimPresets;
+            }
+            if (!SettingsField
+                    .textSame(pending.animCustomName, baseline.animCustomName)) {
+                target.animCustomName = pending.animCustomName;
+            }
+            // 2026-10-29：颜色预设三件套（与动画同一套脏合并纪律）
+            if (!SettingsField
+                    .textSame(pending.customColorPresets, baseline.customColorPresets)) {
+                target.customColorPresets = pending.customColorPresets;
+            }
+            if (!SettingsField
+                    .textSame(pending.colorCustomName, baseline.colorCustomName)) {
+                target.colorCustomName = pending.colorCustomName;
+            }
+            if (pending.colorPresetBase != baseline.colorPresetBase) {
+                target.colorPresetBase = pending.colorPresetBase;
+            }
 
 
-        // A4：落盘（P-C-1：三态结果必须接住，不能丢）
-        //
-        // 【2026-10-31 第 3 批审查 P-C-1，CRITICAL】原来这行是 `svc.persistQuietly();`，
-        // 返回值被丢弃。产生侧（NeovideCursorSettings.persistQuietly）明确区分
-        // CONFIRMED / DEFERRED / FAILED，消费侧却当它不存在 —— 磁盘只读、
-        // 序列化自检失败、saveSettings() 抛异常时，面板照常「应用成功」并关闭，
-        // 重启后全部回滚，全程零提示。
-        NeovideCursorSettings.PersistResult persisted = svc.persistQuietly();
+            // A4：落盘（P-C-1：三态结果必须接住，不能丢）
+            //
+            // 【2026-10-31 第 3 批审查 P-C-1，CRITICAL】原来这行是 `svc.persistQuietly();`，
+            // 返回值被丢弃。产生侧（NeovideCursorSettings.persistQuietly）明确区分
+            // CONFIRMED / DEFERRED / FAILED，消费侧却当它不存在 —— 磁盘只读、
+            // 序列化自检失败、saveSettings() 抛异常时，面板照常「应用成功」并关闭，
+            // 重启后全部回滚，全程零提示。
+            persisted = svc.persistQuietly();
 
-        // A5：唯一生效入口（写字段 → 调 setter → 刷新三类缓存）
-        NeovideCaretManager.applyConfig();
+            // A5：唯一生效入口（写字段 → 调 setter → 刷新三类缓存）
+            NeovideCaretManager.applyConfig();
 
-        // A5.5：性能诊断（高级区，唯一不持久化的项）。
-        // 只在**变化时**下发：setPaintDisabled 会写一行日志并清屏，每次 apply 都调会刷屏。
-        if (NeovideCaretManager.isPaintDisabled() != paintDiag) {
-            NeovideCaretManager.setPaintDisabled(paintDiag);
+            // A5.5：性能诊断（高级区，唯一不持久化的项）。
+            // 只在**变化时**下发：setPaintDisabled 会写一行日志并清屏，每次 apply 都调会刷屏。
+            if (NeovideCaretManager.isPaintDisabled() != paintDiag) {
+                NeovideCaretManager.setPaintDisabled(paintDiag);
+            }
+
+            // 探针注入点（P-M-1）：生产恒为 null，代价只是一次字段读。
+            if (applyFaultForProbe != null) {
+                applyFaultForProbe.run();
+            }
+
+        } catch (Throwable t) {
+            // 【P-M-1】A3..A5.5 中途抛出：把内存态整体回滚到 apply 之前。
+            //
+            // 与 P-C-1 的 FAILED 严格分开：FAILED 是「已写进 State、磁盘没写成」，
+            // 按用户拍板保留内存新值；这里是「连 State 都没写完」，必须撤销。
+            try {
+                target.copyFrom(rollback);
+            } catch (Throwable ignored) {
+                // 回滚本身失败：至少保留下面的提示与日志
+            }
+            try {
+                NeovideCaretManager.applyConfig();      // 用回滚后的 State 重建 CONFIG / 缓存
+            } catch (Throwable ignored) {
+                // 同上
+            }
+            try {
+                // 【code-reviewer L-5】与 A5.5 同一条纪律：只在变化时下发
+                // （setPaintDisabled 会写一行日志并清屏）。
+                if (NeovideCaretManager.isPaintDisabled() != paintDiagBefore) {
+                    NeovideCaretManager.setPaintDisabled(paintDiagBefore);
+                }
+            } catch (Throwable ignored) {
+                // 同上
+            }
+            // 【java-reviewer M-2 / code-reviewer L-4】回滚落盘的结果不能丢（P-C-1 的纪律）：
+            // 若 A4 已把新值写进磁盘、这次补写又失败，磁盘会停在新值，
+            // 而提示说「已回滚到应用前的状态」—— 重启后并不成立。必须如实告知。
+            boolean diskRollbackUncertain = false;
+            try {
+                NeovideCursorSettings.PersistResult rb = svc.persistQuietly();
+                if (rb != NeovideCursorSettings.PersistResult.CONFIRMED) {
+                    diskRollbackUncertain = true;
+                    try {
+                        LOG.warn("neovide-cursor: 回滚落盘未确认（" + rb + "），磁盘可能仍是新值");
+                    } catch (Throwable ignored) {
+                        // 日志不可用：下面的提示仍会说明风险
+                    }
+                }
+            } catch (Throwable ignored) {
+                diskRollbackUncertain = true;
+            }
+            try {
+                LOG.warn("neovide-cursor: 应用设置时抛出，已回滚内存态（baseline 未前移，可重试）", t);
+            } catch (Throwable ignored) {
+                // 日志子系统不可用：不能反过来连累提示
+            }
+            persistFailed = true;                       // 保持 isModified=true，允许重试
+            showUserNotice(APPLY_FAILED_TITLE,
+                    diskRollbackUncertain ? APPLY_FAILED_MESSAGE_DISK : APPLY_FAILED_MESSAGE, true);
+            // 【java-reviewer M-3】回滚与提示已做完，但致命错误必须让平台看见：
+            // 吞掉 OutOfMemoryError / StackOverflowError 会让 JVM 在不可用状态下继续跑。
+            if (t instanceof VirtualMachineError) {
+                throw (VirtualMachineError) t;
+            }
+            return;
         }
 
         // 【P-C-1】落盘失败：不推进 baseline，并明确告诉用户「现在能用，但活不过重启」。
@@ -3484,9 +3640,17 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 活 state，「pending vs state」判据此时为 false。于是平台根本不会再调 apply()。
         // 置标志后 isModified() 保持 true，应用/确定按钮可用，重试才真的存在。
         //
-        // 【不要在这里顺手回滚内存态】target 已经写进 service 且 applyConfig() 已生效，
-        // 回滚需要另一套「上一次成功值」的快照；用户拍板的是「不阻止关闭、给提示」，
-        // 不是「失败即撤销」。所以内存里继续可用，只是活不过重启 —— 文案正是这么写的。
+        // 【FAILED 时为什么不回滚内存态（与 P-M-1 的异常路径分开）】
+        // target 已经写进 service 且 applyConfig() 已生效；用户拍板的是
+        // 「不阻止关闭、给提示」，不是「落盘失败即撤销」。所以内存里继续可用，
+        // 只是活不过重启 —— 文案正是这么写的。
+        // 而 P-M-1 处理的是「连 State 都没写完」：那种半新半旧必须整体撤销。
+        //
+        // 【为什么这一段在 try 之外（java-reviewer L-1）】
+        // 它若留在 try 内，showUserNotice 万一抛出（其内部 LOG.warn 在日志子系统
+        // 被摘时可能抛）会被上面的 catch 误判成「连 State 都没写完」并回滚内存态 ——
+        // 与用户拍板的「落盘 FAILED 时不回滚内存」相反。放在 try 外，两种失败的
+        // 语义边界由代码结构本身保证，不靠「showUserNotice 不会抛」这条隐含前提。
         //
         // 【为什么 return 而不是继续走 A6–A8】
         // A6 会把 baseline 前移、A8 会把控件回灌成 target 值。两者都在宣称
@@ -3531,13 +3695,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 第 2 次 super.apply() 会把 true 写回 pending，再次冲掉 Tools 的 false。
         // {@code super.reset()} 走的是 DialogPanel 自己的 reset 回调表（全部绑定控件），
         // 正好补齐这一块；两者配合才完整。
+        boolean prevSyncA8 = syncingControls;      // 【P-M-9】保存前值
+        boolean prevDeriveA8 = suppressDerive;
         syncingControls = true;
         suppressDerive = true;
         try {
             super.reset();          // DialogPanel 把 pending 灌进【所有】绑定控件（含复选框/下拉）
         } finally {
-            syncingControls = false;
-            suppressDerive = false;
+            syncingControls = prevSyncA8;
+            suppressDerive = prevDeriveA8;
         }
         syncAllControlsFromPending();
     }
@@ -3893,7 +4059,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     // ==================== 滑块绑定（滑块 + 输入框 + 标签）====================
 
-    /** 一个滑块的三个组件 + 它的规格。 */
     /** 滑块 + 输入框 + 数值标签三者一组。包私有以便 {@link SettingsSearchIndex} 读字段 key。 */
     static final class SliderBinding {
         final SliderSpec spec;
@@ -3984,6 +4149,40 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return syncingControls;
     }
 
+    /** 探针/调试用：{@code suppressDerive} 抑制标志的当前值。 */
+    public boolean suppressDeriveForProbe() {
+        return suppressDerive;
+    }
+
+    /**
+     * 探针用（P-M-9 / 2026-10-31 第 3 批收尾）：验证两个抑制标志的<b>嵌套</b>语义。
+     *
+     * <p><b>为什么必须专门开一个入口</b>：嵌套错误在单层调用下<b>不可观察</b> ——
+     * 外层 {@code finally} 无论如何都会把标志复位，最终值恒为 {@code false}。
+     * 只有在「外层已置 true、内层跑完、外层还没结束」这个<b>中间态</b>，
+     * 才能看出内层是否把外层的 true 误清成 false。
+     *
+     * <p>本方法<b>不复制任何业务逻辑</b>：它调用的 {@link #syncAllControlsFromPending()}
+     * 就是 {@code reset()} / {@code apply()} 用的那条生产回灌路径，里面还会再进入
+     * {@code super.reset()} 与 {@code refreshPresetDisplay()} 两层抑制块。
+     *
+     * @return {@code {syncingControls, suppressDerive}} 在调用结束后的值；
+     *         修好后两者都必须仍是 {@code true}
+     */
+    public boolean[] suppressionNestingForProbe() {
+        boolean prevSync = syncingControls;
+        boolean prevDerive = suppressDerive;
+        syncingControls = true;
+        suppressDerive = true;
+        try {
+            syncAllControlsFromPending();
+            return new boolean[]{syncingControls, suppressDerive};
+        } finally {
+            syncingControls = prevSync;
+            suppressDerive = prevDerive;
+        }
+    }
+
     /** 探针用：最近一次「必须让用户知道」的提示（标题：正文）；{@code null} = 还没有过。 */
     public String lastUserNoticeForProbe() {
         return lastUserNotice;
@@ -4018,7 +4217,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return out;
     }
 
-    /** 探针/调试用：10 个数值标签，与 {@link #slidersForProbe()} 同序。 */
+    /** 探针/调试用：全部数值标签，与 {@link #slidersForProbe()} 同序（不写死数量，避免再次过期）。 */
     public List<JLabel> labelsForProbe() {
         List<JLabel> out = new ArrayList<>();
         for (SliderBinding b : bindings) {
@@ -4059,7 +4258,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         return animPresetCombo;
     }
 
-    /** 探针/调试用：颜色预设下拉。 */
     /** 探针/调试用：动画预设「恢复为「X」默认值」按钮（0.9.6 / M5）。 */
     public javax.swing.JButton animRestoreButtonForProbe() {
         return animRestoreBtn;

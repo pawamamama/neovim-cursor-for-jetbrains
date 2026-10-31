@@ -54,6 +54,57 @@ final class RenderScheduler {
      */
     private static final long BUSY_RETRY_MS = 1;
 
+    // ==================== U-M-6：「到期但投不出去」的退避升级 ====================
+    //
+    // 原来 dispatchDue() 返回 false 时只有固定的 Thread.sleep(1ms)：
+    // EDT 被长时间任务卡住（所有到期 animator 的 framePending 都为 true）时，
+    // 调度线程 **1000 次/秒空转且零日志**，与异常路径的 consecutiveFailures 待遇不对等。
+
+    /**
+     * 连续「到期但投不出去」超过这个轮数才开始退避。
+     *
+     * <p>前 10 轮保持 1ms：EDT 上跑完一个稍长的 tick 会短暂让 dispatchDue() 返回 false，
+     * 那是设计内的（不是故障）；立刻退避会平白拖慢帧率。连续 10 轮（≈10ms）才当故障。
+     */
+    private static final int BUSY_BACKOFF_START_ROUNDS = 10;
+
+    /** 退避指数的最大位移：1 << 5 = 32ms。 */
+    private static final int BUSY_BACKOFF_MAX_SHIFT = 5;
+
+    /** 退避上限：32ms ≈ 60fps 两帧，EDT 恢复后最迟两帧内补投。 */
+    private static final long BUSY_BACKOFF_CAP_MS = 32L;
+
+    /** 「到期但投不出去」日志节流：首次必打，之后每 100 轮一条。 */
+    private static final int BUSY_LOG_EVERY = 100;
+
+    /**
+     * 连续「到期但投不出去」轮数 → 本轮退避毫秒（U-M-6）。
+     *
+     * <p>曲线：1..10 轮 → 1ms；11 → 2；12 → 4；13 → 8；14 → 16；15 及以后 → 32。
+     */
+    static long busyBackoffMs(int consecutiveNotPosted) {
+        if (consecutiveNotPosted <= BUSY_BACKOFF_START_ROUNDS) {
+            return BUSY_RETRY_MS;
+        }
+        int shift = Math.min(consecutiveNotPosted - BUSY_BACKOFF_START_ROUNDS,
+                BUSY_BACKOFF_MAX_SHIFT);
+        return Math.min(BUSY_RETRY_MS << shift, BUSY_BACKOFF_CAP_MS);
+    }
+
+    /**
+     * 「到期但投不出去」的日志节流（U-M-6）。
+     *
+     * <p><b>首条门槛是「开始退避」那一轮，不是第 1 轮</b>（java-reviewer M-1）：
+     * {@code dispatchDue()} 返回 false 最常见的原因不是 EDT 卡死，而是「上一帧 tick 还没跑完」
+     * —— 只要某帧 EDT 耗时超过帧间隔（GC / 建索引 / inlay 更新）就会命中。
+     * 若第 1 轮就打 warn，IDE 繁忙时会按帧率刷屏（125~144 条/秒），
+     * 新加的诊断手段自己变成噪音，与 {@code shouldLogFailure} 的严格限流也不对等。
+     */
+    static boolean shouldLogBusy(int consecutiveNotPosted) {
+        return consecutiveNotPosted == BUSY_BACKOFF_START_ROUNDS
+                || consecutiveNotPosted % BUSY_LOG_EVERY == 0;
+    }
+
     /** 已注册的 animator。迭代是弱一致的，足以支撑"重算最早到期时刻"这一用途 */
     private static final com.intellij.openapi.diagnostic.Logger LOG =
             com.intellij.openapi.diagnostic.Logger.getInstance(RenderScheduler.class);
@@ -189,6 +240,8 @@ final class RenderScheduler {
         // release/acquire 保证 T2 一定能读到 3，不是靠可见性侥幸能躲的。
         // 顺带：日志会报「连续 4 次」（其实是 T1 的 3 次 + T2 的 1 次），把排查方向带偏。
         int consecutiveFailures = 0;
+        // 【U-M-6】连续「到期但投不出去」的轮数 —— 同样是线程级状态，不能 static（同 H-1 的理由）。
+        int consecutiveNotPosted = 0;
         while (true) {
             // 【退出条件】已经没有 animator 了：退出并把 thread 置回 null，下次 register 重建。
             // 判空与 thread=null 必须与 register 共用同一把锁：否则会出现
@@ -268,14 +321,35 @@ final class RenderScheduler {
                 // 睡醒（或本来就已到期）：投递本轮所有到期的 animator
                 if (!dispatchDue()) {
                     // 到期时刻已过，但那个 animator 的任务还在 EDT 队列里：退避后再看。
+                    //
+                    // 【U-M-6】原来这里恒 sleep(1ms)：EDT 被长任务卡住时，调度线程
+                    // 1000 次/秒空转且零日志。现在连续 10 轮起指数退避到 32ms，
+                    // 首次与每 100 轮各记一条 warn。判定与计数与 consecutiveFailures 同型
+                    // （线程级局部变量），不碰异常自愈链路。
+                    consecutiveNotPosted++;
+                    long backoff = busyBackoffMs(consecutiveNotPosted);
+                    if (shouldLogBusy(consecutiveNotPosted)) {
+                        try {
+                            LOG.warn("neovide-cursor: 调度到期但投递不出去（连续 "
+                                    + consecutiveNotPosted + " 轮），EDT 可能被阻塞；本轮退避 "
+                                    + backoff + " ms");
+                        } catch (Throwable ignored) {
+                            // 日志失败不能连累调度循环（同 U-H-4 原则）
+                        }
+                    }
                     try {
-                        Thread.sleep(BUSY_RETRY_MS);
+                        Thread.sleep(backoff);
                     } catch (InterruptedException ignored) {
                         // 忽略：下一轮重新计算
                     }
+                } else {
+                    consecutiveNotPosted = 0;
                 }
                 consecutiveFailures = 0;
             } catch (Throwable t) {
+                // 【U-M-6 / java-reviewer L-2】异常路径由 consecutiveFailures 负责，
+                // 「到期但投不出去」的计数必须归零 —— 否则下一轮 false 会从大退避开始。
+                consecutiveNotPosted = 0;
                 consecutiveFailures++;
                 if (handleLoopFailure(t, consecutiveFailures)) {
                     return;

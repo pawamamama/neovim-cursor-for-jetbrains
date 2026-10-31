@@ -218,7 +218,13 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         #   C-4 下一帧必须重算 / C-5 成功后请求被消费 / C-6 静止时回到快速路径。
         # 变异已验证：把清零挪回慢路径开头 → C-2、C-4 变红。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VCatchRollback')
+        'VCatchRollback',
+        # 【2026-10-31 第 3 批收尾】5 条 MEDIUM 的守门：
+        #   T-1 P-M-9 抑制标志嵌套 / T-2 P-M-4 检查更新失败可见 /
+        #   T-3 U-M-6 调度退避升级 / T-4 U-M-8 块选区 key 不退化 /
+        #   T-5 P-M-1 apply 中途抛出回滚。每条都做过变异验证。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VBatch3Tail')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

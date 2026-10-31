@@ -385,6 +385,18 @@ public class CaretAnimator implements Disposable, CaretListener {
     private static final int MAX_TRAILS = 64;
 
     /**
+     * 上一帧每个块选区槽位的 trail key（U-M-8）。
+     *
+     * <p>行号查询<b>瞬时失败</b>时沿用它：否则 key 会从「行号 key」抖成「offset key」，
+     * 下一帧 {@code trails.get(key)} 未命中 → 新建 SpringTrail（视觉上「闪一下」），
+     * 连续失败时每帧重建、每帧分配。行号恢复后 key 也自然回到行号 key。
+     */
+    private final Object[] prevBlockKeys = new Object[MAX_TRAILS];
+
+    /** 上一帧块选区的行数；变化时清空 {@link #prevBlockKeys}（槽位↔行 的对应关系已变）。 */
+    private int prevBlockCount = -1;
+
+    /**
      * 本帧该建几条拖尾 —— <b>生产路径真正在用的判据</b>。
      *
      * <p>块选区（Alt+鼠标拖拽列选）在平台层只产生 1 个 Caret，
@@ -419,6 +431,26 @@ public class CaretAnimator implements Disposable, CaretListener {
         return (lineNo >= 0)
                 ? Integer.valueOf(-1000000 - lineNo)
                 : Integer.valueOf(blockStart);
+    }
+
+    /**
+     * 本帧该槽位的块选区 key（U-M-8）：行号可用 → 行号 key；
+     * 行号查询失败 → 沿用上一帧该槽位的 key；首见 → offset 兜底。
+     *
+     * <p><b>为什么需要 prevKey</b>：{@link #blockTrailKey} 在 {@code lineNo < 0} 时会退化成
+     * offset key，而下一帧行号恢复后 key 又变回行号 key —— 两帧的 key 不同，
+     * {@code trails.get()} 未命中就新建 SpringTrail，用户看到拖尾「闪一下」，
+     * 连续失败时每帧重建一次。沿用上一帧的 key 把这个抖动消掉。
+     *
+     * @param lineNo     该行行号；{@code < 0} 表示文档查询失败
+     * @param blockStart 该行的块选区起点 offset
+     * @param prevKey    上一帧同槽位的 key；{@code null} 表示首见
+     */
+    static Object resolveBlockKey(int lineNo, int blockStart, Object prevKey) {
+        if (lineNo >= 0) {
+            return blockTrailKey(lineNo, blockStart);
+        }
+        return prevKey != null ? prevKey : blockTrailKey(lineNo, blockStart);
     }
 
     /**
@@ -2146,6 +2178,15 @@ public class CaretAnimator implements Disposable, CaretListener {
                     useBlock ? blockStarts.length : 0, carets.size());
             boolean changed = count != activeTrails.size();
 
+            // 【U-M-8】块选区槽位缓存：退出块选区、或行数变化时清空
+            // （槽位↔行的对应关系已变，沿用旧 key 会错位）。
+            if (!useBlock) {
+                prevBlockCount = -1;
+            } else if (count != prevBlockCount) {
+                java.util.Arrays.fill(prevBlockKeys, null);
+                prevBlockCount = count;
+            }
+
             activeTrails.clear();
             for (int i = 0; i < count; i++) {
                 // 【块选区的 key 必须用「行号」，不能用 offset】
@@ -2176,8 +2217,17 @@ public class CaretAnimator implements Disposable, CaretListener {
                     int lineNo = -1;
                     try {
                         lineNo = editor.getDocument().getLineNumber(blockStarts[i]);
-                    } catch (Throwable ignored) { }
-                    key = blockTrailKey(lineNo, blockStarts[i]);
+                    } catch (Throwable t) {
+                        // 【U-M-8】原来这里是空 catch：行号查询失败被完全吞掉，
+                        // 且 key 退化成 offset → 下一帧行号恢复后 key 又变回行号 key，
+                        // trails.get() 未命中 → 每帧重建 SpringTrail。
+                        swallowedQuietly("块选区行号", t);
+                    }
+                    Object prev = (i < prevBlockKeys.length) ? prevBlockKeys[i] : null;
+                    key = resolveBlockKey(lineNo, blockStarts[i], prev);
+                    if (i < prevBlockKeys.length) {
+                        prevBlockKeys[i] = key;
+                    }
                 } else {
                     key = carets.get(i);
                 }
@@ -2261,6 +2311,8 @@ public class CaretAnimator implements Disposable, CaretListener {
                         blockLine = editor.getDocument().getLineNumber(blockStarts[i]);
                         cvp = editor.offsetToVisualPosition(caretOff);
                     } catch (Throwable t) {
+                        // 【U-M-8 顺带】与 key 那处同一个纪律：吞了要留痕（原来零日志）。
+                        swallowedQuietly("块选区行号(视觉位置)", t);
                         cvp = editor.getCaretModel().getVisualPosition();
                     }
                     if (CursorDiag.shouldSample(frameSeq) && i == 0) {

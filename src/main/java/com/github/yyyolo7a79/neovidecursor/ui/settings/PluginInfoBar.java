@@ -39,7 +39,12 @@ import java.util.regex.Pattern;
  * 「检查更新」按钮变成可点击的「有新版本 vX.Y.Z」链接。
  *
  * <p><b>完全异步</b>：网络请求在后台线程，绝不阻塞 EDT。
- * 失败时静默（不弹窗骚扰用户），只在按钮 tooltip 里写原因。
+ *
+ * <p><b>失败不静默（P-M-4，2026-10-31）</b>：原来失败分支把按钮文字复位成「检查更新」，
+ * 与点击前完全一致 —— 用户分不清「没网 / 超时 / 仓库没 Release」和「按钮坏了」。
+ * 现在按钮变成「检查失败，点击重试」，tooltip 写完整原因，另记一条 warn。
+ * <b>不弹模态框</b>：这是常驻控件，每次断网都弹框会打断设置流程；
+ * 按钮文字本身就是一行可见提示（探针可断言 {@link #resolveOutcome}）。
  */
 final class PluginInfoBar {
 
@@ -133,6 +138,12 @@ final class PluginInfoBar {
             } else {
                 error = "HTTP " + code;
             }
+        } catch (java.net.SocketTimeoutException e) {
+            // 【P-M-4】超时必须与「没网」「版本相同」区分开：
+            // 本机代理经常对 GitHub 失效（CLAUDE.md 已记录），超时是最常见的失败形态。
+            error = "网络超时（4 秒无响应）";
+        } catch (java.net.UnknownHostException | java.net.ConnectException e) {
+            error = "无法连接 GitHub（网络或代理不可用）";
         } catch (Throwable t) {
             error = t.getClass().getSimpleName() + ": " + t.getMessage();
         } finally {
@@ -143,26 +154,61 @@ final class PluginInfoBar {
 
         final String latestTag = latest;
         final String err = error;
+        if (latestTag == null) {
+            // 【P-M-4】失败路径原来零日志；补一条后台线程日志，便于用户抓 idea.log。
+            try {
+                LOG.warn("neovide-cursor: 检查更新失败：" + err);
+            } catch (Throwable ignored) {
+                // 日志子系统不可用：不影响下面的可见提示
+            }
+        }
         SwingUtilities.invokeLater(() -> {
             check.setEnabled(true);
-            if (latestTag == null) {
-                check.setText("检查更新");
-                check.setToolTipText("检查失败：" + err + "（可点 GitHub 手动查看）");
-                return;
-            }
-            if (compareVersion(latestTag, currentVersion) > 0) {
-                check.setText("有新版本 " + latestTag);
-                check.setToolTipText("点击前往下载");
+            Outcome o = resolveOutcome(latestTag, currentVersion, err);
+            check.setText(o.text);
+            check.setToolTipText(o.tooltip);
+            if (o.downloadable) {
                 for (java.awt.event.ActionListener l : check.getActionListeners()) {
                     check.removeActionListener(l);
                 }
                 check.addActionListener(e ->
                         openBrowser(RELEASES_URL + "/tag/" + latestTag));
-            } else {
-                check.setText("已是最新 (v" + currentVersion + ")");
-                check.setToolTipText("GitHub 最新：" + latestTag);
             }
         });
+    }
+
+    /**
+     * 「检查结果 → 按钮文案 / tooltip / 是否换成下载链接」的<b>唯一</b>映射（P-M-4）。
+     *
+     * <p><b>为什么抽成纯函数</b>：失败文案要能被探针离线断言，而不是只能靠实机看。
+     * 探针调用本方法，生产也调用本方法 —— 不存在「测的是一份、跑的是另一份」（陷阱 3）。
+     */
+    static Outcome resolveOutcome(String latestTag, String currentVersion, String error) {
+        if (latestTag == null) {
+            // 【P-M-4 的核心修复】原来这里把文字复位成「检查更新」，
+            // 与点击前完全一致 —— 用户看到的是「点了、转了一下、什么都没变」，
+            // 分不清「没网」「超时」「没 Release」和「按钮坏了」。
+            String reason = (error == null || error.isEmpty()) ? "未知原因" : error;
+            return new Outcome("检查失败，点击重试",
+                    "检查失败：" + reason + "（可点 GitHub 手动查看）", false);
+        }
+        if (compareVersion(latestTag, currentVersion) > 0) {
+            return new Outcome("有新版本 " + latestTag, "点击前往下载", true);
+        }
+        return new Outcome("已是最新 (v" + currentVersion + ")", "GitHub 最新：" + latestTag, false);
+    }
+
+    /** {@link #resolveOutcome} 的结果。字段包级可见，探针直接读。 */
+    static final class Outcome {
+        final String text;
+        final String tooltip;
+        final boolean downloadable;
+
+        Outcome(String text, String tooltip, boolean downloadable) {
+            this.text = text;
+            this.tooltip = tooltip;
+            this.downloadable = downloadable;
+        }
     }
 
     /**

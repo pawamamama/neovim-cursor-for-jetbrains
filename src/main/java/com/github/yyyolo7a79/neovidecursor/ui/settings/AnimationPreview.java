@@ -365,8 +365,23 @@ public final class AnimationPreview extends JComponent {
     @Override
     public void addNotify() {
         super.addNotify();
-        if (physicsTimer == null) physicsTimer = new Timer(FRAME_MS, e -> step());
-        if (actionTimer == null) actionTimer = new Timer(actionInterval, e -> advance());
+        // 【P-L-12】JBTabbedPane 切页不触发 removeNotify，非选中页的三个预览仍在跑物理。
+        // 守卫放在 Timer 回调里而不是 step() 里：PreviewShowcase 会在**未 realize**
+        // 的实例上调用 probeTick() → step()，放进 step() 会直接废掉截图工具。
+        if (physicsTimer == null) {
+            physicsTimer = new Timer(FRAME_MS, e -> {
+                if (isShowing()) {
+                    step();
+                }
+            });
+        }
+        if (actionTimer == null) {
+            actionTimer = new Timer(actionInterval, e -> {
+                if (isShowing()) {
+                    advance();
+                }
+            });
+        }
         physicsTimer.start();
         actionTimer.start();
     }
@@ -381,24 +396,6 @@ public final class AnimationPreview extends JComponent {
     // ==================== 字体与度量 ====================
 
     /**
-     * 取编辑器正在用的字体。
-     *
-     * <p><b>为什么</b>：用户要求「字体选正在用的字体」——
-     * 硬编码 monospace 在他机器上可能不是实际编辑器字体，预览就不真实。
-     */
-    /**
-     * 取编辑器正在用的字体。
-     *
-     * <p><b>用户反馈</b>：「展示字体不对不知道是窗口问题还是你没设置」。
-     *
-     * <p>原因：独立窗口（PreviewShowcase）里没有 IDEA 的 Application，
-     * {@code EditorColorsManager.getInstance()} 会抛异常 → 走兜底 monospace。
-     * 在 IDEA 里是能取到的。
-     *
-     * <p>现在加两级兜底：IDEA 取不到时，去注册表里找系统等宽字体，
-     * 避免盲退到 Java 默认 monospaced（那个在大字号下很难看）。
-     */
-    /**
      * 字体缓存。
      *
      * <p><b>【自检发现的性能 bug】</b>：remeasure 每帧都调 editorFont()，
@@ -411,6 +408,20 @@ public final class AnimationPreview extends JComponent {
     private Font cachedBaseFont;
     private String cachedFontSource;
 
+    /**
+     * 取编辑器正在用的字体。
+     *
+     * <p><b>为什么</b>：用户要求「字体选正在用的字体」——
+     * 硬编码 monospace 在他机器上可能不是实际编辑器字体，预览就不真实。
+     *
+     * <p><b>用户反馈</b>：「展示字体不对不知道是窗口问题还是你没设置」。
+     * 原因：独立窗口（PreviewShowcase）里没有 IDEA 的 Application，
+     * {@code EditorColorsManager.getInstance()} 会抛异常 → 走兜底 monospace。
+     * 在 IDEA 里是能取到的。
+     *
+     * <p>现在加两级兜底：IDEA 取不到时，去注册表里找系统等宽字体，
+     * 避免盲退到 Java 默认 monospaced（那个在大字号下很难看）。
+     */
     private Font editorFont() {
         if (cachedBaseFont != null) {
             return cachedBaseFont;
@@ -948,6 +959,10 @@ public final class AnimationPreview extends JComponent {
      * 但截图工具要「跑 N 帧然后拍一张」，不能等真实时间。
      * 这个方法把物理步进暴露出来，不影响正常计时器行为。
      *
+     * <p><b>线程契约（P-L-14）</b>：<b>必须在 EDT 上调用</b>，且<b>只用于未 realize 的实例</b>。
+     * 对已显示（{@link #isShowing()} 为真）的实例调用，会与 8ms 的物理 Timer 交错积分 ——
+     * 两边各自推进物理，画面会抖。今天的调用方 {@code PreviewShowcase} 满足这两个前提。
+     *
      * @param doAdvance true 表示这一步同时推进动作（打字/退格/换行）
      */
     public void probeTick(boolean doAdvance) {
@@ -970,11 +985,6 @@ public final class AnimationPreview extends JComponent {
             advance();
         }
         step();
-    }
-
-    /** 探针：当前字号（验证自适应） */
-    public int probeFontSize() {
-        return fontSize;
     }
 
     /** 探针：当前已打出的字符数（负数表示退格阶段） */
