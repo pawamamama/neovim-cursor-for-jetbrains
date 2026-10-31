@@ -8,7 +8,7 @@
 ## 一句话
 
 审计第 2 批的剩余 **20 条**（E 批 7 / F 批 2 / B 批 11）已全部修完、探针守门、变异验证；
-门禁 **101 条目 / 1069 PASS / 2 FAIL（仅 VRegr2，informational）/ ALL PASS**，D0 零 diff。
+门禁 **101 条目 / 1072 PASS / 2 FAIL（仅 VRegr2，informational）/ ALL PASS**，D0 零 diff。
 **唯一挂起**：U-M-21 的「运行时禁用插件」钩子需要 `plugin.xml`（超白名单），只做了 `Disposer.register` 最小接点。
 
 ---
@@ -108,7 +108,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build\run-one-probe.ps1 -Main VAud
 
 **变异总数：E 批 6 组 + F 批 2 组 + B 批 8 组 + 复查 2 组 = 18 组，全部按预期变红，恢复后全绿。**
 
-既有断言零放宽：门禁从 1048 PASS 增加到 1069 PASS，**没有一条旧断言被修改**（本批只新增探针文件与 V0Env 的默认不变注入开关）。
+既有断言零放宽：门禁从 1048 PASS 增加到 1072 PASS（+24，恰为新探针的 24 条断言），**没有一条旧断言被修改**（本批只新增探针文件与 V0Env 的默认不变注入开关）。
 
 ---
 
