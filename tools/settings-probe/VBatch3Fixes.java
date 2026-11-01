@@ -2,6 +2,7 @@ import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
 import com.github.yyyolo7a79.neovidecursor.settings.CustomPresets;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
 import com.github.yyyolo7a79.neovidecursor.settings.SettingsField;
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorBundle;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
 
 import javax.swing.JCheckBox;
@@ -97,8 +98,10 @@ public final class VBatch3Fixes {
         String notice = conf.lastUserNoticeForProbe();
         boolean informed = conf.userNoticeCountForProbe() > noticesBefore
                 && notice != null
-                && notice.contains("未能写入磁盘")
-                && notice.contains("重启");
+                && notice.contains(NeovideCursorBundle.message(
+                        "settings.dialog.persistFailed.title"))
+                && notice.contains(NeovideCursorBundle.message(
+                        "settings.dialog.persistFailed.message"));
         check("T-1b 用户看得到提示，且文案写清「未能写入磁盘 / 重启恢复旧值」",
                 informed, "提示=" + notice);
 
@@ -201,9 +204,15 @@ public final class VBatch3Fixes {
                 "之前=「" + nameBefore + "」之后=「" + conf.pendingForProbe().animCustomName + "」");
 
         String notice = conf.lastUserNoticeForProbe();
-        check("T-3b 坏快照要给用户一行提示",
+        // 断言完整的合成文案，而不只是标题：必须说明「快照损坏」这个原因，
+        // 否则提示改成一句「切换已取消」探针仍然绿（正是 P-H-3 要防的「提示撒谎」）。
+        String expectedNotice = NeovideCursorBundle.message(
+                "settings.dialog.presetBroken.message", "坏预设",
+                NeovideCursorBundle.message("settings.dialog.presetBroken.noFields"));
+        check("T-3b 坏快照要给用户一行提示（含损坏原因）",
                 conf.userNoticeCountForProbe() > noticesBefore
-                        && notice != null && notice.contains("损坏"),
+                        && notice != null
+                        && notice.contains(expectedNotice),
                 "提示=" + notice);
 
         check("T-3c 下拉回到真实选中项（不留在坏预设上）",

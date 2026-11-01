@@ -72,29 +72,30 @@ final class PluginInfoBar {
         p.setOpaque(false);
 
         // ---- 简介（一行，简短） ----
-        JLabel intro = new JLabel(
-                "Neovide 风格平滑光标 · 弹簧拖尾 · 多光标 · 块选区");
+        JLabel intro = new JLabel(NeovideCursorBundle.message("info.tagline"));
         intro.setForeground(DIM);
         intro.setFont(intro.getFont().deriveFont(Font.PLAIN, 11f));
         p.add(intro);
 
         // ---- GitHub ----
-        JLabel gh = link("GitHub", RELEASES_URL, "在浏览器中打开项目主页");
+        JLabel gh = link("GitHub", RELEASES_URL,
+                NeovideCursorBundle.message("info.githubTooltip"));
         p.add(gh);
 
         // ---- 检查更新 ----
-        JButton check = new JButton("检查更新");
+        JButton check = new JButton(NeovideCursorBundle.message("info.checkUpdate"));
         check.setBorderPainted(false);
         check.setContentAreaFilled(false);
         check.setFocusPainted(false);
         check.setForeground(LINK);
         check.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-        check.setToolTipText("当前版本 v" + currentVersion + "，点击检查 GitHub 上是否有新版");
+        check.setToolTipText(
+                NeovideCursorBundle.message("info.checkUpdateTooltip", currentVersion));
         p.add(check);
 
         check.addActionListener(e -> {
             check.setEnabled(false);
-            check.setText("检查中…");
+            check.setText(NeovideCursorBundle.message("info.checking"));
             // 【必须异步】网络请求不能跑在 EDT 上，否则设置页会卡住
             ApplicationManager.getApplication().executeOnPooledThread(() ->
                     doCheck(currentVersion, check));
@@ -131,19 +132,19 @@ final class PluginInfoBar {
                 } else {
                     // 【自检发现】原来这里不设 error，
                     // 导致 tooltip 显示「检查失败：null」。给个明确原因。
-                    error = "响应里没有 tag_name（API 格式可能变了）";
+                    error = NeovideCursorBundle.message("info.error.noTagName");
                 }
             } else if (code == 404) {
-                error = "仓库暂无 Release";
+                error = NeovideCursorBundle.message("info.error.noRelease");
             } else {
                 error = "HTTP " + code;
             }
         } catch (java.net.SocketTimeoutException e) {
             // 【P-M-4】超时必须与「没网」「版本相同」区分开：
             // 本机代理经常对 GitHub 失效（CLAUDE.md 已记录），超时是最常见的失败形态。
-            error = "网络超时（4 秒无响应）";
+            error = NeovideCursorBundle.message("info.error.timeout");
         } catch (java.net.UnknownHostException | java.net.ConnectException e) {
-            error = "无法连接 GitHub（网络或代理不可用）";
+            error = NeovideCursorBundle.message("info.error.cannotConnect");
         } catch (Throwable t) {
             error = t.getClass().getSimpleName() + ": " + t.getMessage();
         } finally {
@@ -188,14 +189,19 @@ final class PluginInfoBar {
             // 【P-M-4 的核心修复】原来这里把文字复位成「检查更新」，
             // 与点击前完全一致 —— 用户看到的是「点了、转了一下、什么都没变」，
             // 分不清「没网」「超时」「没 Release」和「按钮坏了」。
-            String reason = (error == null || error.isEmpty()) ? "未知原因" : error;
-            return new Outcome("检查失败，点击重试",
-                    "检查失败：" + reason + "（可点 GitHub 手动查看）", false);
+            String reason = (error == null || error.isEmpty())
+                    ? NeovideCursorBundle.message("info.error.unknown") : error;
+            return new Outcome(NeovideCursorBundle.message("info.checkFailedRetry"),
+                    NeovideCursorBundle.message("info.checkFailedTooltip", reason), false);
         }
         if (compareVersion(latestTag, currentVersion) > 0) {
-            return new Outcome("有新版本 " + latestTag, "点击前往下载", true);
+            return new Outcome(
+                    NeovideCursorBundle.message("info.hasNewVersion", latestTag),
+                    NeovideCursorBundle.message("info.hasNewVersionTooltip"), true);
         }
-        return new Outcome("已是最新 (v" + currentVersion + ")", "GitHub 最新：" + latestTag, false);
+        return new Outcome(
+                NeovideCursorBundle.message("info.upToDate", currentVersion),
+                NeovideCursorBundle.message("info.upToDateTooltip", latestTag), false);
     }
 
     /** {@link #resolveOutcome} 的结果。字段包级可见，探针直接读。 */

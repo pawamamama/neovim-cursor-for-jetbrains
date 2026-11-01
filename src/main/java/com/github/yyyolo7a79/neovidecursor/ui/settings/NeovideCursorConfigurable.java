@@ -110,27 +110,26 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 「没写成」。所以这里写「已应用」（内存里生效了）+「未能写入磁盘」+「重启后会恢复」，
      * 让用户知道「现在能用，但别指望它活过重启」。
      */
-    private static final String PERSIST_FAILED_TITLE = "设置未能写入磁盘";
+    private static final String PERSIST_FAILED_TITLE =
+            NeovideCursorBundle.message("settings.dialog.persistFailed.title");
 
     private static final String PERSIST_FAILED_MESSAGE =
-            "本次设置已应用到当前会话，但未能写入磁盘。"
-            + "重启 IDE 后会恢复为上一次成功保存的值。";
+            NeovideCursorBundle.message("settings.dialog.persistFailed.message");
 
     /** 【P-M-1】apply() 中途抛出的标题。与落盘失败（P-C-1）是两种不同的失败，文案分开。 */
-    private static final String APPLY_FAILED_TITLE = "应用失败";
+    private static final String APPLY_FAILED_TITLE =
+            NeovideCursorBundle.message("settings.dialog.applyFailed.title");
 
     private static final String APPLY_FAILED_MESSAGE =
-            "设置没能完整写入，已回滚到应用前的状态。"
-            + "你的修改仍保留在面板里，可以再点一次「应用」。";
+            NeovideCursorBundle.message("settings.dialog.applyFailed.message");
 
     /** 【P-M-1】回滚后补写磁盘未确认时的文案 —— 不能再说「已回滚到应用前」而不提磁盘。 */
     private static final String APPLY_FAILED_MESSAGE_DISK =
-            "设置没能完整写入，内存已回滚到应用前的状态。"
-            + "但回滚后的磁盘写入未确认 —— 重启 IDE 后可能仍是这次改动前的值，"
-            + "请再点一次「应用」。";
+            NeovideCursorBundle.message("settings.dialog.applyFailedDisk.message");
 
     /** 预设快照损坏时的标题（P-H-3）。 */
-    private static final String PRESET_BROKEN_TITLE = "无法应用预设";
+    private static final String PRESET_BROKEN_TITLE =
+            NeovideCursorBundle.message("settings.dialog.presetBroken.title");
 
     /**
      * 预设快照里有越界数值、已被夹回合法区间时的标题（P-M-5）。
@@ -138,20 +137,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p>与 {@link #PRESET_BROKEN_TITLE} 分开：那一条是「这份预设不能用，什么都没改」，
      * 这一条是「用上了，但有几个值替你收回了合法范围」—— 两种结论不能共用一个标题。
      */
-    private static final String PRESET_CLAMPED_TITLE = "预设里有越界参数";
+    private static final String PRESET_CLAMPED_TITLE =
+            NeovideCursorBundle.message("settings.dialog.presetClamped.title");
 
     // ==================== 警告文案（契约 §2.2 / §7.3 / §9.4，逐字，不得改动）====================
 
     private static final String W_ALWAYS_HIGH_FPS =
-            "常驻按 8ms 刷新，光标跟随最跟手，但会一直占 CPU。"
-            + "机器卡或笔记本省电时可以关掉 —— 代价是停手后第一次操作会慢一拍。";
+            NeovideCursorBundle.message("settings.comment.alwaysHighFps");
 
     private static final String W_HIDE_NATIVE =
-            "勾选后只显示拖尾光标。<b>注意</b>：它改的是 IDE 配色方案且会落盘，"
-            + "卸载插件后原生光标可能仍是隐形的 —— 届时从本页取消勾选即可恢复。";
+            NeovideCursorBundle.message("settings.comment.hideNative");
 
     private static final String W_COUPLING =
-            "提示：勾选「隐藏原生光标」时建议同时开「常驻刷新」，否则跟随会有延迟。";
+            NeovideCursorBundle.message("settings.comment.coupling");
 
     /**
      * 目标帧率的说明。
@@ -167,9 +165,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 给做不到的数字让用户选，是骗人。
      */
     private static final String W_TARGET_FPS =
-            "只在开启「常驻刷新」时生效。<b>125</b> 是稳定档；"
-            + "<b>144</b> 适合 144Hz 以上显示器，实测能精准达成。"
-            + "<br/>再往上（165/240）受系统睡眠精度限制，实测反而更不准，所以不提供。";
+            NeovideCursorBundle.message("settings.comment.targetFps");
 
     /**
      * 「斜度」的说明。
@@ -185,19 +181,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * </pre>
      */
     private static final String W_SLOPE =
-            "单行打字时四边形的<b>倾斜程度</b>。"
-            + "<br/><b>0% = 纯矩形</b>：只上下伸缩、左右边缘垂直，完全没有倾斜"
-            + "（<b>拉伸仍然存在</b>，不是取消形变）。"
-            + "<br/><b>100% = 完全斜</b>：等于「拉伸强度」推导出的原值，也就是上游原版效果。"
-            + "<br/><b>本项随预设变化</b>：改了它会自动生成副本，切预设回到该预设的值。"
-            + "<br/>注意「输入平滑」会把倾斜压平：平滑开大时斜度也会显得更小。";
+            NeovideCursorBundle.message("settings.comment.slope");
 
     /** 目标帧率下拉项（List 而不是数组 —— row.comboBox 要求 Collection） */
     private static final java.util.List<String> FPS_ITEMS =
-            Arrays.asList("125 fps（推荐）", "144 fps");
+            Arrays.asList(NeovideCursorBundle.message("settings.item.fps125"),
+                    NeovideCursorBundle.message("settings.item.fps144"));
 
     private static final String W_GLOW_LAYERS =
-            "越多越平滑，但每层都要 CPU 绘制，机器慢时建议调低。层数不影响亮度。";
+            NeovideCursorBundle.message("settings.comment.glowLayers");
 
     /**
      * 辉光锐度/外扩的说明（0.9.6 / M6：显示层从「外扩幅度」改成「锐度」，内部值不变）。
@@ -205,15 +197,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p>原文案「0.6 是原版 JS 的夸张光雾（约 40px）」保留其事实，但主语换成锐度 ——
      * 否则用户看到一个叫「锐度」的滑块配一段讲 0.6 的文案，会以为滑块坏了。
      */
+    // 【2026-10-29 补】用户报「预览里辉光很大，和编辑器里不一样」。
+    // 查证结论：半径公式两边同一个（shadowBlurFactor × 光标较长边），
+    // 真正的差别是**窗口尺寸**——预览窗只有 110px 高，20px 的光晕占去近两成；
+    // 编辑器窗口近千像素，同一半径只占个位数百分比。不是 bug，但要说明。
     private static final String W_SHADOW_BLUR =
-            "数值越小光晕越散（像雾），越大越收紧（贴近光标边缘）。"
-            + "<b>调到最散会明显增加重绘开销</b>，慢机器可能掉帧。默认 73 比较适中。"
-            // 【2026-10-29 补】用户报「预览里辉光很大，和编辑器里不一样」。
-            // 查证结论：半径公式两边同一个（shadowBlurFactor × 光标较长边），
-            // 真正的差别是**窗口尺寸**——预览窗只有 110px 高，20px 的光晕占去近两成；
-            // 编辑器窗口近千像素，同一半径只占个位数百分比。不是 bug，但要说明。
-            + "<br/>预览窗很小，<b>同样的外扩量在预览里会显得比编辑器里大得多</b>，"
-            + "判断实际观感请以编辑器为准。";
+            NeovideCursorBundle.message("settings.comment.shadowBlur");
 
     /**
      * 拉伸强度的说明。
@@ -229,17 +218,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * </ol>
      */
     private static final String W_STRETCH =
-            "<b>只影响单行打字/退格</b>：越大后缘越慢、拉得越长。"
-            + "<br/><b>调它对换行没有影响</b> —— 跨行缎带由「拖尾密度」和「跨行动画时长」决定。"
-            + "<br/>另外它会被「输入平滑」抵消：平滑把四角速度差压平后，拉伸强度的效果会变弱。"
-            + "两者都调高时，观感可能反而更「平」。";
+            NeovideCursorBundle.message("settings.comment.stretch");
 
     private static final String W_FADE_OFF =
-            "淡出关闭时这两个值不生效，辉光会瞬间消失。";
+            NeovideCursorBundle.message("settings.comment.fadeOff");
 
     /** 契约 §9.4：跨行动画时长的 comment，逐字。 */
     private static final String W_ANIM_LEN =
-            "换行时拖尾持续多久。太长会看到「上一个位置还在拖」，建议 0.1~0.2s。";
+            NeovideCursorBundle.message("settings.comment.animLen");
 
     /**
      * 契约 §9.4：短动画时长的 comment。<b>两边界版本</b>（t7 / R-06 定稿）。
@@ -268,11 +254,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private static final String BR = "<br/>";
 
     private static final String W_SHORT_LEN =
-            "打字/退格时拖尾持续多久。<b>低于 0.04s 会看不出拖尾</b>（太快了），建议 0.08~0.15s。";
+            NeovideCursorBundle.message("settings.comment.shortLen");
 
     /** 契约 §7.3 第三行：动画时序组底部，恒显示，逐字。 */
     private static final String W_ANIM_COUPLING =
-            "这几项只影响时长，拉伸倍率见上方「缎带拉伸强度」。";
+            NeovideCursorBundle.message("settings.comment.animCoupling");
 
     /**
      * 「拖尾密度」（trailSize）的说明 —— 0.9.72 新增。
@@ -288,16 +274,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 那正是缎带效果的核心，但没有文案的话会被当成 bug（「怎么一边是硬的」）。
      */
     private static final String W_TRAIL_SIZE =
-            "<b>控制跨行缎带的两端差异</b>。"
-            + "1.0 = 前缘在<b>第一帧就到新位置</b>、只有后缘慢慢拖出去（最像缎带）；"
-            + "调小则前缘也开始拖，0 = 前后缘等速、缎带消失。"
-            + "<br/>所以本项只决定跨行；行内打字由「拉伸强度」决定。"
-            + "<br/>注：前缘最快也要 1 帧（约 8ms），不可能真的 0 —— 那是绘制帧率的下限。";
+            NeovideCursorBundle.message("settings.comment.trailSize");
 
     /** 「跨行动画时长」补充说明：它同时是 trailSize 的基准。 */
     private static final String W_ANIM_LEN_EXTRA =
-            "<b>它和「拖尾密度」一起决定缎带长度</b>：后缘 = 本值，"
-            + "前缘 = 本值 ×（1 − 拖尾密度）。所以拖尾密度为 1.0 时前缘是 0（瞬间到位）。";
+            NeovideCursorBundle.message("settings.comment.animLenExtra");
 
     /**
      * 动画时序：「输入平滑」的说明。
@@ -310,28 +291,26 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * </ol>
      */
     private static final String W_TYPING_SMOOTH =
-            "把四角速度差压平一点，让打字更连贯。<b>0% 原样，100% 最平</b>。"
-            + "<br/><b>它与「拉伸强度」互相抵消</b>：两者都在调四角的快慢差，"
-            + "所以把拉伸强度调高、同时又把本项开大，净效果可能几乎看不出来。"
-            + "<br/>只影响单行；跨行缎带不受本项影响（由「拖尾密度」和「跨行动画时长」决定）。"
-            + "<br/><b>注意：开得越大，单行连续快速输入时拖尾会跟不上。</b>";
+            NeovideCursorBundle.message("settings.comment.typingSmooth");
 
     /** 高级（诊断）区：性能诊断开关的说明。该项不持久化。 */
     private static final String W_PAINT_DIAG =
-            "跳过绘制只跑计算，用于判断卡顿是「画得慢」还是「调度慢」。重启后自动关闭。";
+            NeovideCursorBundle.message("settings.comment.paintDiag");
 
     // ==================== 下拉项文案（契约 §2.4：不得只显示枚举名）====================
 
-    private static final String MODE_SPRING_TEXT = "弹簧拉伸（Neovide 原版效果）";
-    private static final String MODE_AFTERIMAGE_TEXT = "残影轨迹（低帧率更稳）";
+    private static final String MODE_SPRING_TEXT =
+            NeovideCursorBundle.message("settings.item.modeSpring");
+    private static final String MODE_AFTERIMAGE_TEXT =
+            NeovideCursorBundle.message("settings.item.modeAfterimage");
     private static final List<String> MODE_ITEMS = Arrays.asList(MODE_SPRING_TEXT, MODE_AFTERIMAGE_TEXT);
 
     private static final int COMMENT = -1;
 
     private static final HyperlinkEventAction NO_LINK = HyperlinkEventAction.HTML_HYPERLINK_INSTANCE;
 
-    /** 「恢复为默认值」按钮的文案模板。 */
-    private static final String RESTORE_TPL = "恢复为「%s」默认值";
+    /** 「恢复为默认值」按钮的文案键（带 {0} 占位符）。 */
+    private static final String RESTORE_KEY = "settings.button.restoreDefault";
 
     // ==================== 2026-10-28：「是否随预设」的统一提示 ====================
     //
@@ -349,19 +328,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     // 选蓝灰/土黄而不是红绿：红绿在深色主题下容易与警告色混淆。
     /** 全局设置标签（设备开关 + 输入平滑）。 */
     private static final String TAG_GLOBAL =
-            "<font color=\"#6C8EBF\"><b>[全局]</b></font> ";
+            NeovideCursorBundle.message("settings.tag.global") + " ";
     /** 颜色预设域标签（拖尾色 / 辉光色 / 光标渐变）。 */
     private static final String TAG_COLOR =
-            "<font color=\"#C08A3E\"><b>[颜色预设]</b></font> ";
+            NeovideCursorBundle.message("settings.tag.color") + " ";
 
     /** 预设区顶部的总说明。 */
     private static final String PRESET_SCOPE_HINT =
-            "<b>哪些设置随预设变？</b><br/>"
-            + "· <b>没标注的</b>都随动画预设：改任一项会自动生成一个「XX 副本」，切预设回到该预设的值。<br/>"
-            + "· " + TAG_GLOBAL + "切任何预设都不变：总开关、隐藏原生光标、常驻刷新、目标帧率、"
-            + "多光标辉光、光标宽/高、输入平滑、渲染模式、诊断日志。<br/>"
-            + "· " + TAG_COLOR + "由上面「颜色预设」下拉控制，动画预设不碰："
-            + "拖尾颜色、辉光颜色、光标渐变。";
+            NeovideCursorBundle.message("settings.comment.presetScopeHint");
 
     // 【2026-10-28 删除「自定义（未保存）」占位项】
     //
@@ -518,10 +492,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 v -> fmt2(v / 100f)));
 
         // 5. 辉光层数：刻度 = 层数
-        out.add(spec("glowLayers", LAYERS_STEP, " 层",
+        out.add(spec("glowLayers", LAYERS_STEP,
+                NeovideCursorBundle.message("settings.unit.layersSuffix"),
                 s -> s.glowLayers,
                 (s, v) -> s.glowLayers = v,
-                (c, v) -> v + " 层",
+                (c, v) -> NeovideCursorBundle.message("settings.unit.layers",
+                        String.valueOf(v)),
                 v -> String.valueOf(v)));
 
         // 6. 辉光锐度（0.9.6 / M6）：刻度 **0..100 = 锐度**，存储仍是 shadowBlurFactor（外扩 0.05..0.60）。
@@ -530,8 +506,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         out.add(spec("shadowBlurFactor", 1, "",
                 s -> sharpnessOf(s.shadowBlurFactor),
                 (s, v) -> s.shadowBlurFactor = blurOfSharpness(v),
-                (c, v) -> "锐 " + v + "（外扩 " + fmt2(blurOfSharpness(v)) + "）",
-                v -> v == 0 ? "柔" : (v == 100 ? "锐" : String.valueOf(v))));
+                (c, v) -> NeovideCursorBundle.message("settings.unit.sharpness",
+                        v, fmt2(blurOfSharpness(v))),
+                v -> v == 0 ? NeovideCursorBundle.message("settings.tick.soft")
+                        : (v == 100 ? NeovideCursorBundle.message("settings.tick.sharp")
+                        : String.valueOf(v))));
 
         // 7. 拖尾密度：刻度 / 100f
         out.add(spec("trailSize", PCT_STEP, "",
@@ -1020,7 +999,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         } catch (Throwable ignored) {
             // 插件还没注册完 / API 不可用：返回占位
         }
-        return "(未知)";
+        return NeovideCursorBundle.message("settings.version.unknown");
     }
 
     @Override
@@ -1054,7 +1033,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 「已修改」是把基准那一项**就地改名**（不新增条目），由 refreshPresetDisplay() 负责。
             animPresetItems.addAll(animPresetNames());
             colorPresetItems.addAll(colorPresetNames());
-            colorPresetItems.add(CursorPresets.CUSTOM_COLOR_LABEL);   // 颜色不参与预设语义，末项只是兜底
+            // 颜色不参与预设语义，末项只是兜底（显示名走 bundle，选中逻辑仍是下标）
+            colorPresetItems.add(NeovideCursorBundle.message("settings.item.customColor"));
 
             // ---------- 7 个标签页 = 7 个内层 DialogPanel ----------
             //
@@ -1153,13 +1133,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
             com.intellij.ui.components.JBTabbedPane tabs =
                     new com.intellij.ui.components.JBTabbedPane();
-            tabs.addTab("总开关", tabMaster);
-            tabs.addTab("颜色", tabColor);
-            tabs.addTab("光标行手感", tabCursorLine);
-            tabs.addTab("列手感", tabCrossLine);
-            tabs.addTab("辉光", tabGlow);
-            tabs.addTab("特殊", tabSpecial);
-            tabs.addTab("调试", tabDiag);
+            tabs.addTab(NeovideCursorBundle.message("settings.tab.master"), tabMaster);
+            tabs.addTab(NeovideCursorBundle.message("settings.tab.color"), tabColor);
+            tabs.addTab(NeovideCursorBundle.message("settings.tab.cursorLine"), tabCursorLine);
+            tabs.addTab(NeovideCursorBundle.message("settings.tab.crossLine"), tabCrossLine);
+            tabs.addTab(NeovideCursorBundle.message("settings.tab.glow"), tabGlow);
+            tabs.addTab(NeovideCursorBundle.message("settings.tab.special"), tabSpecial);
+            tabs.addTab(NeovideCursorBundle.message("settings.tab.diag"), tabDiag);
 
             DialogPanel outer = BuilderKt.panel(panel -> {
                 // 整页只放这一行：标签页占满宽度（Cell 默认横向 FILL）
@@ -1214,10 +1194,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             bar.setOpaque(false);
 
             javax.swing.JLabel ver = new javax.swing.JLabel(
-                    "<html>Neovide Cursor v" + pluginVersion()
-                            + " ｜ 下方预览窗实时渲染，"
-                            + "拖动滑块/改颜色会立刻变化；"
-                            + "作用于编辑器仍需点「应用 / OK」</html>");
+                    "<html>" + NeovideCursorBundle.message("settings.versionRow", pluginVersion())
+                            + "</html>");
             ver.setForeground(new Color(0x8A8A8A));
             ver.setFont(ver.getFont().deriveFont(java.awt.Font.PLAIN, 11f));
             bar.add(ver, java.awt.BorderLayout.WEST);
@@ -1250,15 +1228,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 落在第二列（下拉列）。**不要删它** —— 删掉后三个按钮会整体左移一列。
         // 实测列位（plans/panel-refactor.md:276）：标签 21 / 下拉 97 /
         // 恢复与动作首列 220（按钮与「恢复默认值」同列）。
-        panel.group("预设", true, g -> {
+        panel.group(NeovideCursorBundle.message("settings.group.presets"), true, g -> {
             // 动画预设：下拉 + 它自己的「恢复默认值」（一键恢复的语义不变：
             // 把该预设已保存的值重新写进 pending，落库仍由「应用 / OK」完成）。
-            g.row("动画预设", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.animPreset"), row -> {
                 row.layout(RowLayout.PARENT_GRID);
                 row.topGap(TopGap.SMALL);
                 animPresetCombo = row.comboBox(animPresetItems, null).getComponent();
                 animPresetCombo.addActionListener(e -> onAnimPresetPicked());
-                animRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                animRestoreBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message(RESTORE_KEY, "…"));
                 animRestoreBtn.addActionListener(e -> restoreAnimPreset());
                 row.cell(animRestoreBtn);
                 return kotlin.Unit.INSTANCE;
@@ -1272,13 +1251,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             g.row("", row -> {
                 row.layout(RowLayout.PARENT_GRID);
                 row.cell();                     // 占住【下拉】列（标签列由 row("") 自动补）→ 按钮从第三列起
-                animNewBtn = new javax.swing.JButton("新建预设…");
+                animNewBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message("settings.button.newAnimPreset"));
                 animNewBtn.addActionListener(e -> createCustomPreset());
                 row.cell(animNewBtn);
-                animRenameBtn = new javax.swing.JButton("重命名…");
+                animRenameBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message("settings.button.renameAnimPreset"));
                 animRenameBtn.addActionListener(e -> renameCustomPreset());
                 row.cell(animRenameBtn);
-                animDeleteBtn = new javax.swing.JButton("删除");
+                animDeleteBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message("settings.button.deleteAnimPreset"));
                 animDeleteBtn.addActionListener(e -> deleteCustomPreset());
                 row.cell(animDeleteBtn);
                 // 初值：内置预设选中时改名/删除置灰。之后每次 refreshPresetDisplay 会再刷。
@@ -1288,11 +1270,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             });
 
             // 0c2. 颜色预设：与动画侧完全对称（2026-10-29 用户要求「颜色也做成完整预设」）。
-            g.row("颜色预设", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.colorPreset"), row -> {
                 row.layout(RowLayout.PARENT_GRID);
                 colorPresetCombo = row.comboBox(colorPresetItems, null).getComponent();
                 colorPresetCombo.addActionListener(e -> onColorPresetPicked());
-                colorRestoreBtn = new javax.swing.JButton(String.format(RESTORE_TPL, "…"));
+                colorRestoreBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message(RESTORE_KEY, "…"));
                 colorRestoreBtn.addActionListener(e -> restoreColorPreset());
                 row.cell(colorRestoreBtn);
                 return kotlin.Unit.INSTANCE;
@@ -1301,13 +1284,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             g.row("", row -> {
                 row.layout(RowLayout.PARENT_GRID);
                 row.cell();
-                colorNewBtn = new javax.swing.JButton("新建颜色预设…");
+                colorNewBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message("settings.button.newColorPreset"));
                 colorNewBtn.addActionListener(e -> createCustomColorPreset());
                 row.cell(colorNewBtn);
-                colorRenameBtn = new javax.swing.JButton("重命名颜色…");
+                colorRenameBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message("settings.button.renameColorPreset"));
                 colorRenameBtn.addActionListener(e -> renameCustomColorPreset());
                 row.cell(colorRenameBtn);
-                colorDeleteBtn = new javax.swing.JButton("删除颜色");
+                colorDeleteBtn = new javax.swing.JButton(
+                        NeovideCursorBundle.message("settings.button.deleteColorPreset"));
                 colorDeleteBtn.addActionListener(e -> deleteCustomColorPreset());
                 row.cell(colorDeleteBtn);
                 colorRenameBtn.setEnabled(false);
@@ -1331,8 +1317,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p>全是「影响整个插件行为」的东西，不随动画预设变化。
      */
     private void buildMasterGroup(Panel panel) {
-        panel.group("总开关", true, g -> {
-            g.row("启用拖尾光标（总开关）", row -> {
+        panel.group(NeovideCursorBundle.message("settings.group.master"), true, g -> {
+            g.row(NeovideCursorBundle.message("settings.row.enableTrail"), row -> {
                 row.topGap(TopGap.SMALL);
                 bindCheck(row, () -> pending.enabled, v -> pending.enabled = v);
                 return kotlin.Unit.INSTANCE;
@@ -1341,13 +1327,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 【P11 第二轮 2026-10-31】说明从「控件右侧」（Cell.comment）改成
             // 「控件下方」（row.rowComment）：全页说明统一到行标题列的同一条左缘。
             // 原来右侧说明在 x≈580、下方说明在 x≈330，同一页两种左缘 = 用户说的「放得随意」。
-            g.row("隐藏原生光标（覆盖层充当光标）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.hideNative"), row -> {
                 bindCheck(row, () -> pending.hideNativeCaret, v -> pending.hideNativeCaret = v);
                 row.rowComment(W_HIDE_NATIVE, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("常驻刷新（不停手降频）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.alwaysHighFps"), row -> {
                 bindCheck(row, () -> pending.alwaysHighFps, v -> pending.alwaysHighFps = v);
                 row.rowComment(W_ALWAYS_HIGH_FPS, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
@@ -1358,7 +1344,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 审查发现 targetFps 字段已加进 State / loadState / copyFrom / FIELDS，
             // 也已接进 CaretAnimator.computeNextDelayNs，但**面板里没有控件** ——
             // 用户根本没有入口选 144。字段通到底但 UI 断了，等于白做。
-            g.row("目标帧率", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.targetFps"), row -> {
                 ComboBoxKt.bindItem(
                         row.comboBox(FPS_ITEMS, null),
                         new MutableProperty<String>() {
@@ -1374,12 +1360,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             });
 
             // 【多光标不辉光】全局设置，不随预设变化
-            g.row("多光标时关闭辉光（只保留拉伸）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.multiCursorNoGlow"), row -> {
                 bindCheck(row, () -> pending.multiCursorNoGlow,
                         v -> pending.multiCursorNoGlow = v);
-                row.rowComment(TAG_GLOBAL + "光标 ≥ 2 个时把辉光层数强制归零，"
-                        + "只保留拖尾拉伸形状 —— 减少多光标时的绘制开销。"
-                        + "单光标不受影响。", COMMENT, NO_LINK);
+                row.rowComment(TAG_GLOBAL
+                                + NeovideCursorBundle.message("settings.comment.multiCursorNoGlow"),
+                        COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
@@ -1400,7 +1386,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 预览窗和它影响的参数放在同一组，看着窗调，调的就是窗里发生的事。
      */
     private void buildInlineGroup(Panel panel) {
-        panel.group("单行输入输出（打字 / 退格）", true, g -> {
+        panel.group(NeovideCursorBundle.message("settings.group.inline"), true, g -> {
             // 【P11 面板重构 2026-10-31】预览窗左移，光标宽/高并排到它右边。
             //
             // ① 为什么必须 layout(RowLayout.INDEPENDENT)：
@@ -1431,12 +1417,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 });
                 return kotlin.Unit.INSTANCE;
             });
-            g.row("短动画时长（打字/退格）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.shortAnimLen"), row -> {
                 addSlider(row, specOf("shortAnimationLength"), null);
                 row.rowComment(W_SHORT_LEN, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
-            g.row("输入平滑（拖尾形状 · 全局）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.typingSmooth"), row -> {
                 addSlider(row, specOf("typingSmoothness"), null);
                 row.rowComment(TAG_GLOBAL + W_TYPING_SMOOTH, COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
@@ -1447,7 +1433,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // （见 TrailCorner.jump 的 isShortJump 分支），跨行分支用的是
             // trailSize + animationLength。
             // 放在「多行缎带」下会让用户以为它管跨行 —— 调了没反应。
-            g.row("拉伸强度（行内后缘）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.stretch"), row -> {
                 addSlider(row, specOf("stretchRatioK"), springMode);
                 row.rowComment(W_STRETCH, COMMENT, NO_LINK).enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
@@ -1459,7 +1445,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 正是纪律四-D 说的定时炸弹，这里拆开。
             //
             // 默认「跟随拉伸强度」：不碰它 = 旧行为完全不变。
-            g.row("斜度（单行倾斜）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.slope"), row -> {
                 addSlider(row, specOf("slopeTicks"), springMode);
                 row.rowComment(W_SLOPE, COMMENT, NO_LINK).enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
@@ -1474,7 +1460,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 位置不变：紧跟在「斜度」之后 —— 两者都涉及单行拖尾的形状；
             // 设备级开关不跟随预设，所以文案挂 TAG_GLOBAL。
-            g.row("前缘贴合（半边拖尾 · 全局）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.leadingSnap"), row -> {
                 // 【M-6】与同组「拉伸强度 / 斜度」同一条规则：原实现只被 SpringTrail 消费，
                 // 残影（AFTERIMAGE）模式走 tickAfterimage、根本不跑 assignRanks ——
                 // 沿用置灰规则，避免出现「看起来可点但完全无效」的开关。
@@ -1482,10 +1468,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         v -> pending.leadingSnap = v).enabledIf(springMode);
                 // 【文案口径】必须让用户一眼看出「勾了没效果」，否则会被当成 bug 上报。
                 row.rowComment(TAG_GLOBAL
-                        + "<b>待实现：此功能尚未实现，勾选不会改变观感。</b>"
-                        + "<br/>开关状态会被保存，供实现后使用。"
-                        + "<br/><b>不随动画预设变化</b>：切任何预设都不改本项。"
-                        + "<br/><b>残影模式下置灰</b>。", COMMENT, NO_LINK)
+                                + NeovideCursorBundle.message("settings.comment.leadingSnap"),
+                        COMMENT, NO_LINK)
                         .enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });
@@ -1503,7 +1487,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 语义上没坏，但索引契约被破坏。恢复原序。
      */
     private void buildCrossGroup(Panel panel) {
-        panel.group("多行缎带（换行 / 跳转）", true, g -> {
+        panel.group(NeovideCursorBundle.message("settings.group.cross"), true, g -> {
             // 【P11 面板重构 2026-10-31】预览窗左移，跨行两个参数并排到它右边 ——
             // 与标签 3（光标行手感）同一套语法：预览在左、本页核心参数在右、说明在下方。
             // INDEPENDENT / verticalAlign 的理由见 buildInlineGroup 的注释。
@@ -1522,12 +1506,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     // 核实 TrailCorner.jump()：短跳分支只读 shortAnimationLength
                     // 与 trailFactors，**完全不读 trailSize**。trailSize 只出现在跨行分支。
                     // 所以「也影响行内」是没有依据的陈述，会误导用户去调它试行内手感。
-                    np.row("拖尾密度（跨行缎带）", r -> {
+                    np.row(NeovideCursorBundle.message("settings.row.trailSize"), r -> {
                         addSlider(r, specOf("trailSize"), springMode);
                         r.rowComment(W_TRAIL_SIZE, COMMENT, NO_LINK).enabledIf(springMode);
                         return kotlin.Unit.INSTANCE;
                     });
-                    np.row("跨行动画时长", r -> {
+                    np.row(NeovideCursorBundle.message("settings.row.animLen"), r -> {
                         addSlider(r, specOf("animationLength"), null);
                         r.rowComment(W_ANIM_LEN + BR + W_ANIM_LEN_EXTRA, COMMENT, NO_LINK);
                         return kotlin.Unit.INSTANCE;
@@ -1563,17 +1547,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 现在恢复「同色系深浅渐变」，文案必须说清两端的颜色从哪来。
      */
     private static final String W_CURSOR_GRADIENT =
-            "光标本身<b>从上到下有个同色系的深浅变化</b>："
-            + "上端 = 你选的拖尾颜色，下端 = 从<b>辉光颜色</b>自动算出的更深版本。"
-            + "<br/>所以换了拖尾色或辉光色，这个渐变会跟着变，始终是同一色系的两个层次。"
-            + "<br/><b>关闭时是纯色填充</b>，没有渐变。"
-            + "<br/><b>与「彩虹（动态）」颜色预设互斥</b>："
-            + "选了彩虹预设时走色相循环，本项不生效。"
-            + "<br/>辉光本身的颜色不受本项影响 —— 它始终用「辉光颜色」那一项。";
+            NeovideCursorBundle.message("settings.comment.cursorGradient");
 
     /** C. 颜色 —— 拖尾纯色 + 不透明度 + 辉光色 + 光标渐变。 */
     private void buildColorGroup(Panel panel) {
-        panel.group("颜色", true, g -> {
+        panel.group(NeovideCursorBundle.message("settings.group.color"), true, g -> {
             // 【0.9.105 起本组是标签页 2 的全部内容】
             //
             // 原来「辉光颜色」在辉光组、「光标渐变」在光标组，两者都与「颜色」
@@ -1589,7 +1567,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 为什么用 row.label 而不是再开一行：平台 DSL 的 row 是网格里的一行，
             // 一行内多对「标签 + 控件」正是它支持的写法（预设下拉那一行就是同款）。
-            g.row("拖尾颜色", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.tailColor"), row -> {
                 row.topGap(TopGap.SMALL);
                 tailColorPanel = new ColorPanel();
                 tailColorPanel.setSupportTransparency(false);
@@ -1597,7 +1575,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 // 自动反映到「当前预设」下拉上 —— 必须自己挂 ActionListener 重算。
                 tailColorPanel.addActionListener(e -> onColorPanelChanged());
                 row.cell(tailColorPanel);
-                row.label("辉光颜色").gap(RightGap.COLUMNS);
+                row.label(NeovideCursorBundle.message("settings.row.glowColor"))
+                        .gap(RightGap.COLUMNS);
                 shadowColorPanel = new ColorPanel();
                 shadowColorPanel.setSupportTransparency(false);
                 shadowColorPanel.addActionListener(e -> onColorPanelChanged());
@@ -1605,7 +1584,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("拖尾不透明度", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.tailOpacity"), row -> {
                 addSlider(row, specOf("tailOpacity"), null);
                 return kotlin.Unit.INSTANCE;
             });
@@ -1615,7 +1594,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 原名「RGB 渐变（实验性）」+ 文案「下端=蓝紫」，但 0.9.75 起
             // 实现被换成了色相循环（彩虹），文案与实际行为早已不符。
             // 现在恢复「光标自身的同色系渐变」语义，文案同步重写。
-            g.row("光标渐变（上下深浅）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.cursorGradient"), row -> {
                 bindCheck(row, () -> pending.rgbGradient,
                         v -> pending.rgbGradient = v);
                 row.rowComment(TAG_COLOR + W_CURSOR_GRADIENT, COMMENT, NO_LINK);
@@ -1628,8 +1607,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     /** C2. 辉光 —— 围绕光标矩形的光晕。「辉光颜色」不在这里，在标签 2（颜色）。 */
     private void buildGlowGroup(Panel panel) {
-        panel.group("辉光", true, g -> {
-            g.row("启用辉光", row -> {
+        panel.group(NeovideCursorBundle.message("settings.group.glow"), true, g -> {
+            g.row(NeovideCursorBundle.message("settings.row.enableGlow"), row -> {
                 row.topGap(TopGap.SMALL);
                 bindCheck(row, () -> pending.useShadow, v -> {
                     pending.useShadow = v;
@@ -1642,18 +1621,18 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 留在本组会让「改颜色」这件事分散在两个标签页里。
             // shadowColorPanel 的创建 / 监听没有丢：只是换了个组构建它。
             // 本组下面三项的 enabledIf(shadowOn) 与它仍然是同一个属性对象，联动同步。
-            g.row("辉光峰值不透明度", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.glowOpacity"), row -> {
                 addSlider(row, specOf("glowOpacity"), shadowOn);
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("辉光层数", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.glowLayers"), row -> {
                 addSlider(row, specOf("glowLayers"), shadowOn);
                 row.rowComment(W_GLOW_LAYERS, COMMENT, NO_LINK).enabledIf(shadowOn);
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("辉光锐度（越大越锐，外扩越窄）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.glowSharpness"), row -> {
                 addSlider(row, specOf("shadowBlurFactor"), shadowOn);
                 row.rowComment(W_SHADOW_BLUR, COMMENT, NO_LINK).enabledIf(shadowOn);
                 return kotlin.Unit.INSTANCE;
@@ -1680,22 +1659,24 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p>这两项都是<b>持久配置</b>，不随动画预设变化。
      */
     private void buildCursorSizeBlock(Panel panel) {
-        panel.group("光标尺寸", true, cur -> {
-            cur.row("光标宽度", row -> {
+        panel.group(NeovideCursorBundle.message("settings.group.cursorSize"), true, cur -> {
+            cur.row(NeovideCursorBundle.message("settings.row.cursorWidth"), row -> {
                 // 【0.9.59】0 的语义取消 —— 用户反馈「0 光标不变，实际 2px」，
                 // 那个档位看不出区别。改成纯 1-5px。
                 addSlider(row, specOf("cursorWidthPx"), null);
-                row.rowComment(TAG_GLOBAL + "1~5 像素，5 = IDEA 粗光标宽度（上限）。"
-                        + "静止时也保持这个宽度。", COMMENT, NO_LINK);
+                row.rowComment(TAG_GLOBAL
+                                + NeovideCursorBundle.message("settings.comment.cursorWidth"),
+                        COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
 
             // 【0.9.105 迁走】「光标渐变（上下深浅）」这一行现在在 buildColorGroup。
 
-            cur.row("光标高度（% 行高）", row -> {
+            cur.row(NeovideCursorBundle.message("settings.row.cursorHeight"), row -> {
                 addSlider(row, specOf("cursorHeightRatio"), null);
-                row.rowComment(TAG_GLOBAL + "100% = 顶格（占满行高）；30% = 只占三成（居中）。"
-                        + "上限就是顶格，不能超过。", COMMENT, NO_LINK);
+                row.rowComment(TAG_GLOBAL
+                                + NeovideCursorBundle.message("settings.comment.cursorHeight"),
+                        COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
             return kotlin.Unit.INSTANCE;
@@ -1704,8 +1685,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     /** B. 淡出 —— 辉光停止后柔和熄灭。两项时长受「辉光淡出」联动置灰。 */
     private void buildFadeGroup(Panel panel) {
-        panel.group("淡出", true, g -> {
-            g.row("辉光淡出（停止后柔和熄灭）", row -> {
+        panel.group(NeovideCursorBundle.message("settings.group.fade"), true, g -> {
+            g.row(NeovideCursorBundle.message("settings.row.glowFade"), row -> {
                 row.topGap(TopGap.SMALL);
                 bindCheck(row, () -> pending.overlayFadeOut, v -> {
                     pending.overlayFadeOut = v;
@@ -1714,13 +1695,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("淡出前保持时长", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.fadeHold"), row -> {
                 addSlider(row, specOf("cursorDisappearDelay"), fadeOn);
                 row.rowComment(W_FADE_OFF, COMMENT, NO_LINK).enabledIf(fadeOn);
                 return kotlin.Unit.INSTANCE;
             });
 
-            g.row("淡出时长", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.fadeDuration"), row -> {
                 addSlider(row, specOf("cursorFadeOutDuration"), fadeOn);
                 return kotlin.Unit.INSTANCE;
             });
@@ -1740,8 +1721,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 与组内那条 ⚠ 说明都保留，只是不再需要先点开。
      */
     private void buildExperimentalGroup(Panel panel) {
-        panel.group("实验性（官方不建议使用）", true, g -> {
-            g.row("拖尾渲染模式", row -> {
+        panel.group(NeovideCursorBundle.message("settings.group.experimental"), true, g -> {
+            g.row(NeovideCursorBundle.message("settings.row.renderMode"), row -> {
                 Cell<com.intellij.openapi.ui.ComboBox<String>> cell = ComboBoxKt.bindItem(
                         row.comboBox(MODE_ITEMS, null),
                         new MutableProperty<String>() {
@@ -1754,10 +1735,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 return kotlin.Unit.INSTANCE;
             });
             g.row("", row -> {
-                row.rowComment("⚠ 残影模式（AFTERIMAGE）为实验性功能，<b>官方不建议日常使用</b>："
-                        + "它记录真实历史位置，掉帧时残影会变稀疏；"
-                        + "且当前<b>只跟随主光标</b>，多光标下只有主光标有残影。"
-                        + "除非你在低帧率环境明确需要它，否则请保持「弹簧（拉伸）」模式。",
+                row.rowComment(
+                        NeovideCursorBundle.message("settings.comment.renderModeWarning"),
                         COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
@@ -1776,8 +1755,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 折叠只是多一次点击。
      */
     private void buildDiagGroup(Panel panel) {
-        panel.group("高级（诊断）", true, g -> {
-            g.row("性能诊断（跳过重绘，只跑计算）", row -> {
+        panel.group(NeovideCursorBundle.message("settings.group.diag"), true, g -> {
+            g.row(NeovideCursorBundle.message("settings.row.paintDiag"), row -> {
                 row.topGap(TopGap.SMALL);
                 // 【0.9.88 修复：不能用 bindCheck】
                 //
@@ -1813,11 +1792,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 曾经把它塞进上面「性能诊断」那一行，结果两行 label 不匹配：
             // 行标题写着「性能诊断（跳过重绘，只跑计算）」，下面却有两个复选框，
             // 用户看到「诊断那里怎么两个框框」。
-            g.row("诊断日志（记录光标状态，供开发者排查）", row -> {
+            g.row(NeovideCursorBundle.message("settings.row.diagLogging"), row -> {
                 row.bottomGap(BottomGap.SMALL);
                 bindCheck(row, () -> pending.diagLogging, v -> pending.diagLogging = v);
-                row.rowComment("勾选后每 15 帧往 idea.log 写一条光标状态（caret / block / draw）。"
-                                + "复现问题后把 idea.log 发给开发者；长期开着会撑大日志。",
+                row.rowComment(
+                        NeovideCursorBundle.message("settings.comment.diagLogging"),
                         COMMENT, NO_LINK);
                 return kotlin.Unit.INSTANCE;
             });
@@ -2228,8 +2207,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 才说明数据坏了。
             if (applied == 0) {
                 showUserNotice(PRESET_BROKEN_TITLE,
-                        "预设「" + e.name + "」的内容已损坏（没有可应用的参数），"
-                                + "本次切换已取消，当前设置保持不变。", false);
+                        NeovideCursorBundle.message("settings.dialog.presetBroken.message",
+                                e.name,
+                                NeovideCursorBundle.message(
+                                        "settings.dialog.presetBroken.noFields")), false);
                 // 【必须抑制派生（审查 M-1）】refreshPresetDisplay() 第一件事是
                 // afterPendingEdited()。如果此刻 pending 已经偏离基准（例如用户先改了
                 // 参数、原预设又被删），它会派生出一个「X 副本」——
@@ -2309,13 +2290,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 失败时**不写半套颜色**，并按 P-H-3 已经建立好的范式处置：
             // 提示用户 + 抑制派生 + 把下拉拉回真实状态（否则「点了没反应」也算静默）。
-            String colorError = applyColorSnapshot(pending, e);
+            ColorSnapshotFailure colorError = applyColorSnapshot(pending, e);
             if (colorError != null) {
-                LOG.warn("neovide-cursor: 颜色预设「" + e.name + "」" + colorError
-                        + "，本次切换已取消");
+                LOG.warn("neovide-cursor: 颜色预设「" + e.name + "」"
+                        + colorFailureLogReason(colorError) + "，本次切换已取消");
                 showUserNotice(PRESET_BROKEN_TITLE,
-                        "颜色预设「" + e.name + "」" + colorError
-                                + "，本次切换已取消，当前颜色保持不变。", false);
+                        NeovideCursorBundle.message("settings.dialog.colorPresetBroken.message",
+                                e.name, colorFailureUserReason(colorError)), false);
                 boolean prevSuppress = suppressDerive;
                 suppressDerive = true;
                 try {
@@ -2617,7 +2598,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         for (CustomPresets.Entry e : CustomPresets.parse(pending.customColorPresets)) {
             next.add(e.name);
         }
-        next.add(CursorPresets.CUSTOM_COLOR_LABEL);
+        next.add(NeovideCursorBundle.message("settings.item.customColor"));
         replaceModel(colorPresetCombo, colorPresetItems, next);
     }
 
@@ -2658,7 +2639,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         if (b.builtinIdx >= 0) {
             return b.builtinIdx < CursorPresets.ANIM_PRESETS.length
-                    ? CursorPresets.ANIM_PRESETS[b.builtinIdx].name() : null;
+                    ? animPresetDisplayName(b.builtinIdx) : null;
         }
         return b.custom.name;
     }
@@ -2674,10 +2655,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             String target = animBaseName(currentAnimBase());
             if (target != null) {
                 animRestoreBtn.setEnabled(true);
-                animRestoreBtn.setText(String.format(RESTORE_TPL, target));
+                animRestoreBtn.setText(NeovideCursorBundle.message(RESTORE_KEY, target));
             } else {
                 animRestoreBtn.setEnabled(false);
-                animRestoreBtn.setText("恢复默认值（此预设没有可继承的父预设）");
+                animRestoreBtn.setText(
+                        NeovideCursorBundle.message("settings.button.restoreNoParent"));
             }
         }
         if (colorRestoreBtn != null) {
@@ -2686,10 +2668,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             String target = colorBaseName(currentColorBase());
             if (target != null) {
                 colorRestoreBtn.setEnabled(true);
-                colorRestoreBtn.setText(String.format(RESTORE_TPL, target));
+                colorRestoreBtn.setText(NeovideCursorBundle.message(RESTORE_KEY, target));
             } else {
                 colorRestoreBtn.setEnabled(false);
-                colorRestoreBtn.setText("恢复默认值（此颜色预设没有可继承的父预设）");
+                colorRestoreBtn.setText(
+                        NeovideCursorBundle.message("settings.button.restoreNoParentColor"));
             }
         }
     }
@@ -2760,8 +2743,11 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 // 但按钮与下拉仍然显示一切正常 —— 必须告诉用户，并保持原值不动。
                 if (applied == 0) {
                     showUserNotice(PRESET_BROKEN_TITLE,
-                            "预设「" + base.custom.name + "」的内容已损坏（没有可应用的参数），"
-                                    + "恢复未执行，当前设置保持不变。", false);
+                            NeovideCursorBundle.message(
+                                    "settings.dialog.presetRestoreBroken.message",
+                                    base.custom.name,
+                                    NeovideCursorBundle.message(
+                                            "settings.dialog.presetBroken.noFields")), false);
                     return;
                 }
                 // 【P-M-5 / U-1，2026-10-31 校验下沉】与 onAnimPresetPicked 的自定义分支
@@ -2808,13 +2794,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 // 【P-M-3 / P-M-6，2026-10-31】与 onColorPresetPicked 的自定义分支同一条判据。
                 // 原来这里 `hex == null` 只 `return` —— 连刷新都没有，用户点了「恢复默认值」
                 // 看到的是「什么都没发生」，且没有任何说明。
-                String colorError = applyColorSnapshot(pending, b.custom);
+                ColorSnapshotFailure colorError = applyColorSnapshot(pending, b.custom);
                 if (colorError != null) {
-                    LOG.warn("neovide-cursor: 颜色预设「" + b.custom.name + "」" + colorError
-                            + "，恢复未执行");
+                    LOG.warn("neovide-cursor: 颜色预设「" + b.custom.name + "」"
+                            + colorFailureLogReason(colorError) + "，恢复未执行");
                     showUserNotice(PRESET_BROKEN_TITLE,
-                            "颜色预设「" + b.custom.name + "」" + colorError
-                                    + "，恢复未执行，当前颜色保持不变。", false);
+                            NeovideCursorBundle.message(
+                                    "settings.dialog.colorPresetRestoreBroken.message",
+                                    b.custom.name,
+                                    colorFailureUserReason(colorError)), false);
                     return;
                 }
             }
@@ -2848,10 +2836,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         LOG.warn("neovide-cursor: 预设「" + presetName + "」里有越界数值，已夹回合法区间："
                 + String.join("、", clamped));
         showUserNotice(PRESET_CLAMPED_TITLE,
-                "预设「" + presetName + "」里有 " + clamped.size()
-                        + " 个参数超出正常范围，已按合法区间应用（具体字段见 idea.log）。",
+                NeovideCursorBundle.message("settings.dialog.presetClamped.message",
+                        presetName, clamped.size()),
                 false);
     }
+
+    /** 颜色快照失败的两类原因（日志与界面各用一份文案，互不干扰）。 */
+    private enum ColorSnapshotFailure { MISSING_FIELDS, BAD_FORMAT }
 
     /**
      * 把自定义颜色预设的快照写进 {@code s}。
@@ -2866,19 +2857,34 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * 同一份坏快照，面板拒绝、菜单照写，写入后绘制层解析失败 → 光标变黑。
      * 「校验写在调用方」的代价就是每多一个入口就多一个洞。
      *
-     * @return {@code null} = 已成功写入；否则是给用户看的失败原因
+     * @return {@code null} = 已成功写入；否则是失败类型（界面/日志各有一份文案）
      */
-    private static String applyColorSnapshot(NeovideCursorSettings.State s,
-                                             CustomPresets.Entry e) {
-        switch (SettingsField.restoreColorSnapshot(s, e.snapshot)) {
-            case OK:
-                return null;
-            case MISSING_FIELDS:
-                return "的内容已损坏（缺少颜色字段）";
-            case BAD_FORMAT:
-            default:
-                return "的颜色格式非法（不是 #RRGGBB / #RRGGBBAA）";
-        }
+    private static ColorSnapshotFailure applyColorSnapshot(NeovideCursorSettings.State s,
+                                                           CustomPresets.Entry e) {
+        // 穷尽 switch 表达式：将来 ColorRestoreResult 加常量时编译期就报错。
+        return switch (SettingsField.restoreColorSnapshot(s, e.snapshot)) {
+            case OK -> null;
+            case MISSING_FIELDS -> ColorSnapshotFailure.MISSING_FIELDS;
+            case BAD_FORMAT -> ColorSnapshotFailure.BAD_FORMAT;
+        };
+    }
+
+    /** 日志原因：固定中文，不随界面语言变化（排查时口径稳定）。 */
+    private static String colorFailureLogReason(ColorSnapshotFailure failure) {
+        // 用穷尽 switch 而不是三元式：将来加第三个枚举常量时编译期就报错，
+        // 不会静默归到 BAD_FORMAT。
+        return switch (failure) {
+            case MISSING_FIELDS -> "的内容已损坏（缺少颜色字段）";
+            case BAD_FORMAT -> "的颜色格式非法（不是 #RRGGBB / #RRGGBBAA）";
+        };
+    }
+
+    /** 界面原因：跟随当前 locale。 */
+    private static String colorFailureUserReason(ColorSnapshotFailure failure) {
+        return NeovideCursorBundle.message(switch (failure) {
+            case MISSING_FIELDS -> "settings.dialog.colorSnapshot.missingFields";
+            case BAD_FORMAT -> "settings.dialog.colorSnapshot.badFormat";
+        });
     }
 
     /** 当前颜色预设的「恢复默认值」目标（与 {@link #currentAnimBase()} 同构）。 */
@@ -2897,7 +2903,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         if (b.builtinIdx >= 0) {
             return b.builtinIdx < CursorPresets.COLOR_PRESETS.length
-                    ? CursorPresets.COLOR_PRESETS[b.builtinIdx].name() : null;
+                    ? colorPresetDisplayName(b.builtinIdx) : null;
         }
         return b.custom.name;
     }
@@ -2911,8 +2917,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private void createCustomColorPreset() {
         if (!CustomPresets.canAdd(pending.customColorPresets)) {
             Messages.showWarningDialog(
-                    "自定义颜色预设最多 " + CustomPresets.MAX_PRESETS + " 个。请先删除不用的。",
-                    "无法新建");
+                    NeovideCursorBundle.message("settings.dialog.maxColorPresets",
+                            CustomPresets.MAX_PRESETS),
+                    NeovideCursorBundle.message("settings.dialog.cannotCreate.title"));
             return;
         }
         boolean fromCustom = !pending.colorCustomName.isEmpty();
@@ -2925,7 +2932,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         String suggested = CustomPresets.uniqueName(
                 pending.customColorPresets, base + " 副本");
         java.awt.Component parent = suppressDerive ? null : createComponent();
-        String name = Messages.showInputDialog(parent, "给这套颜色起个名字：", "新建颜色预设",
+        String name = Messages.showInputDialog(parent,
+                NeovideCursorBundle.message("settings.dialog.newColorPreset.prompt"),
+                NeovideCursorBundle.message("settings.dialog.newColorPreset.title"),
                 null, suggested, null);
         if (name == null) {
             return;
@@ -2933,11 +2942,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         String trimmed = name.trim();
         String err = CustomPresets.nameError(trimmed);
         if (err != null) {
-            Messages.showWarningDialog(err + "。", "无法新建");
+            Messages.showWarningDialog(err + "。",
+                    NeovideCursorBundle.message("settings.dialog.cannotCreate.title"));
             return;
         }
         if (CustomPresets.has(pending.customColorPresets, trimmed)) {
-            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法新建");
+            Messages.showWarningDialog(
+                    NeovideCursorBundle.message("settings.dialog.nameTaken", trimmed),
+                    NeovideCursorBundle.message("settings.dialog.cannotCreate.title"));
             return;
         }
         pending.customColorPresets = CustomPresets.put(pending.customColorPresets, trimmed,
@@ -2949,11 +2961,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 重命名当前自定义颜色预设（子预设的父引用会由 rename 一并改掉）。 */
     private void renameCustomColorPreset() {
         if (pending.colorCustomName.isEmpty()) {
-            Messages.showInfoMessage("内置颜色预设是只读的，不能改名。要改请先「新建颜色预设」。", "重命名");
+            Messages.showInfoMessage(
+                    NeovideCursorBundle.message("settings.dialog.builtinColorReadonly.rename"),
+                    NeovideCursorBundle.message("settings.dialog.rename.title"));
             return;
         }
         String from = pending.colorCustomName;
-        String name = Messages.showInputDialog(createComponent(), "新名字：", "重命名颜色预设",
+        String name = Messages.showInputDialog(createComponent(),
+                NeovideCursorBundle.message("settings.dialog.renameColorPreset.prompt"),
+                NeovideCursorBundle.message("settings.dialog.renameColorPreset.title"),
                 null, from, null);
         if (name == null) {
             return;
@@ -2964,16 +2980,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         String err = CustomPresets.nameError(trimmed);
         if (err != null) {
-            Messages.showWarningDialog(err + "。", "无法重命名");
+            Messages.showWarningDialog(err + "。",
+                    NeovideCursorBundle.message("settings.dialog.cannotRename.title"));
             return;
         }
         if (CustomPresets.has(pending.customColorPresets, trimmed)) {
-            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法重命名");
+            Messages.showWarningDialog(
+                    NeovideCursorBundle.message("settings.dialog.nameTaken", trimmed),
+                    NeovideCursorBundle.message("settings.dialog.cannotRename.title"));
             return;
         }
         String next = CustomPresets.rename(pending.customColorPresets, from, trimmed);
         if (next == null) {
-            Messages.showWarningDialog("重命名失败，请重试。", "无法重命名");
+            Messages.showWarningDialog(
+                    NeovideCursorBundle.message("settings.dialog.renameFailed"),
+                    NeovideCursorBundle.message("settings.dialog.cannotRename.title"));
             return;
         }
         pending.customColorPresets = next;
@@ -2984,13 +3005,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 删除当前自定义颜色预设（子预设由 remove 接管到祖父）。 */
     private void deleteCustomColorPreset() {
         if (pending.colorCustomName.isEmpty()) {
-            Messages.showInfoMessage("内置颜色预设是只读的，不能删除。", "删除");
+            Messages.showInfoMessage(
+                    NeovideCursorBundle.message("settings.dialog.builtinColorReadonly.delete"),
+                    NeovideCursorBundle.message("settings.dialog.delete.title"));
             return;
         }
         String name = pending.colorCustomName;
         int ok = Messages.showYesNoDialog(createComponent(),
-                "删除自定义颜色预设「" + name + "」？此操作不可撤销。",
-                "删除颜色预设", Messages.getQuestionIcon());
+                NeovideCursorBundle.message("settings.dialog.deleteColorPreset.message", name),
+                NeovideCursorBundle.message("settings.dialog.deleteColorPreset.title"),
+                Messages.getQuestionIcon());
         if (ok != Messages.YES) {
             return;
         }
@@ -3023,8 +3047,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         if (!CustomPresets
                 .canAdd(pending.customAnimPresets)) {
             Messages.showWarningDialog(
-                    "自定义预设最多 " + CustomPresets
-                            .MAX_PRESETS + " 个。请先删除不用的。", "无法新建");
+                    NeovideCursorBundle.message("settings.dialog.maxAnimPresets",
+                            CustomPresets.MAX_PRESETS),
+                    NeovideCursorBundle.message("settings.dialog.cannotCreate.title"));
             return;
         }
         boolean fromCustom = !pending.animCustomName.isEmpty();
@@ -3043,7 +3068,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         String suggested = CustomPresets
                 .uniqueName(pending.customAnimPresets, base + " 副本");
         java.awt.Component parent = suppressDerive ? null : createComponent();
-        String name = Messages.showInputDialog(parent, "给这套设置起个名字：", "新建预设",
+        String name = Messages.showInputDialog(parent,
+                NeovideCursorBundle.message("settings.dialog.newAnimPreset.prompt"),
+                NeovideCursorBundle.message("settings.dialog.newAnimPreset.title"),
                 null, suggested, null);
         if (name == null) {
             return;                                      // 用户取消
@@ -3055,12 +3082,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 没有提示、应用按钮也不亮。nameError() 当时是死 API（零调用点）。
         String err = CustomPresets.nameError(trimmed);
         if (err != null) {
-            Messages.showWarningDialog(err + "。", "无法新建");
+            Messages.showWarningDialog(err + "。",
+                    NeovideCursorBundle.message("settings.dialog.cannotCreate.title"));
             return;
         }
         if (CustomPresets
                 .has(pending.customAnimPresets, trimmed)) {
-            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法新建");
+            Messages.showWarningDialog(
+                    NeovideCursorBundle.message("settings.dialog.nameTaken", trimmed),
+                    NeovideCursorBundle.message("settings.dialog.cannotCreate.title"));
             return;
         }
         pending.customAnimPresets = CustomPresets
@@ -3073,11 +3103,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 重命名当前选中的自定义预设。内置预设只读，没有「改名」这个概念。 */
     private void renameCustomPreset() {
         if (pending.animCustomName.isEmpty()) {
-            Messages.showInfoMessage("内置预设是只读的，不能改名。要改请先「新建预设」。", "重命名");
+            Messages.showInfoMessage(
+                    NeovideCursorBundle.message("settings.dialog.builtinAnimReadonly.rename"),
+                    NeovideCursorBundle.message("settings.dialog.rename.title"));
             return;
         }
         String from = pending.animCustomName;
-        String name = Messages.showInputDialog(createComponent(), "新名字：", "重命名预设",
+        String name = Messages.showInputDialog(createComponent(),
+                NeovideCursorBundle.message("settings.dialog.renameAnimPreset.prompt"),
+                NeovideCursorBundle.message("settings.dialog.renameAnimPreset.title"),
                 null, from, null);
         if (name == null) {
             return;
@@ -3091,17 +3125,22 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 但非法名场景其实并不重名，那个提示是在骗用户。
         String err = CustomPresets.nameError(trimmed);
         if (err != null) {
-            Messages.showWarningDialog(err + "。", "无法重命名");
+            Messages.showWarningDialog(err + "。",
+                    NeovideCursorBundle.message("settings.dialog.cannotRename.title"));
             return;
         }
         if (CustomPresets.has(pending.customAnimPresets, trimmed)) {
-            Messages.showWarningDialog("已有同名预设：「" + trimmed + "」。请换个名字。", "无法重命名");
+            Messages.showWarningDialog(
+                    NeovideCursorBundle.message("settings.dialog.nameTaken", trimmed),
+                    NeovideCursorBundle.message("settings.dialog.cannotRename.title"));
             return;
         }
         String next = CustomPresets
                 .rename(pending.customAnimPresets, from, trimmed);
         if (next == null) {
-            Messages.showWarningDialog("重命名失败，请重试。", "无法重命名");
+            Messages.showWarningDialog(
+                    NeovideCursorBundle.message("settings.dialog.renameFailed"),
+                    NeovideCursorBundle.message("settings.dialog.cannotRename.title"));
             return;
         }
         pending.customAnimPresets = next;
@@ -3112,13 +3151,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 删除当前选中的自定义预设。内置预设不可删。 */
     private void deleteCustomPreset() {
         if (pending.animCustomName.isEmpty()) {
-            Messages.showInfoMessage("内置预设是只读的，不能删除。", "删除");
+            Messages.showInfoMessage(
+                    NeovideCursorBundle.message("settings.dialog.builtinAnimReadonly.delete"),
+                    NeovideCursorBundle.message("settings.dialog.delete.title"));
             return;
         }
         String name = pending.animCustomName;
         int ok = Messages.showYesNoDialog(createComponent(),
-                "删除自定义预设「" + name + "」？此操作不可撤销。",
-                "删除预设", Messages.getQuestionIcon());
+                NeovideCursorBundle.message("settings.dialog.deleteAnimPreset.message", name),
+                NeovideCursorBundle.message("settings.dialog.deleteAnimPreset.title"),
+                Messages.getQuestionIcon());
         if (ok != Messages.YES) {
             return;
         }
@@ -3322,12 +3364,12 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 原来只报「拉伸系数」，而那个系数是 deriveTrailFactors(k, smooth) 的结果 ——
             // 用户把 smooth 调高后再看这个数字会觉得「我没改拉伸强度啊，怎么系数变了」。
             // 现在直接标注当前 smooth 值，让两个参数的关系可见。
-            singleMoveHint.setText("<html>" + String.format(Locale.ROOT,
-                    "单行动画时长 = 短动画时长 × 拉伸系数" + BR
-                            + "后缘 %d ms / 横向前缘 %d ms" + BR
-                            + "（系数 %.2f×，已含输入平滑 %.0f%% 的压平效果）。",
-                    trailing, leading, f[2] > 0f ? f[0] / f[2] : 0f,
-                    pending.typingSmoothness * 100f) + "</html>");
+            singleMoveHint.setText("<html>" + NeovideCursorBundle.message(
+                    "settings.hint.singleMove",
+                    Long.toString(trailing), Long.toString(leading),
+                    String.format(Locale.ROOT, "%.2f", f[2] > 0f ? f[0] / f[2] : 0f),
+                    String.format(Locale.ROOT, "%.0f", pending.typingSmoothness * 100f))
+                    + "</html>");
         }
         if (crossMoveHint != null) {
             long trailing = Math.round(pending.animationLength * 1000f);
@@ -3349,7 +3391,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // leading=0 时第一帧（dt=8ms）就命中短路，但那已经消耗了一帧。
             // 任何角点至少要跑一帧才会被判为「静止」，所以 0ms 在物理上不存在。
             String leadText = (leading <= 0)
-                    ? "第 1 帧即到位（约 8 ms）"
+                    ? NeovideCursorBundle.message("settings.hint.leadFirstFrame")
                     : leading + " ms";
             // 【P11 面板重构 2026-10-31】这里的两个 hint 是**普通 JLabel**，
             // 不是 DslLabel：
@@ -3358,11 +3400,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //   · 普通 JLabel 也不换行，一条长文本会一直往右顶出面板边界。
             // 所以：整串包 <html>…</html> + 用 BR 显式分行。
             // 实测每行最宽 412px（原来单行 1160px），远小于用户已接受的 657px。
-            crossMoveHint.setText("<html>" + String.format(Locale.ROOT,
-                    "跨行动画时长：DampedSpring 时间常数 —— 后缘 = %d ms；前缘 = %s" + BR
-                            + "（拖尾密度 %.2f，为 1.00 时前缘只剩 1 帧）。" + BR
-                            + "实际运动时长约为该值的 2.6 倍（示例：0.35 s → 约 920 ms / 115 帧）。",
-                    trailing, leadText, pending.trailSize) + "</html>");
+            crossMoveHint.setText("<html>" + NeovideCursorBundle.message(
+                    "settings.hint.crossMove",
+                    Long.toString(trailing), leadText,
+                    String.format(Locale.ROOT, "%.2f", pending.trailSize)) + "</html>");
         }
         // 拉伸强度那一行的数值标签里也带派生时长 → 一并刷新
         for (SliderBinding b : bindings) {
@@ -3403,9 +3444,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         long trailingMs = Math.round(pending.shortAnimationLength * 1000f * f[0]);
         long leadingMs = Math.round(pending.shortAnimationLength * 1000f * f[2]);
         float ratio = f[2] > 0f ? f[0] / f[2] : 0f;
-        return String.format(Locale.ROOT,
-                "%.1f×   后缘 %d ms / 横向前缘 %d ms   (rank0 最拖 → rank2 跟手，横向实际比值 %.2f×)",
-                k, trailingMs, leadingMs, ratio);
+        return NeovideCursorBundle.message("settings.hint.stretchValue",
+                String.format(Locale.ROOT, "%.1f", k),
+                Long.toString(trailingMs), Long.toString(leadingMs),
+                String.format(Locale.ROOT, "%.2f", ratio));
     }
 
     // ==================== reset / apply / isModified ====================
@@ -4068,18 +4110,40 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
 
     private static List<String> animPresetNames() {
         List<String> out = new ArrayList<>();
-        for (CursorPresets.AnimPreset p : CursorPresets.ANIM_PRESETS) {
-            out.add(p.name());
+        for (int i = 0; i < CursorPresets.ANIM_PRESETS.length; i++) {
+            out.add(animPresetDisplayName(i));
         }
         return out;
     }
 
     private static List<String> colorPresetNames() {
         List<String> out = new ArrayList<>();
-        for (CursorPresets.ColorPreset p : CursorPresets.COLOR_PRESETS) {
-            out.add(p.name());
+        for (int i = 0; i < CursorPresets.COLOR_PRESETS.length; i++) {
+            out.add(colorPresetDisplayName(i));
         }
         return out;
+    }
+
+    /**
+     * 内置动画预设的界面显示名（下拉、恢复按钮）。
+     *
+     * <p>数据层的 {@code CursorPresets.ANIM_PRESETS[i].name()} 仍是中文原名：
+     * 它被写进自定义预设的父引用与「XX 副本」命名，属于用户数据，不能随界面语言漂移。
+     * 没登记文案时回退到数据层名字 —— 新增内置预设不会因漏配 key 而显示 key。
+     */
+    static String animPresetDisplayName(int index) {
+        String key = "settings.preset.anim." + index;
+        return NeovideCursorBundle.containsKey(key)
+                ? NeovideCursorBundle.message(key)
+                : CursorPresets.ANIM_PRESETS[index].name();
+    }
+
+    /** 内置颜色预设的界面显示名；规则同 {@link #animPresetDisplayName(int)}。 */
+    static String colorPresetDisplayName(int index) {
+        String key = "settings.preset.color." + index;
+        return NeovideCursorBundle.containsKey(key)
+                ? NeovideCursorBundle.message(key)
+                : CursorPresets.COLOR_PRESETS[index].name();
     }
 
     // ==================== 滑块绑定（滑块 + 输入框 + 标签）====================

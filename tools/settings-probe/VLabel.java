@@ -49,8 +49,10 @@ public final class VLabel {
         System.out.println("    " + shown);
 
         // 解析出面板宣称的后缘/前缘 ms
-        long shownTrailing = parseMs(shown, "后缘");
-        long shownLeading = parseMs(shown, "前缘");
+        // 标签文案随界面语言变化：中文「后缘/前缘」，英文「trailing/leading」。
+        // 这里同时接受两种标记，断言口径（面板报的是 f[2] 而不是 f[3]）不变。
+        long shownTrailing = parseMs(shown, "后缘", "trailing ");
+        long shownLeading = parseMs(shown, "前缘", "leading ");
         System.out.printf(Locale.ROOT, "  解析结果：后缘 %d ms / 前缘 %d ms%n",
                 shownTrailing, shownLeading);
 
@@ -135,9 +137,17 @@ public final class VLabel {
         System.exit(0);
     }
 
-    /** 从「后缘 110 ms / 前缘 24 ms」这种串里抠出数字。 */
-    private static long parseMs(String s, String key) {
-        int i = s.indexOf(key);
+    /** 从「后缘 110 ms / 前缘 24 ms」或「trailing 110 ms / leading 24 ms」里抠出数字。 */
+    private static long parseMs(String s, String... keys) {
+        int i = -1;
+        String key = "";
+        for (String candidate : keys) {
+            i = s.indexOf(candidate);
+            if (i >= 0) {
+                key = candidate;
+                break;
+            }
+        }
         if (i < 0) {
             return -1;
         }

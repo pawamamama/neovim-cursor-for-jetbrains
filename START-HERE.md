@@ -15,10 +15,10 @@
 **技术栈**：Java 21。日常用 `javac` 直接编译 + 手写 `plugin.xml`（快）；
 Gradle 也完整入库（`build.gradle.kts` / `gradlew` / `gradle/wrapper/`），需要平台构件时用它。**两条路径并存。**
 
-**规模**（2026-10-31 实测，`wc -l` 口径）：
+**规模**（2026-11-01 实测，`wc -l` 口径）：
 ```
-生产代码   src/main/java/.../neovidecursor/   36 文件 / 21,127 行
-探针       tools/settings-probe/*.java        127 文件 / 32,589 行（112 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/   37 文件 / 21,213 行
+探针       tools/settings-probe/*.java        128 文件 / 32,762 行（113 个 V*.java）
 基准程序   tools/bench/Bench*.java            16 个
 ```
 

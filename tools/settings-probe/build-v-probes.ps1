@@ -27,6 +27,9 @@ $probeDir = Join-Path $tmpRoot 'probe'
 $fakeHome = Join-Path $tmpRoot 'fake-home'
 $srcMain = Join-Path $repoRoot 'src\main\java'
 $toolDir = Join-Path $repoRoot 'tools\settings-probe'
+# 资源包必须在运行期 classpath 上：探针要读 messages/NeovideCursorBundle*.properties，
+# 否则 ResourceBundle 抛 MissingResourceException（I18n 相关探针全红）。
+$resDir = Join-Path $repoRoot 'src\main\resources'
 
 if (-not (Test-Path -LiteralPath $Libs)) { throw "idea-libs 不存在：$($Libs)" }
 
@@ -238,7 +241,10 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 变异已验证：删掉 assignRanks() 里对 order[n-1]/order[n-2] 的调用 → L-1/L-12/L-3a/L-13b 红；
         # 删掉 pushStyleTo 里的预览推送 → L-15 红。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VLeadingSnap')
+        'VLeadingSnap',
+        # 【2026-11-01】界面国际化守门：两套 key 集合一致 / 源码引用的 key 都存在 /
+        # 面板 UI 调用点零中文字面量（AC-001）。不登记 = 从不运行。
+        'VI18n')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：
@@ -314,7 +320,7 @@ $failed = 0
 $rows = @()
 foreach ($main in $mains) {
     $outFile = Join-Path $tmpRoot ($main + '.txt')
-    & java @jvm -cp "$probeDir;$classesDir;$cp" $main 2>&1 |
+    & java @jvm -cp "$probeDir;$classesDir;$resDir;$cp" $main 2>&1 |
         Where-Object { $_ -notmatch 'Do not use an alarm' -and $_ -notmatch '已停用' } |
         Set-Content -LiteralPath $outFile -Encoding UTF8
     $code = $LASTEXITCODE

@@ -69,6 +69,24 @@ Write-Host "[1/4] javac：$($sources.Count) 个 .java，classpath $((Get-ChildIt
 & javac --release 21 -nowarn -g -encoding UTF-8 -classpath $cp -d $classes $sources
 if ($LASTEXITCODE -ne 0) { throw "javac 失败 (exit $LASTEXITCODE)" }
 
+# ---------- 1b) 资源包（src/main/resources 全量）----------
+# properties 必须进 jar，否则运行期 ResourceBundle 找不到包 → 设置页直接抛
+# MissingResourceException。必须放在「注入 plugin.xml」之前：模板里那份要覆盖
+# resources 里的原始 plugin.xml（version / idea-version 是打包时注入的）。
+$resSrc = Join-Path $repo 'src\main\resources'
+if (Test-Path -LiteralPath $resSrc) {
+    # 用 Resolve-Path 取规范绝对路径：$repo 可能带正斜杠/相对段，直接按字符串长度
+    # 截断会把相对路径算错（结果是 jar 里多一层目录或漏文件）。
+    $resRoot = (Resolve-Path -LiteralPath $resSrc).Path
+    Get-ChildItem -Recurse -File $resRoot | ForEach-Object {
+        $rel = $_.FullName.Substring($resRoot.Length).TrimStart('\', '/')
+        $dst = Join-Path $classes $rel
+        New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+        Copy-Item -LiteralPath $_.FullName -Destination $dst -Force
+    }
+    Write-Host "[1b/4] 资源包已拷入 classes：$resSrc"
+}
+
 # ---------- 2) 注入 plugin.xml ----------
 $xml = [System.IO.File]::ReadAllText($resXml)
 if ($xml -notmatch '<idea-plugin>') { throw "plugin.xml 里找不到 <idea-plugin> 开标签" }

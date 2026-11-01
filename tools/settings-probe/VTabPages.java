@@ -1,3 +1,4 @@
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorBundle;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
 import com.intellij.openapi.ui.DialogPanel;
 
@@ -52,7 +53,13 @@ public final class VTabPages {
 
     /** 期望的标签名与顺序（必须与 createPanel() 里 tabs.addTab 的先后一致）。 */
     private static final String[] EXPECTED_TITLES = {
-            "总开关", "颜色", "光标行手感", "列手感", "辉光", "特殊", "调试"
+            NeovideCursorBundle.message("settings.tab.master"),
+            NeovideCursorBundle.message("settings.tab.color"),
+            NeovideCursorBundle.message("settings.tab.cursorLine"),
+            NeovideCursorBundle.message("settings.tab.crossLine"),
+            NeovideCursorBundle.message("settings.tab.glow"),
+            NeovideCursorBundle.message("settings.tab.special"),
+            NeovideCursorBundle.message("settings.tab.diag"),
     };
 
     /**

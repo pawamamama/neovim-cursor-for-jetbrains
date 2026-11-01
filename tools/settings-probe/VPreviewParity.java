@@ -1,6 +1,7 @@
 import com.github.yyyolo7a79.neovidecursor.core.GlowIntensity;
 import com.github.yyyolo7a79.neovidecursor.settings.CursorPresets;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorBundle;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
 
 import javax.swing.JCheckBox;
@@ -95,7 +96,8 @@ public final class VPreviewParity {
         check("6 复位后预览的 useShadow = false（前置条件）",
                 Boolean.FALSE.equals(before), "previewConfig.useShadow=" + before);
 
-        JCheckBox shadowBox = checkBoxInRow(ui.panel.component, "启用辉光");
+        JCheckBox shadowBox = checkBoxInRow(ui.panel.component,
+                NeovideCursorBundle.message("settings.row.enableGlow"));
         check("7 定位到「启用辉光」复选框（按行标题，不按空文案）",
                 shadowBox != null, shadowBox == null ? "未找到" : "ok");
 

@@ -1,6 +1,7 @@
 import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
 import com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager;
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorBundle;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
 import com.intellij.ide.util.PropertiesComponent;
 import com.intellij.openapi.application.Application;
@@ -190,17 +191,21 @@ public final class VerifyPanel {
         // 【0.9.38】文案在「精简说明」这一轮重写过（用户实拍反馈排版差、太长）。
         // 本断言的目的不是冻结原文措辞，而是确保「每个需要解释的项都有说明」。
         // 所以改为检查【语义关键词】，措辞调整不会再误报。
+        // 【2026-11-01 i18n】文案来源已改为资源包：不再写死中文原文，
+        // 而是取当前 locale 下 bundle 值的前缀 —— 面板与探针同源，两套 locale 都成立。
+        // 前缀长度取 8：必须落在同一段纯文本内，不能跨 <b> 标签边界 ——
+        // 面板是 JEditorPane，标签两侧渲染后可能多出空白，跨边界的前缀会误报缺失。
         String[] required = {
-                "常驻按 8ms 刷新",                 // 常驻刷新说明
-                "卸载插件后原生光标可能仍是隐形的",   // 隐藏原生光标的持久化副作用
-                "建议同时开「常驻刷新」",            // 联动提示
-                "越多越平滑",                      // 辉光层数
-                "越小光晕越散",                    // 辉光锐度（原「锐度反向说法」）
-                "只影响单行打字/退格",              // 拉伸强度（0.9.38 明确作用域）
-                "淡出关闭时这两个值不生效",          // 淡出说明
-                "弹簧拉伸（Neovide 原版效果）",      // 下拉文案（未改）
-                "残影轨迹（低帧率更稳）",            // 下拉文案（未改）
-                "这几项只影响时长"                  // 时序耦合提示
+                head("settings.comment.alwaysHighFps", 8),    // 常驻刷新说明
+                head("settings.comment.hideNative", 8),       // 隐藏原生光标的持久化副作用
+                head("settings.comment.coupling", 8),         // 联动提示
+                head("settings.comment.glowLayers", 8),       // 辉光层数
+                head("settings.comment.shadowBlur", 8),       // 辉光锐度
+                head("settings.comment.stretch", 8),          // 拉伸强度作用域
+                head("settings.comment.fadeOff", 8),          // 淡出说明
+                NeovideCursorBundle.message("settings.item.modeSpring"),
+                NeovideCursorBundle.message("settings.item.modeAfterimage"),
+                head("settings.comment.animCoupling", 8),     // 时序耦合提示
         };
         int missing = 0;
         for (String r : required) {
@@ -303,8 +308,9 @@ public final class VerifyPanel {
         svc.getState().trailMode = NeovideConfig.TrailMode.AFTERIMAGE;   // ← Tools「残影模式」
         conf.reset();
         Object modeItem = conf.trailModeComboForProbe().getSelectedItem();
-        check("U24 Tools 切到残影模式后，面板下拉显示「残影轨迹」",
-                modeItem != null && String.valueOf(modeItem).contains("残影"),
+        check("U24 Tools 切到残影模式后，面板下拉显示残影模式的本地化文案",
+                modeItem != null && String.valueOf(modeItem).equals(
+                        NeovideCursorBundle.message("settings.item.modeAfterimage")),
                 "下拉显示=" + modeItem);
 
         System.out.println();
@@ -333,6 +339,12 @@ public final class VerifyPanel {
     }
 
     /** 把 &#NNNNN; / &amp; / &lt; / &gt; / &quot; / &nbsp; 解码成字符。 */
+    /** 取 bundle 文案去掉 HTML 标签后的前 n 个字符（面板里的 JEditorPane 是纯文本）。 */
+    private static String head(String key, int n) {
+        String s = NeovideCursorBundle.message(key).replaceAll("<[^>]+>", "");
+        return s.length() <= n ? s : s.substring(0, n);
+    }
+
     private static String unescapeHtml(String s) {
         StringBuilder out = new StringBuilder(s.length());
         int i = 0;

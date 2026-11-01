@@ -1,6 +1,7 @@
 import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
 import com.github.yyyolo7a79.neovidecursor.settings.SettingsField;
 import com.github.yyyolo7a79.neovidecursor.ui.NeovideCaretManager;
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorBundle;
 import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorConfigurable;
 
 /**
@@ -87,14 +88,19 @@ public final class VBatch3Tail {
                     "resolveOutcome", String.class, String.class, String.class);
             m.setAccessible(true);
 
-            Object timeout = m.invoke(null, new Object[]{null, "0.9.104", "网络超时（4 秒无响应）"});
+            String timeoutReason = NeovideCursorBundle.message("info.error.timeout");
+            Object timeout = m.invoke(null, new Object[]{null, "0.9.104", timeoutReason});
             String timeoutText = field(timeout, "text");
             String timeoutTip = field(timeout, "tooltip");
             boolean timeoutDl = (Boolean) fieldObj(timeout, "downloadable");
-            check("T-2a 超时：按钮文字必须与点击前不同且含「检查失败」",
-                    !"检查更新".equals(timeoutText) && timeoutText.contains("检查失败"),
+            String checkUpdateText = NeovideCursorBundle.message("info.checkUpdate");
+            String checkFailedText = NeovideCursorBundle.message("info.checkFailedRetry");
+            check("T-2a 超时：按钮文字必须与点击前不同且是检查失败文案",
+                    !checkUpdateText.equals(timeoutText)
+                            && checkFailedText.equals(timeoutText),
                     timeoutText);
-            check("T-2b 超时：tooltip 含具体原因", timeoutTip.contains("网络超时"), timeoutTip);
+            check("T-2b 超时：tooltip 含具体原因",
+                    timeoutTip.contains(timeoutReason), timeoutTip);
             check("T-2c 超时：不进入可下载态", !timeoutDl, "downloadable=" + timeoutDl);
 
             Object noRelease = m.invoke(null, new Object[]{null, "0.9.104", "仓库暂无 Release"});
@@ -103,8 +109,10 @@ public final class VBatch3Tail {
                     field(noRelease, "tooltip"));
 
             Object same = m.invoke(null, new Object[]{"v0.9.104", "0.9.104", null});
-            check("T-2e 版本相同：仍显示「已是最新」",
-                    field(same, "text").contains("已是最新"), field(same, "text"));
+            check("T-2e 版本相同：仍显示最新文案",
+                    field(same, "text").equals(
+                            NeovideCursorBundle.message("info.upToDate", "0.9.104")),
+                    field(same, "text"));
 
             Object newer = m.invoke(null, new Object[]{"v0.9.105", "0.9.104", null});
             check("T-2f 有新版：可下载且文字含版本号",
@@ -113,8 +121,10 @@ public final class VBatch3Tail {
                     field(newer, "text"));
 
             Object unknown = m.invoke(null, new Object[]{null, "0.9.104", null});
-            check("T-2g error 为 null 时不抛且仍有「检查失败」文案",
-                    field(unknown, "text").contains("检查失败"), field(unknown, "text"));
+            check("T-2g error 为 null 时不抛且仍有检查失败文案",
+                    field(unknown, "text").contains(
+                            NeovideCursorBundle.message("info.checkFailedRetry")),
+                    field(unknown, "text"));
         } catch (Throwable t) {
             check("T-2 反射调用 PluginInfoBar.resolveOutcome 失败", false, t.toString());
         }
@@ -311,8 +321,10 @@ public final class VBatch3Tail {
                     conf.isModified(), "isModified=false");
 
             String notice = conf.lastUserNoticeForProbe();
-            check("T-5f 有可见提示「应用失败」",
-                    notice != null && notice.contains("应用失败"), String.valueOf(notice));
+            check("T-5f 有可见提示（应用失败标题）",
+                    notice != null && notice.contains(NeovideCursorBundle.message(
+                            "settings.dialog.applyFailed.title")),
+                    String.valueOf(notice));
 
             // G-2：清掉故障后重试必须成功，且值真的落地（证明回滚不破坏正常路径）
             conf.setApplyFaultForProbe(null);

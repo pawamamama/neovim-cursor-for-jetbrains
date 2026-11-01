@@ -60,11 +60,11 @@ do not hold back on token usage.
 分支         main（2026-10-27 起；此前长期在 fix/f7-override-read）
 ```
 
-## 规模（实测 · 2026-10-31，命令见本节末尾）
+## 规模（实测 · 2026-11-01，命令见本节末尾）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    36 文件 / 21,127 行
-探针       tools/settings-probe/*.java        127 文件 / 32,589 行（112 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/    37 文件 / 21,213 行
+探针       tools/settings-probe/*.java        128 文件 / 32,762 行（113 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
 
@@ -103,7 +103,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         112 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap）/ **ALL PASS（0 失败）**
+探针         113 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap / VI18n）/ **ALL PASS（0 失败）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）

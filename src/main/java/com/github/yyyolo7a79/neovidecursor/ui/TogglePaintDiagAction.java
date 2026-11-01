@@ -1,5 +1,6 @@
 package com.github.yyyolo7a79.neovidecursor.ui;
 
+import com.github.yyyolo7a79.neovidecursor.ui.settings.NeovideCursorBundle;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.ToggleAction;
 import com.intellij.openapi.ui.Messages;
@@ -28,8 +29,8 @@ public class TogglePaintDiagAction extends ToggleAction {
         NeovideCaretManager.setPaintDisabled(state);
         Messages.showInfoMessage(
                 state
-                        ? "已开启诊断模式：拖尾不再绘制。\n\n请连续快速移动光标，然后告诉我卡顿是否消失。"
-                        : "已关闭诊断模式，拖尾恢复绘制。",
-                "Neovide Cursor 性能诊断");
+                        ? NeovideCursorBundle.message("action.paintDiag.on")
+                        : NeovideCursorBundle.message("action.paintDiag.off"),
+                NeovideCursorBundle.message("action.paintDiag.title"));
     }
 }
