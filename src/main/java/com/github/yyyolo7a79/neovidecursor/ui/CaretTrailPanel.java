@@ -92,6 +92,22 @@ public class CaretTrailPanel extends JComponent {
     private int quadCount = 0;
 
     /**
+     * 半边拖尾模式：不画被拉伸的四边形，改为「2px 光标本体 + 固定长度尾巴」。
+     *
+     * <p>用户 2026-11-01 的要求：隐藏原生光标后，被拉伸的矩形会把刚输入/删除的字符
+     * 盖住；要的是光标本体不被拉长、后面只拖一条约半个字符的尾巴。
+     */
+    private boolean halfTrail;
+
+    /** 每个四边形的运动方向单位向量 [dx,dy] × N（halfTrail 用来决定尾巴朝向）。 */
+    private double[] quadDirs = new double[2 * 4];
+
+    /** 设置半边拖尾模式（由 CaretAnimator / 预览在推设置时调用）。 */
+    public void setHalfTrail(boolean on) {
+        this.halfTrail = on;
+    }
+
+    /**
      * 【BUG-007】诊断追踪 id（由 {@link CaretAnimator} 构造时写入）。
      *
      * <p>{@code -1} = 未接入（例如设置页预览用的那个面板实例），
@@ -602,6 +618,15 @@ public class CaretTrailPanel extends JComponent {
      * @param glow 该光标自己的辉光强度（0~1），静止时为 0
      */
     public void addQuad(double[] xs, double[] ys, float glow) {
+        addQuad(xs, ys, glow, 0, 0);
+    }
+
+    /**
+     * 同上，并带上本次移动的方向单位向量（半边拖尾模式用来决定尾巴朝向）。
+     *
+     * <p>{@code dirX/dirY} 传 0 表示未知 —— 绘制会退回原来的四边形路径。
+     */
+    public void addQuad(double[] xs, double[] ys, float glow, double dirX, double dirY) {
         int need = (quadCount + 1) * QUAD_STRIDE;
         if (need > quads.length) {
             // 按 2 倍扩容，避免逐个 addQuad 反复复制
@@ -613,6 +638,13 @@ public class CaretTrailPanel extends JComponent {
             quads[base + j * 2 + 1] = ys[j];
         }
         quads[base + 8] = glow < 0f ? 0f : Math.min(glow, 1f);
+        int dirBase = quadCount * 2;
+        if (dirBase + 1 >= quadDirs.length) {
+            quadDirs = java.util.Arrays.copyOf(quadDirs,
+                    Math.max(dirBase + 2, quadDirs.length * 2));
+        }
+        quadDirs[dirBase] = dirX;
+        quadDirs[dirBase + 1] = dirY;
         quadCount++;
         hasGhosts = false;
     }
@@ -919,7 +951,58 @@ public class CaretTrailPanel extends JComponent {
             // ③ 纯色
             g2.setColor(fillColor);
         }
-        g2.fill(path);
+        int dirBase = index * 2;
+        double dx = (dirBase + 1 < quadDirs.length) ? quadDirs[dirBase] : 0;
+        double dy = (dirBase + 1 < quadDirs.length) ? quadDirs[dirBase + 1] : 0;
+        if (halfTrail && (dx != 0 || dy != 0)) {
+            fillHalfTrail(g2, dx, dy);
+        } else {
+            g2.fill(path);
+        }
+    }
+
+    /**
+     * 半边拖尾：画「不拉伸的光标本体 + 反方向一条固定长度尾巴」。
+     *
+     * <p>本体的几何直接由四角推出来（四边形在 halfTrail 下四角同速，始终是矩形）：
+     * 中心取四角平均，两条半轴取相邻边的半向量。尾巴沿运动反方向平移
+     * {@code 宽度 × TrailCorner.HALF_TRAIL_CAP_WIDTHS}（默认 6px，约半个字符），
+     * 用 45% 不透明度画在本体下面 —— 不靠弹簧时长差，所以连打不会累积。
+     */
+    private void fillHalfTrail(Graphics2D g2, double dx, double dy) {
+        double cx = (quadX[0] + quadX[1] + quadX[2] + quadX[3]) * 0.25;
+        double cy = (quadY[0] + quadY[1] + quadY[2] + quadY[3]) * 0.25;
+        double exX = (quadX[1] - quadX[0]) * 0.5;
+        double exY = (quadY[1] - quadY[0]) * 0.5;
+        double eyX = (quadX[2] - quadX[1]) * 0.5;
+        double eyY = (quadY[2] - quadY[1]) * 0.5;
+        double widthPx = Math.hypot(exX * 2, exY * 2);
+        double tail = widthPx
+                * com.github.yyyolo7a79.neovidecursor.core.TrailCorner.HALF_TRAIL_CAP_WIDTHS;
+        double len = Math.hypot(dx, dy);
+        double bx = -dx / len * tail;
+        double by = -dy / len * tail;
+
+        Path2D.Double t = new Path2D.Double();
+        t.moveTo(cx - exX - eyX + bx, cy - exY - eyY + by);
+        t.lineTo(cx + exX - eyX + bx, cy + exY - eyY + by);
+        t.lineTo(cx + exX + eyX + bx, cy + exY + eyY + by);
+        t.lineTo(cx - exX + eyX + bx, cy - exY + eyY + by);
+        t.closePath();
+
+        java.awt.Composite old = g2.getComposite();
+        g2.setComposite(java.awt.AlphaComposite.getInstance(
+                java.awt.AlphaComposite.SRC_OVER, 0.45f));
+        g2.fill(t);
+        g2.setComposite(old);
+
+        Path2D.Double body = new Path2D.Double();
+        body.moveTo(cx - exX - eyX, cy - exY - eyY);
+        body.lineTo(cx + exX - eyX, cy + exY - eyY);
+        body.lineTo(cx + exX + eyX, cy + exY + eyY);
+        body.lineTo(cx - exX + eyX, cy - exY + eyY);
+        body.closePath();
+        g2.fill(body);
     }
 
     /**

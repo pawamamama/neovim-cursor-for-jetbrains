@@ -72,24 +72,27 @@ public final class VLeadingSnap {
         check("L-2 关闭时斜度与基线一致（左 2.11 / 右 4.06，容差 0.05）",
                 near(off[0], BASE_LEFT) && near(off[1], BASE_RIGHT),
                 String.format("left=%.4f right=%.4f", off[0], off[1]));
-        check("L-1 开启时右边缘（前缘）精确 0.00 且左边缘仍 > 0",
-                on[1] == 0.0 && on[0] > 0.01,
+        check("L-1 开启时光标本体是刚性矩形（左右边缘都齐平）",
+                on[1] == 0.0 && on[0] == 0.0,
                 String.format("left=%.4f right=%.6f", on[0], on[1]));
-        check("L-1b 开启不改变后缘斜度（左边缘与关闭时相同，容差 0.05）",
-                near(on[0], off[0]),
-                String.format("on=%.4f off=%.4f", on[0], off[0]));
+        double[] bodyDurations = productionDurations();
+        check("L-1b 开启时四角时长相同（本体不被拉伸）",
+                eq(bodyDurations[0], bodyDurations[1])
+                        && eq(bodyDurations[1], bodyDurations[2])
+                        && eq(bodyDurations[2], bodyDurations[3]),
+                java.util.Arrays.toString(bodyDurations));
 
         // ---------- B. 删除方向镜像（左移 → 前缘是左边缘） ----------
         double[] leftOn = safeMeasure(true, -DX, slope100());
-        check("L-12 左移（退格）时左边缘精确 0.00、右边缘 > 0",
-                leftOn[0] == 0.0 && leftOn[1] > 0.01,
-                String.format("left=%.6f right=%.4f", leftOn[0], leftOn[1]));
+        check("L-12 左移（退格）时光标本体同样是刚性矩形",
+                leftOn[0] == 0.0 && leftOn[1] == 0.0,
+                String.format("left=%.6f right=%.6f", leftOn[0], leftOn[1]));
 
         // ---------- C. 可逆（AC-002） ----------
         double rightAfterOff = safeReversible();
         check("L-3 关闭开关后下一次移动恢复斜度（0 残留）",
-                near(rightAfterOff, BASE_RIGHT),
-                String.format("right=%.4f", rightAfterOff));
+                Math.abs(rightAfterOff - off[1]) < 0.3,
+                String.format("right=%.4f（关闭基线 %.4f）", rightAfterOff, off[1]));
 
         // ---------- D. 出厂默认系数（slope=0）：用位移而不是斜度判定 ----------
         // 这一组才是用户默认配置下的真实观感：前缘瞬间贴住目标，后缘仍滞后。
@@ -100,9 +103,9 @@ public final class VLeadingSnap {
                 offOffsets[0], offOffsets[1], onOffsets[0], onOffsets[1]);
         check("L-13a 出厂默认下：关闭时前缘角点首帧仍有位移（开关确实起作用）",
                 offOffsets[0] > 0.01, String.format("lead=%.4f", offOffsets[0]));
-        check("L-13b 出厂默认下：开启时前缘角点首帧位移精确 0、后缘仍滞后",
-                onOffsets[0] == 0.0 && onOffsets[1] > 0.01,
-                String.format("lead=%.6f trail=%.4f", onOffsets[0], onOffsets[1]));
+        check("L-13b 出厂默认下：开启时四角同步平滑移动（前缘=后缘位移）",
+                onOffsets[0] > 0.0 && eq(onOffsets[0], onOffsets[1]),
+                String.format("lead=%.4f trail=%.4f", onOffsets[0], onOffsets[1]));
 
         // ---------- E. 默认值（AC-003） ----------
         check("L-7 默认值为 false（全新安装 / 老配置升级都是关）",
@@ -173,18 +176,21 @@ public final class VLeadingSnap {
                 inPreset ? "被误加进预设了" : "不在预设里");
 
         // ---------- K2. 设置页预览也必须跟随（陷阱 6：预览与生产同源） ----------
-        int[] previewOn = previewZeroIndices(true);
-        int[] previewOff = previewZeroIndices(false);
-        check("L-14 预览窗把前缘两角（TR/BR）钉死、后缘两角不钉",
-                java.util.Arrays.equals(previewOn, new int[]{1, 2}) && previewOff.length == 0,
-                "开启时零时长角=" + java.util.Arrays.toString(previewOn)
-                        + "（应为 [1, 2]），关闭时=" + java.util.Arrays.toString(previewOff));
+        double leadLen = slope100().shortAnimationLength;
+        double[] previewOn = previewDurations(true);
+        double[] previewOff = previewDurations(false);
+        check("L-14 预览窗：四角同速（本体不被拉伸），关闭时恢复梯度",
+                eq(previewOn[0], leadLen) && eq(previewOn[1], leadLen)
+                        && eq(previewOn[2], leadLen) && eq(previewOn[3], leadLen)
+                        && !eq(previewOff[1], leadLen) && !eq(previewOff[2], leadLen),
+                "on=" + java.util.Arrays.toString(previewOn)
+                        + " off=" + java.util.Arrays.toString(previewOff));
 
-        // L-16：预览与生产「钉的是哪两个角」必须一致（审查 M-2）。
+        // L-16：预览与生产四角时长必须逐位一致（审查 M-2）。
         // 两侧各读自己的行为结果，不在探针里复刻判据。
-        int[] prodOn = productionZeroIndices();
-        check("L-16 预览与生产被钉住的角集合一致",
-                java.util.Arrays.equals(previewOn, prodOn),
+        double[] prodOn = productionDurations();
+        check("L-16 预览与生产的四角时长逐位一致",
+                eqArray(previewOn, prodOn),
                 "预览=" + java.util.Arrays.toString(previewOn)
                         + " 生产=" + java.util.Arrays.toString(prodOn));
 
@@ -328,18 +334,14 @@ public final class VLeadingSnap {
     }
 
     /**
-     * 预览窗在 pushTarget 之后<b>哪些角</b>的动画时长恰好为 0。
+     * 预览窗在 pushTarget 之后四角的动画时长（短跳分支）。
      *
-     * <p>【为什么返回下标而不是个数】审查 M-1 的变异实证：把预览的判据从
-     * {@code ranks[i] >= 2} 改成 {@code <= 1}，个数仍是 2 —— 只数个数抓不到
-     * 「钉反了方向」。这里断言的是身份（TR/BR），与 L-1 在生产侧的判据对齐。
-     *
-     * <p>【为什么第一次之后要 snapTo】两次 pushTarget 之间没有 {@code update()}，
-     * {@code previousDest} 仍是初值 {@code -1e5} → 走跨行分支；而预览真实打字走的是
-     * 短跳分支。把四角摆到上一目标（同时落定 previousDest）后，第二次移动
-     * {@code deltaY = 0} → 走短跳，与用户看到的路径一致。
+     * <p>【为什么要 snapTo】两次 pushTarget 之间没有 {@code update()}，
+     * {@code previousDest} 仍是初值 {@code -1e5} → 走跨行分支；把四角摆到上一目标
+     * （同时落定 previousDest）后，第二次移动 {@code deltaY = 0} → 走短跳，
+     * 与用户看到的路径一致。
      */
-    private static int[] previewZeroIndices(boolean snap) throws Exception {
+    private static double[] previewDurations(boolean snap) throws Exception {
         AnimationPreview p = AnimationPreview.inline(slope100());
         p.setLeadingSnap(snap);
         setField(p, "cursorW", 2.0);
@@ -353,35 +355,42 @@ public final class VLeadingSnap {
         }
         setField(p, "centerX", X0 + DX);
         invoke(p, "pushTarget");                 // 真正的跳动（短跳分支）
-        return zeroIndices(cs);
+        return durations(cs);
     }
 
-    /** 生产侧同一场景下被钉住的角（右移一字符、短跳分支、开一帧）。 */
-    private static int[] productionZeroIndices() throws Exception {
+    /** 生产侧同一场景的四角时长（右移一字符、短跳分支、开一帧）。 */
+    private static double[] productionDurations() throws Exception {
         Ref r = new Ref(newTrail(slope100()));
         r.setTarget(X0, Y0, W, H);
         r.applyCharsMoved(1);
         r.setLeadingSnap(true);
         r.setTarget(X0 + DX, Y0, W, H);
-        r.update(DT);                            // 触发 assignRanks → jump → 钉前缘
-        return zeroIndices(r.corners());
+        r.update(DT);                            // 触发 assignRanks → jump → 设前后缘时长
+        return durations(r.corners());
     }
 
-    private static int[] zeroIndices(TrailCorner[] cs) {
-        int n = 0;
-        for (TrailCorner c : cs) {
-            if (c.animationLengthForProbe() == 0.0) {
-                n++;
-            }
-        }
-        int[] out = new int[n];
-        int k = 0;
+    private static double[] durations(TrailCorner[] cs) {
+        double[] out = new double[cs.length];
         for (int i = 0; i < cs.length; i++) {
-            if (cs[i].animationLengthForProbe() == 0.0) {
-                out[k++] = i;
-            }
+            out[i] = cs[i].animationLengthForProbe();
         }
         return out;
+    }
+
+    private static boolean eq(double a, double b) {
+        return Math.abs(a - b) < 1e-9;
+    }
+
+    private static boolean eqArray(double[] a, double[] b) {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (int i = 0; i < a.length; i++) {
+            if (!eq(a[i], b[i])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

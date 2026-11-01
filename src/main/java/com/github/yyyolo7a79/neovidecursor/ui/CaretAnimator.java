@@ -2724,6 +2724,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         // RGB 开关与弹簧路径保持同一语义：控制台光标也是我们画的，配色要一致
         panel.setRgbEnabled(rgbGradient);
         panel.setCursorRgbWash(cursorRgbWash);
+        // 控制台静态光标不拖尾，也不走半边绘制。
+        panel.setHalfTrail(false);
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
             trail.snapToTarget();
@@ -2867,6 +2869,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         panel.setEffectiveGlowLayers(effectiveGlowLayers);
         panel.setRgbEnabled(rgbGradient);
         panel.setCursorRgbWash(cursorRgbWash);
+        // 【2026-11-01】半边拖尾：绘制层改成「本体 + 固定尾巴」，与四角时长解耦。
+        panel.setHalfTrail(leadingSnap);
         // 【诊断必须报告本帧真正生效的层数】
         //
         // 这个字段原来只在 tickStaticCaret 里被赋值，弹簧路径从不写 ——
@@ -2895,7 +2899,12 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 【U-M-2】复用中转数组（addQuad 立即拷贝，调用方不保留引用）
             fillQuadXs(quadScratchX, trail.corners);
             fillQuadYs(quadScratchY, trail.corners);
-            panel.addQuad(quadScratchX, quadScratchY, trailGlow);
+            // 方向只对半边拖尾有意义；其余模式面板走原四边形路径。
+            // 静止（偏移 < 0.5px）时传 0：尾巴随之消失，只剩本体 —— 否则停下后
+            // 会一直挂着一条固定尾巴，看起来像「光标变粗」。
+            boolean moving = trail.maxOffset() > 0.5;
+            panel.addQuad(quadScratchX, quadScratchY, trailGlow,
+                    moving ? trail.dirX : 0, moving ? trail.dirY : 0);
 
             if (diagFrame) {
                 // I2 / I3：单光标的偏移合理性

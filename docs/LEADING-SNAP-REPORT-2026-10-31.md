@@ -186,3 +186,39 @@ git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/N
 git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/settings/CursorPresets.java
 git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/ui/CursorPresetApplier.java
 ```
+
+---
+
+## 十一、2026-11-01 修订：改为「光标不拉伸 + 固定尾巴」
+
+用户实机反馈：「方向对了但是拉伸过长，没拉伸的一侧不平滑……只画半边轨迹，
+但是我们隐藏了原生光标所以不拉伸那一面就得平滑」「前缘贴合不是直接贴住目标，
+是纯平滑输入那样的，不是拉伸把字符吞掉，这个就会瞬间贴合导致观感问题」。
+
+### 新模型（已替换第十节之前描述的 0ms 吸附）
+
+| 组件 | 做法 |
+|---|---|
+| 光标本体 | 四角同速 `shortAnimationLength`（默认 110ms）→ 始终是 2px 宽的刚性矩形，像普通光标一样平滑移动 |
+| 尾巴 | `CaretTrailPanel` 的 halfTrail 分支按运动反方向画 `光标宽 × 3`（默认 6px，约半个字符），45% 不透明度 |
+| 静止 | 偏移 < 0.5px 时不画尾巴（只留本体），避免「光标变粗」 |
+| 预览 | 与生产共用同一绘制分支；方向由 `AnimationPreview.pushTarget()` 记录 |
+
+### 同时得到的量化调查结论
+
+- `slopeTicks` / `typingSmoothness` **不是吞字符的根因**：
+  单次移动四角最大跨度 11.87px < 12px（字符宽），只覆盖刚走过的那一格；
+  连续删除才会累积，主控是 `shortAnimationLength`（0.02→0.25：8.3→18.8px）
+  与按键间隔；slope 是放大器（默认 100ms/键 11.1px），smooth 是缩小器
+  但会把覆盖时间从 117ms 延长到 132ms。
+- 旧实现里的「弹簧位移 cap」是错的：它把后缘弹簧直接截到 6px，第一帧就
+  超过前缘位移，导致四边形交叉（角点跑到另一边）。所以新模型把尾巴放到绘制层，
+  弹簧只负责本体的平滑移动。
+
+### 探针变化
+
+`VLeadingSnap` 仍是 22 条，语义随模型更新：
+L-1/L-1b/L-12 断言「四角时长逐位相同、左右边缘都齐平」；
+L-13b 断言「前缘=后缘位移」；L-14/L-16 断言预览与生产四角时长逐位一致。
+变异测试：删掉 `assignRanks()` 里的四角覆盖 → L-1/L-1b/L-12/L-14 红；
+删掉 `pushStyleTo` 的一行 → L-15 红。

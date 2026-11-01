@@ -126,28 +126,28 @@ public class TrailCorner {
         return springX.getAnimationLengthForProbe();
     }
 
+    /** 半边拖尾的尾巴长度 = {@code 光标宽度 × 本系数}（约半个字符宽）。 */
+    public static final double HALF_TRAIL_CAP_WIDTHS = 3.0;
+
     /**
-     * 前缘贴合（「半边拖尾」）：把本角点的动画时长压成 <b>0</b>，下一帧直接贴住目标。
+     * 半边拖尾：直接指定本角点的动画时长。
      *
-     * <p><b>机制</b>：{@link DampedSpring#update(double)} 首句判
-     * {@code animationLength <= dt}（{@code 0.0 <= 0.008}）→ 把位移与速度归零
-     * → {@code currentX = destX}。这不是「时长很短」，而是<b>精确</b>到位，
-     * 所以前缘的斜度是精确的 0，不随帧率漂移。
+     * <p><b>为什么需要它（2026-11-01 用户实机反馈后改）</b>：最初的实现把前缘时长压成 0
+     * （照搬上游 {@code snapAnimationLength}）。但上游的前提是 <b>显示原生光标</b>
+     * （它的 {@code hideNativeCursor} 默认 false）—— 前缘被真光标盖住，瞬移看不出来。
+     * 本项目默认隐藏原生光标，0ms 的前缘直接暴露，每键瞬移一个字符宽，
+     * 观感是「跳」而不是「滑」，而且整块矩形瞬间横跨过去、把刚敲的字盖住。
+     *
+     * <p>现在半边拖尾模式给四角同一个时长（{@code shortAnimationLength}）：
+     * 弹簧只负责让「光标本体」平滑移动，尾巴由绘制层画成固定长度的一段，
+     * 不再靠四角时长差产生（见 {@code CaretTrailPanel} 的 halfTrail 分支）。
      *
      * <p><b>必须在 {@link #jump} 之后调用</b>：{@code jump} 内部会
      * {@code setAnimationLength(animationLength)} 覆盖时长，先设会被冲掉。
-     * 调用方有两处，都只对 rank 最高的两个角：
-     * {@code SpringTrail.assignRanks()}（真机）与
-     * {@code AnimationPreview.pushTarget()}（设置页预览）。
-     *
-     * <p><b>为什么不用 alignment &gt; 0.5 判据</b>：0.9.83 试过，纯轴向移动时
-     * 同侧两角的对齐度完全相等，阈值会同时命中两个角、把时长差抹平、斜度反而变小。
-     * 完整数据见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1。
-     * 现在改用「rank 前两名 = 前缘」，只依赖已经稳定下来的排序。
      */
-    public void setLeadingSnap() {
-        springX.setAnimationLength(0.0);
-        springY.setAnimationLength(0.0);
+    public void setAnimationLengthForTrail(double length) {
+        springX.setAnimationLength(length);
+        springY.setAnimationLength(length);
     }
 
     // ==================== 目标位置计算 ====================

@@ -275,31 +275,29 @@ public final class AnimationPreview extends JComponent {
      */
     private boolean leadingSnap;
 
-    /** 上一次 {@link #pushTarget()} 算出的四角 rank（用于开启时立刻重贴，不必等下一轮）。 */
+    /** 上一次 {@link #pushTarget()} 算出的四角 rank（保留给探针与方向判断）。 */
     private int[] lastRanks = new int[4];
+
+    /** 预览最近一次移动方向（半边拖尾用来决定尾巴朝向）。 */
+    private double dirX, dirY;
+    private double lastPushX, lastPushY;
+    private boolean pushSeen;
 
     /**
      * 设置前缘贴合（面板在 {@code pushStyleTo} 里推送）。
      *
-     * <p><b>关闭时在下一次 {@link #advance()} 生效</b>，不是立即：开启会立刻把
-     * 正在播的前缘两角贴住；关闭只清标志，两个角被写成 0 的时长要等下一次
-     * {@code jump} 才会恢复（约一个步进间隔，静止段无可观察差异）。
-     * 不在这里立刻重跑 {@code jump}，是因为那会打断当前动画、比等待更跳。
+     * <p>半边拖尾由绘制层实现（{@code CaretTrailPanel} 的 halfTrail 分支）：
+     * 本体不拉伸，尾巴固定约半个字符。这里只切开关并把四角设成同一个平滑时长，
+     * 让本体像普通光标一样移动。关闭时下一次 {@code advance()} 会恢复正常梯度。
      */
     public void setLeadingSnap(boolean on) {
         if (leadingSnap == on) {
             return;
         }
         leadingSnap = on;
-        if (on) {
-            // 勾选那一刻正在播的这一段动画也要立刻呈现「前缘贴住」，
-            // 否则用户要等下一次 advance（约一个演示周期）才看得到，会以为没生效。
-            int n = Math.min(corners.length, lastRanks.length);
-            for (int i = 0; i < n; i++) {
-                if (lastRanks[i] >= 2) {
-                    corners[i].setLeadingSnap();
-                }
-            }
+        panel.setHalfTrail(on);
+        for (TrailCorner c : corners) {
+            c.setAnimationLengthForTrail(config.shortAnimationLength);
         }
         repaint();
     }
@@ -709,6 +707,20 @@ public final class AnimationPreview extends JComponent {
     }
 
     private void pushTarget() {
+        // 【半边拖尾】记录本次移动方向，供绘制层决定尾巴朝向。
+        if (pushSeen) {
+            double dx = centerX - lastPushX;
+            double dy = centerY - lastPushY;
+            double len = Math.hypot(dx, dy);
+            if (len > 1e-6) {
+                dirX = dx / len;
+                dirY = dy / len;
+            }
+        }
+        lastPushX = centerX;
+        lastPushY = centerY;
+        pushSeen = true;
+
         // 【0.9.65 修复：预览必须告诉 TrailCorner「这次挪了几个字符」】
         //
         // 用户报：「动画的单行删除预览窗口是拉长的很诡异」，而实际编辑器里
@@ -763,10 +775,10 @@ public final class AnimationPreview extends JComponent {
         // 所以不需要长度守卫 —— 原来那段不可达的 realloc 已删（审查 L-5）。
         System.arraycopy(ranks, 0, lastRanks, 0, corners.length);
         if (leadingSnap) {
-            for (int i = 0; i < corners.length && i < ranks.length; i++) {
-                if (ranks[i] >= 2) {
-                    corners[i].setLeadingSnap();
-                }
+            // 四角同一平滑时长：弹簧只负责让「光标本体」移动；
+            // 尾巴由 CaretTrailPanel 的 halfTrail 分支按方向画成固定长度。
+            for (TrailCorner c : corners) {
+                c.setAnimationLengthForTrail(config.shortAnimationLength);
             }
         }
     }
@@ -956,7 +968,7 @@ public final class AnimationPreview extends JComponent {
                             corners[2].getCurrentX(), corners[3].getCurrentX()},
                     new double[]{corners[0].getCurrentY(), corners[1].getCurrentY(),
                             corners[2].getCurrentY(), corners[3].getCurrentY()},
-                    panel.getGlowStrengthForPreview());
+                    panel.getGlowStrengthForPreview(), dirX, dirY);
             panel.paintForPreview(g2, getWidth(), getHeight());
         } finally {
             g2.dispose();
