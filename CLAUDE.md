@@ -63,8 +63,8 @@ do not hold back on token usage.
 ## 规模（实测 · 2026-11-01，命令见本节末尾）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    37 文件 / 21,213 行
-探针       tools/settings-probe/*.java        128 文件 / 32,762 行（113 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/    37 文件 / 21,414 行
+探针       tools/settings-probe/*.java        131 文件 / 33,311 行（116 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
 
@@ -93,8 +93,8 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 # 二、当前状态（用这组数字判断一切）
 
 ```
-版本         v0.9.104（IDEA 2026.1 与 PyCharm 2025.2 都已装；读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
-             git tag 仍停在 v0.9.83 —— 0.9.84~0.9.104 共 21 个版本没打 tag（版本未发布）
+版本         v0.9.119（IDEA 2026.1 已装；PyCharm 2025.2 仍是旧版。读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
+             git tag 仍停在 v0.9.83 —— 0.9.84~0.9.119 共 36 个版本没打 tag（版本未发布）
 HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过期一次）
 远程         fork/main 与本机 main 是否同步，**用命令核实，不要写结论**：
              git rev-list --left-right --count fork/main...HEAD  → 应为 0 0
@@ -103,7 +103,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         113 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap / VI18n）/ **ALL PASS（0 失败）**
+探针         116 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap / VI18n / VInputCommit / VFadeTick / VFadePreview）/ **ALL PASS（0 失败）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）
