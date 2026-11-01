@@ -143,26 +143,8 @@ final class SpringTrail {
         }
     }
 
-    /**
-     * 前缘贴合（半边拖尾）开关 —— <b>设备级</b>，由 {@code CaretAnimator} 从 State 推送。
-     *
-     * <p>默认 {@code false}（与 State 默认值一致）。只有为 true 时
-     * {@link #assignRanks()} 才会把 rank 最高的两个角的时长压成
-     * {@code shortAnimationLength × TrailCorner.LEADING_SNAP_FACTOR}（默认 55ms），
-     * 让它们明显快于后缘但仍以弹簧曲线跟随。
-     */
-    private boolean leadingSnap;
-
-    /** 构造时传入的配置（半边拖尾要用 {@code shortAnimationLength} 算时长）。 */
+    /** 构造时传入的配置（assignRanks 用 trailFactors / shortAnimationLength 等算时长）。 */
     private final NeovideConfig config;
-
-    /** 最近一次移动方向的单位向量（半边拖尾用来决定尾巴画在哪一侧）。 */
-    double dirX = 0, dirY = 0;
-
-    /** 设置前缘贴合。下一帧 {@code assignRanks()} 起生效（光标静止时无可观察差异）。 */
-    void setLeadingSnap(boolean leadingSnap) {
-        this.leadingSnap = leadingSnap;
-    }
 
     /**
      * 让本光标从另一个光标的当前形状起飞（多光标新增时调用）。
@@ -195,17 +177,6 @@ final class SpringTrail {
         if (initialized && cx == centerX && cy == centerY
                 && w == width && h == height) {
             return false;
-        }
-        // 【半边拖尾】记录本次移动方向（单位向量）——绘制层据此把尾巴画在反方向。
-        // 静止时保持上一次方向，避免尾巴方向突然丢失。
-        if (initialized) {
-            double dx = cx - centerX;
-            double dy = cy - centerY;
-            double len = Math.hypot(dx, dy);
-            if (len > 1e-6) {
-                dirX = dx / len;
-                dirY = dy / len;
-            }
         }
         centerX = cx;
         centerY = cy;
@@ -346,29 +317,6 @@ final class SpringTrail {
         // 排序后 order[k] = 「第 k 靠后」的角点下标；k 就是它的 rank
         for (int k = 0; k < n; k++) {
             corners[order[k]].jump(width, height, centerX, centerY, k);
-        }
-
-        // ==================== 前缘贴合（半边拖尾，2026-10-31）====================
-        //
-        // 【在哪】必须在上面 jump 循环【之后】：jump 内部会
-        // setAnimationLength(animationLength)，先设会被覆盖。
-        //
-        // 【锁哪两个】order[n-1] / order[n-2] = rank 最高的两个 = 对齐度最大的两个
-        // = 运动方向那一侧的「前缘」。纯水平右移时是 TR/BR；删除时镜像成 TL/BL。
-        // 用 n-1 / n-2 而不是写死 2/3，理由与 alignmentScratch 相同：
-        // 角点表增删时自动跟随，不会出现「表改了 5 个、这里还锁 2/3」。
-        //
-        // 【效果（2026-11-01 按用户实机反馈重做）】
-        // 用户要求：「光标不拉伸，只拖一条尾巴」「不拉伸那一侧要平滑」「别把字符吞掉」。
-        // 所以这里不再是「前缘瞬移」，也不是靠四角时长差拉出一个四边形：
-        //   · 四角同一个 shortAnimationLength（默认 110ms）—— 弹簧只负责让
-        //     「光标本体」像普通光标一样平滑移动，形状始终是 2px 宽的矩形，不被拉长；
-        //   · 尾巴由绘制层按运动方向画成固定长度的一段（约半个字符，见
-        //     CaretTrailPanel 的 halfTrail 分支），因此连打再快也不会累积。
-        if (leadingSnap) {
-            for (int k = 0; k < n; k++) {
-                corners[order[k]].setAnimationLengthForTrail(config.shortAnimationLength);
-            }
         }
     }
 

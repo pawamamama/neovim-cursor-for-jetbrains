@@ -11,10 +11,11 @@ package com.github.yyyolo7a79.neovidecursor.core;
  * <p>移植自 VS Code 版 {@code neovide-cursor.js} 的 {@code Corner} 类。
  *
  * <p><b>与上游的差异</b>：上游用「对齐度 &gt; 0.5 的单点硬吸附」（{@code useHardSnap}）。
- * 本实现默认<b>没有</b>硬吸附；可选的「前缘贴合（半边拖尾）」由
- * {@link #setLeadingSnap()} 实现，由 {@code SpringTrail.assignRanks()} 对
- * <b>rank 最高的两个角</b>调用 —— 不是照搬上游的阈值方案（那个方案在 4 角点模型下
+ * 本实现默认<b>没有</b>硬吸附 —— 不是照搬上游的阈值方案（那个方案在 4 角点模型下
  * 会同时命中同侧两角、把斜度抹平，见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1）。
+ * 「前缘贴合（半边拖尾）」曾试过三版模型（前缘 0ms 吸附 / 四角同长 + 固定尾巴 /
+ * 前缘 0ms + 短后缘），2026-11-01 按用户实机反馈全部回退，实现已删除，
+ * 只保留设置页开关（不影响任何行为）。
  */
 public class TrailCorner {
 
@@ -126,30 +127,6 @@ public class TrailCorner {
         return springX.getAnimationLengthForProbe();
     }
 
-    /** 半边拖尾的尾巴长度 = {@code 光标宽度 × 本系数}（约半个字符宽）。 */
-    public static final double HALF_TRAIL_CAP_WIDTHS = 3.0;
-
-    /**
-     * 半边拖尾：直接指定本角点的动画时长。
-     *
-     * <p><b>为什么需要它（2026-11-01 用户实机反馈后改）</b>：最初的实现把前缘时长压成 0
-     * （照搬上游 {@code snapAnimationLength}）。但上游的前提是 <b>显示原生光标</b>
-     * （它的 {@code hideNativeCursor} 默认 false）—— 前缘被真光标盖住，瞬移看不出来。
-     * 本项目默认隐藏原生光标，0ms 的前缘直接暴露，每键瞬移一个字符宽，
-     * 观感是「跳」而不是「滑」，而且整块矩形瞬间横跨过去、把刚敲的字盖住。
-     *
-     * <p>现在半边拖尾模式给四角同一个时长（{@code shortAnimationLength}）：
-     * 弹簧只负责让「光标本体」平滑移动，尾巴由绘制层画成固定长度的一段，
-     * 不再靠四角时长差产生（见 {@code CaretTrailPanel} 的 halfTrail 分支）。
-     *
-     * <p><b>必须在 {@link #jump} 之后调用</b>：{@code jump} 内部会
-     * {@code setAnimationLength(animationLength)} 覆盖时长，先设会被冲掉。
-     */
-    public void setAnimationLengthForTrail(double length) {
-        springX.setAnimationLength(length);
-        springY.setAnimationLength(length);
-    }
-
     // ==================== 目标位置计算 ====================
 
     private double destX(double centerX, double width) {
@@ -187,9 +164,9 @@ public class TrailCorner {
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
-     * <p><b>注意：本方法不做「前缘硬吸附」</b>。吸附由
-     * {@code SpringTrail.assignRanks()} 在 jump 之后对 rank 最高的两个角单独调用
-     * {@link #setLeadingSnap()} —— 放在 jump 内部会被本方法结尾的
+     * <p>本方法不做任何「前缘吸附」——时长只按 rank 与短跳判定分配。
+     * 「前缘贴合（半边拖尾）」曾通过 {@code SpringTrail.assignRanks()} 在 jump
+     * 之后改写时长实现（2026-11-01 已回退删除），放在 jump 内部会被本方法结尾的
      * {@code setAnimationLength(animationLength)} 覆盖掉。
      *
      * <p>0.9.83 试过的「对齐度 &gt; 0.5」阈值方案已否决：纯轴向移动时同侧两角的
@@ -374,11 +351,13 @@ public class TrailCorner {
             // 同一套（用移动向量算 alignment，只判前缘一个点）；我们的 4 档 rank
             // 已经把四角差分配好了，再加一层吸附就是两套机制打架。
             //
-            // 【2026-10-31 已实现】没有走「改 rank 体系」那条路，而是直接用
-            // **已经稳定的 rank 排序**：rank 最高的两个角就是前缘（纯水平移动时
-            // 是右侧两角、删除时镜像成左侧两角），由 SpringTrail 在 jump 之后
-            // 调 setLeadingSnap() 把它们钉死。开关是设备级的 leadingSnap，默认关。
-            // 这样既不需要连续的 alignment 值，也不与 4 档 rank 打架。
+            // 【2026-10-31 曾实现，2026-11-01 已回退】当时没有走「改 rank 体系」
+            // 那条路，而是直接用已经稳定的 rank 排序：rank 最高的两个角就是前缘，
+            // 由 SpringTrail 在 jump 之后改写时长。三版模型（前缘 0ms 吸附 /
+            // 四角同长 + 绘制层固定尾巴 / 前缘 0ms + 短后缘）实机验收全部不可行，
+            // 2026-11-01 用户决定回退，只留设置页开关（不影响任何行为）。
+            // 决策依据见 docs/LEADING-SNAP-ISSUES-2026-11-01.md 与
+            // docs/LEADING-SNAP-DECISION-2026-11-01.md。
             //
             // 保留此段注释，避免下次又从头试一遍（阈值方案仍然不可行）。
         } else {

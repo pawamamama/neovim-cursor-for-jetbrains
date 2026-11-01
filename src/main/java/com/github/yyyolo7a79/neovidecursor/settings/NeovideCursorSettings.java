@@ -898,16 +898,14 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
     /**
      * 前缘贴合（半边拖尾）—— 默认关，<b>设备级</b>，不随动画预设变化。
      *
-     * <p><b>效果</b>：运动方向那一侧的两个角（rank 最高）直接贴住目标，
-     * 只有后缘两个角拉出拖尾 —— 就是「左半边 / 右半边」的观感。
-     *
      * <p><b>为什么是设备级</b>：它改变整体观感，用户明确要求做成可选开关，
      * 且不应被「切动画预设」顺带改掉（与 {@link #multiCursorNoGlow} 同一判据：
      * 设备/环境开关不进预设域）。
      *
-     * <p><b>实现入口</b>：{@code CaretAnimator.syncGlobalSettings()} 读取，
-     * 推给每个 {@code SpringTrail}；{@code TrailCorner.setLeadingSnap()} 把
-     * 前缘弹簧时长设为 0，下一帧精确到位。
+     * <p><b>当前状态（2026-11-01 回退）</b>：字段与开关控件保留（能勾、能记住、
+     * 不进预设域），但<b>没有任何行为层消费点</b> —— 勾选不改变观感。
+     * 三版实现模型实机验收均不可行后删除，决策依据见
+     * docs/LEADING-SNAP-ISSUES-2026-11-01.md。
      */
     public boolean leadingSnap = false;
 

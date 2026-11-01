@@ -931,9 +931,6 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 否则选「彩虹（动态）」时预览完全不变（用户报「彩虹没有到预览」）。
         // 判据与 CaretAnimator.resolveRgbWash 一致：颜色匹配到的预设带 rgbWash 标记。
         preview.setCursorRgbWash(isRainbowSelected());
-        // 【2026-10-31】前缘贴合同样是 State-only 字段（NeovideConfig 无此字段，D0 红线），
-        // 必须由面板显式推给预览 —— 否则勾选后真机变、预览窗不变（陷阱 6）。
-        preview.setLeadingSnap(pending.leadingSnap);
     }
 
     /**
@@ -1467,25 +1464,28 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                 row.rowComment(W_SLOPE, COMMENT, NO_LINK).enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });
-            // 【2026-10-31 前缘贴合（半边拖尾）】
+            // 【2026-10-31 前缘贴合（半边拖尾）→ 2026-11-01 已回退，只留开关】
             //
-            // 位置：紧跟在「斜度」之后 —— 两者都改变单行拖尾的**形状**，
-            // 与「拉伸强度 / 斜度」同类；设备级开关不跟随预设，所以文案挂 TAG_GLOBAL。
-            // 默认关闭：它改变整体观感，做成可选最安全（用户 2026-10-28 拍板）。
+            // 三版实现模型（前缘 0ms 吸附 / 四角同长 + 绘制层固定尾巴 /
+            // 前缘 0ms + 短后缘）实机验收全部不可行，实现逻辑已删除；
+            // 开关与 State 字段保留（能勾、能记住），但【不影响任何行为】。
+            // 决策依据：docs/LEADING-SNAP-ISSUES-2026-11-01.md、
+            // docs/LEADING-SNAP-DECISION-2026-11-01.md。
+            //
+            // 位置不变：紧跟在「斜度」之后 —— 两者都涉及单行拖尾的形状；
+            // 设备级开关不跟随预设，所以文案挂 TAG_GLOBAL。
             g.row("前缘贴合（半边拖尾 · 全局）", row -> {
-                // 【M-6】与同组「拉伸强度 / 斜度」同一条规则：本项只被 SpringTrail 消费，
+                // 【M-6】与同组「拉伸强度 / 斜度」同一条规则：原实现只被 SpringTrail 消费，
                 // 残影（AFTERIMAGE）模式走 tickAfterimage、根本不跑 assignRanks ——
-                // 不置灰的话用户会点一个「看起来可点但完全无效」的开关。
+                // 沿用置灰规则，避免出现「看起来可点但完全无效」的开关。
                 bindCheck(row, () -> pending.leadingSnap,
                         v -> pending.leadingSnap = v).enabledIf(springMode);
-                // 【文案口径】与同组「输入平滑（拖尾形状 · 全局）」一致：
-                // 标签后缀「· 全局」+ 蓝色 [全局] 开头，第一句就说「全局生效」。
+                // 【文案口径】必须让用户一眼看出「勾了没效果」，否则会被当成 bug 上报。
                 row.rowComment(TAG_GLOBAL
-                        + "全局生效：光标<b>最靠前的两个角</b>（始终是同一条边）"
-                        + "<b>直接贴住目标</b>，只剩后缘拉出拖尾 —— 就是「左半边」效果。"
-                        + "<br/>关闭时是现在的完整四角拖尾。"
+                        + "<b>待实现：此功能尚未实现，勾选不会改变观感。</b>"
+                        + "<br/>开关状态会被保存，供实现后使用。"
                         + "<br/><b>不随动画预设变化</b>：切任何预设都不改本项。"
-                        + "<br/><b>仅弹簧拖尾模式生效</b>：残影模式下本项置灰。", COMMENT, NO_LINK)
+                        + "<br/><b>残影模式下置灰</b>。", COMMENT, NO_LINK)
                         .enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });

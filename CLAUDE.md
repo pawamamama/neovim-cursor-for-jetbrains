@@ -543,55 +543,44 @@ TR（前缘单角）   2.11     7.43    11.58
 
 ## 7.1 用户已决定、已实现
 
-**半边拖尾开关（`leadingSnap`）** —— 状态：✅ 已实现（2026-10-31）
+**半边拖尾开关（`leadingSnap`）** —— 状态：⚠️ **已回退，只留控件**（2026-11-01）
 ```
 形态：标签 3「光标行手感」→「单行输入输出」组「斜度」之后的复选框
-      「前缘贴合（半边拖尾 · 全局）」，默认关（文案带蓝色 [全局] 说明）
+      「前缘贴合（半边拖尾 · 全局）」，默认关
 归属：设备级（runtimeSwitch=true）—— 不进 AnimPreset / 三个内置预设 /
       applyAnimPresetFields / matchAnimPreset
+现状：实现逻辑已全部删除，勾选【不改变任何观感】；文案已写明「待实现」。
 ```
 
-**最终落点（2026-11-01 按实机反馈重做过一次）：**
+**为什么回退（2026-11-01，用户实机验收三版全部不可行）**：
 
-> 【为什么重做】最初的实现照搬上游 `snapAnimationLength = 0`（前缘瞬移），
-> 但上游 `hideNativeCursor` 默认 false、前缘被真光标盖住；我们隐藏了原生光标，
-> 0ms 瞬移直接暴露，而且整块拉伸矩形会瞬间横跨、盖住刚输入/删除的字符。
-> 用户实机反馈：「拉伸过长、没拉伸的一侧不平滑、别把字符吞掉、只拖一条尾巴」。
+| 版本 | 模型 | 实机反馈 |
+|---|---|---|
+| 第一版（feat 提交，2026-11-01 凌晨） | 前缘 0ms 吸附 | 「拉伸过长、盖住字符」 |
+| 第二版（fix 提交，同日） | 四角同长 110ms + 绘制层固定尾巴 | 「只有一个残影」「连续跟不上」 |
+| 路线 C（未提交） | 前缘 0ms + 后缘 20ms | 「像原生光标卡卡的」「没有尾巴」 |
 
-1. **光标本体不拉伸**：`SpringTrail.assignRanks()` 在 leadingSnap 下把四角
-   设成同一个 `shortAnimationLength`（默认 110ms）→ 四边形始终是 2px 宽的矩形，
-   像普通光标一样平滑移动（`TrailCorner.setAnimationLengthForTrail`）。
-2. **尾巴由绘制层画**：`CaretTrailPanel` 新增 halfTrail 分支 —— 本体按四角几何画，
-   尾巴沿运动反方向平移 `光标宽 × HALF_TRAIL_CAP_WIDTHS`（默认 6px，约半个字符），
-   45% 不透明度；静止（偏移 < 0.5px）时不画尾巴，避免像「光标变粗」。
-   方向由 `SpringTrail.setTarget()` / `AnimationPreview.pushTarget()` 记录，
-   经 `CaretAnimator` 每帧 `panel.setHalfTrail(...)` + `addQuad(..., dirX, dirY)` 传下去。
-3. 开关**不走** `NeovideConfig`（D0 红线），走 `CaretAnimator.syncGlobalSettings()`
-   的 State 通道，与 `multiCursorNoGlow` 同一条路；新建 `SpringTrail` 时补设一次。
-4. 六层：State 字段 / `SettingsField.build()`（第 28 个）/ `copyFrom()` /
-   `loadState()` / `CaretAnimator` 消费 / 面板复选框（斜度之后，带 `TAG_GLOBAL`）。
+关键矛盾：隐藏原生光标后「本体」就是用户看到的唯一光标，必须平滑移动；
+而要「不落后」就得前缘 0ms = 瞬移。且纯弹簧里尾巴长度与停留时间由同一个
+参数决定，要短就消失得快、要久就长到跨格。**这套模型无解**，不是调参能救的。
+完整数据见 `docs/LEADING-SNAP-ISSUES-2026-11-01.md` 与
+`docs/LEADING-SNAP-DECISION-2026-11-01.md`。
 
-**调查结论（2026-11-01，量化实测）**：`slopeTicks` / `typingSmoothness`
-**不是「吞字符」的根因** —— 单次移动四角最大跨度 11.87px < 12px（字符宽），
-永远只覆盖刚走过的那一格；连续删除时才会累积，主控是 `shortAnimationLength`
-（0.02→0.25 时 8.3→18.8px）与按键间隔，slope 是放大器（默认 100ms/键 11.1px），
-smooth 是缩小器但会延长覆盖时间。完整数据见交付报告。
+**回退保留的壳子（能勾、能记住，但不影响行为）**：
+1. State 字段 `leadingSnap = false` / `SettingsField.build()`（第 28 项，
+   runtimeSwitch=true）/ `copyFrom()` / `loadState()` —— 持久化链路完整。
+2. 面板复选框（位置不动），文案「待实现：此功能尚未实现，勾选不会改变观感」。
+3. `PRESET_FIELDS` / `AnimPreset` / `matchAnimPreset` 均不含它（设备级不变）。
+4. 行为层（TrailCorner / SpringTrail / CaretTrailPanel / CaretAnimator /
+   AnimationPreview）零消费点。
 
-**探针 `VLeadingSnap`（22 条断言，全绿）**：L-1/L-1b/L-12 开启时本体是刚性矩形
-（四角时长逐位相同、左右边缘都齐平）；L-2 关闭时右边缘 `4.0565`（与 §六基线一致）；
-L-3/L-3a 关闭可逆；L-4 设备级四项；L-5/L-6 拷贝与持久化；L-7 默认 false；
-L-8 切预设不改；L-9 `AnimPreset` 不含；L-10/L-11 剥注释后的 `syncGlobalSettings`
-真的读它并推给 trail；L-13 出厂默认（slope=0）下四角同步平滑移动；
-**L-14/L-15/L-16 设置页预览窗同步**（预览四角同速、`refreshPreviews` 链路
-把 pending 推到 `inlinePreview`、预览与生产的四角时长逐位一致）。
-变异测试：删掉 `assignRanks()` 里的四角覆盖 → L-1/L-1b/L-12/L-14 红；
-删掉 `pushStyleTo` 的一行 → L-15 红。
-
-**预览窗已接入（2026-10-31，2026-11-01 同步新模型）**：`AnimationPreview` 与生产
-共用 `CaretTrailPanel` 的 halfTrail 分支，方向由 `pushTarget()` 记录 ——
-勾选即时可见，不需要点「应用」。
-
-**产品决策已定**：设备级，**不**跟随动画预设（用户 2026-10-28 拍板）。
+**探针 `VLeadingSnap`（12 条断言，全绿）**：L-4a–d 开关存在与设备级四项；
+L-7 默认 false；L-5/L-6 拷贝与持久化；L-8/L-9/L-20 不进预设域；
+**L-21 真实 UI 链路下开关 true/false 四角时长逐位相同（AC-002）**；
+L-22 行为层五文件剥注释后零消费点（防复活守门）。
+旧 22 条断言（L-1/L-1b/L-2/L-3/L-3a/L-10/L-11/L-12/L-13/L-14/L-15/L-16）
+为**契约变更（功能回退，2026-11-01 用户决定），非缺陷**，逐条去向见
+`plans/leading-snap-revert.md`。
 
 本次交付的完整记录（含终检结论、三组变异测试、实机验收清单）见
 `docs/LEADING-SNAP-REPORT-2026-10-31.md`。

@@ -250,15 +250,6 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 多光标不辉光（全局设置，来自 State，不随预设变化） */
     private boolean multiCursorNoGlow;
 
-    /**
-     * 前缘贴合 / 半边拖尾（设备级，来自 State，不随预设变化）。
-     *
-     * <p>与 {@link #multiCursorNoGlow} 同一条通道：State → 本字段 → 每个
-     * {@code SpringTrail.setLeadingSnap(...)}。不经过 {@code NeovideConfig}
-     * （那是预设快照，而本项明确不进预设域）。
-     */
-    private boolean leadingSnap;
-
 
     /** 光标宽度像素（1–5）；来自 State，不随预设变化 */
     private int cursorWidthPx = 2;
@@ -2243,10 +2234,6 @@ public class CaretAnimator implements Disposable, CaretListener {
                 SpringTrail trail = trails.get(key);
                 if (trail == null) {
                     trail = new SpringTrail(config);
-                    // 【2026-10-31】新光标必须带上当前的前缘贴合值 —— 否则在
-                    // 「勾选后新开一个文件」的场景里，新文件要等一次设置 apply
-                    // 才会生效（syncGlobalSettings 只遍历已存在的 trail）。
-                    trail.setLeadingSnap(leadingSnap);
                     // 【块选区不做出场动画，直接各自吸附】
                     //
                     // 用户反馈：「第一行拖尾长，最后一行短」。
@@ -2724,8 +2711,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         // RGB 开关与弹簧路径保持同一语义：控制台光标也是我们画的，配色要一致
         panel.setRgbEnabled(rgbGradient);
         panel.setCursorRgbWash(cursorRgbWash);
-        // 控制台静态光标不拖尾，也不走半边绘制。
-        panel.setHalfTrail(false);
         panel.beginQuads();
         for (SpringTrail trail : activeTrails) {
             trail.snapToTarget();
@@ -2869,8 +2854,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         panel.setEffectiveGlowLayers(effectiveGlowLayers);
         panel.setRgbEnabled(rgbGradient);
         panel.setCursorRgbWash(cursorRgbWash);
-        // 【2026-11-01】半边拖尾：绘制层改成「本体 + 固定尾巴」，与四角时长解耦。
-        panel.setHalfTrail(leadingSnap);
         // 【诊断必须报告本帧真正生效的层数】
         //
         // 这个字段原来只在 tickStaticCaret 里被赋值，弹簧路径从不写 ——
@@ -2899,12 +2882,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 【U-M-2】复用中转数组（addQuad 立即拷贝，调用方不保留引用）
             fillQuadXs(quadScratchX, trail.corners);
             fillQuadYs(quadScratchY, trail.corners);
-            // 方向只对半边拖尾有意义；其余模式面板走原四边形路径。
-            // 静止（偏移 < 0.5px）时传 0：尾巴随之消失，只剩本体 —— 否则停下后
-            // 会一直挂着一条固定尾巴，看起来像「光标变粗」。
-            boolean moving = trail.maxOffset() > 0.5;
-            panel.addQuad(quadScratchX, quadScratchY, trailGlow,
-                    moving ? trail.dirX : 0, moving ? trail.dirY : 0);
+            panel.addQuad(quadScratchX, quadScratchY, trailGlow);
 
             if (diagFrame) {
                 // I2 / I3：单光标的偏移合理性
@@ -3131,7 +3109,6 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorHeightRatio = s.cursorHeightRatio;
             rgbGradient = s.rgbGradient;
             targetFps = s.targetFps;
-            leadingSnap = s.leadingSnap;
             // 【0.9.86】彩虹与双拼互斥：从「当前颜色匹配哪个预设」反推
             cursorRgbWash = resolveRgbWash(s);
         } catch (Throwable t) {
@@ -3146,22 +3123,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorHeightRatio = 1.0f;
             rgbGradient = false;
             targetFps = 125;
-            leadingSnap = false;
             cursorRgbWash = false;
-        }
-
-        // 推给所有已存在的光标（新建的在 refreshTarget 里设，见那里的注释）。
-        // 放在 try/catch 之外：State 读失败时也要让现有光标落到确定的 false，
-        // 不能一半 true 一半 false。
-        //
-        // 【为什么不在这里做 forceResync + wakeUp（审查 M-3 / LOW-1 的结论）】
-        // 本方法只有两个调用点：构造函数（此时 trails 为空）与 onModeChanged()。
-        // 而 onModeChanged() 末尾本来就无条件 forceResync = true; wakeUp()，
-        // 并且会 snapToTarget() 把所有角点摆到位 —— 所以「勾选后立刻可见」
-        // 由那条既有路径保证，这里再加一次是死代码。
-        // 另外 forceResync 也唤不醒 assignRanks()：它只在目标变化（jumped）时跑。
-        for (SpringTrail trail : trails.values()) {
-            trail.setLeadingSnap(leadingSnap);
         }
     }
 

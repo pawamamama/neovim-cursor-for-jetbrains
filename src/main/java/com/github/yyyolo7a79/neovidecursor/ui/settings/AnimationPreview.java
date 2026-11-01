@@ -266,46 +266,9 @@ public final class AnimationPreview extends JComponent {
         return cursorRgbWash;
     }
 
-    /**
-     * 前缘贴合（半边拖尾）—— 由面板推送，与 {@link #rgbGradient} 同一条通道。
-     *
-     * <p><b>为什么必须显式推</b>：{@code NeovideConfig} 是 D0 红线、不能加字段，
-     * 这个开关只存在于 {@code State}。若不推，用户在标签 3 勾选后真机会变、
-     * 预览窗不变 —— 正是陷阱 6「预览与生产必须同源」记录过的分家。
-     */
-    private boolean leadingSnap;
-
-    /** 上一次 {@link #pushTarget()} 算出的四角 rank（保留给探针与方向判断）。 */
+    /** 上一次 {@link #pushTarget()} 算出的四角 rank 快照（历史探针口径，2026-11-01 起
+     * 无读取者；「前缘贴合」回退后仅剩本处 arraycopy 维护，删除属独立清理，不在本批）。 */
     private int[] lastRanks = new int[4];
-
-    /** 预览最近一次移动方向（半边拖尾用来决定尾巴朝向）。 */
-    private double dirX, dirY;
-    private double lastPushX, lastPushY;
-    private boolean pushSeen;
-
-    /**
-     * 设置前缘贴合（面板在 {@code pushStyleTo} 里推送）。
-     *
-     * <p>半边拖尾由绘制层实现（{@code CaretTrailPanel} 的 halfTrail 分支）：
-     * 本体不拉伸，尾巴固定约半个字符。这里只切开关并把四角设成同一个平滑时长，
-     * 让本体像普通光标一样移动。关闭时下一次 {@code advance()} 会恢复正常梯度。
-     */
-    public void setLeadingSnap(boolean on) {
-        if (leadingSnap == on) {
-            return;
-        }
-        leadingSnap = on;
-        panel.setHalfTrail(on);
-        for (TrailCorner c : corners) {
-            c.setAnimationLengthForTrail(config.shortAnimationLength);
-        }
-        repaint();
-    }
-
-    /** 供探针断言 */
-    public boolean leadingSnapForProbe() {
-        return leadingSnap;
-    }
 
     /**
      * 设置用户的光标尺寸，并立即重排。
@@ -707,20 +670,6 @@ public final class AnimationPreview extends JComponent {
     }
 
     private void pushTarget() {
-        // 【半边拖尾】记录本次移动方向，供绘制层决定尾巴朝向。
-        if (pushSeen) {
-            double dx = centerX - lastPushX;
-            double dy = centerY - lastPushY;
-            double len = Math.hypot(dx, dy);
-            if (len > 1e-6) {
-                dirX = dx / len;
-                dirY = dy / len;
-            }
-        }
-        lastPushX = centerX;
-        lastPushY = centerY;
-        pushSeen = true;
-
         // 【0.9.65 修复：预览必须告诉 TrailCorner「这次挪了几个字符」】
         //
         // 用户报：「动画的单行删除预览窗口是拉长的很诡异」，而实际编辑器里
@@ -760,27 +709,12 @@ public final class AnimationPreview extends JComponent {
             corners[i].jump(cursorW, cursorH, centerX, centerY, ranks[i]);
         }
 
-        // ==================== 前缘贴合（2026-10-31）====================
-        //
-        // 【顺序】与生产 {@code SpringTrail.assignRanks()} 相同：
-        // 必须在 jump 循环【之后】（jump 内部会用 setAnimationLength 覆盖时长），
-        // 否则刚设的 0 会被冲掉。
-        //
-        // 【判据】生产取「排序后的前两名」{@code order[n-1] / order[n-2]}；
-        // 预览取 {@code ranks[i] >= 2}。当前角点恒为 4 个时两者等价，
-        // 但**不是同一份实现** —— 角点表若增删，生产自动跟随、预览不会。
-        // 守门由 VLeadingSnap 的 L-16（逐角比对两侧被钉住的角集合）负责。
-        // 预览侧不能自己重算 rank（陷阱 3），这里只复用本类已有的 ranks 结果。
+        // 【lastRanks】每次 pushTarget 都快照本帧的 rank（探针读取）。
         // corners 恒为 4、ranks 恒与 corners 等长（ranksForAlignment 按 corners.length 建），
         // 所以不需要长度守卫 —— 原来那段不可达的 realloc 已删（审查 L-5）。
+        // （「前缘贴合」曾在这里之后按 leadingSnap 把四角时长改成同一值，
+        // 2026-11-01 功能回退，该覆盖块已删。）
         System.arraycopy(ranks, 0, lastRanks, 0, corners.length);
-        if (leadingSnap) {
-            // 四角同一平滑时长：弹簧只负责让「光标本体」移动；
-            // 尾巴由 CaretTrailPanel 的 halfTrail 分支按方向画成固定长度。
-            for (TrailCorner c : corners) {
-                c.setAnimationLengthForTrail(config.shortAnimationLength);
-            }
-        }
     }
 
     /**
@@ -968,7 +902,7 @@ public final class AnimationPreview extends JComponent {
                             corners[2].getCurrentX(), corners[3].getCurrentX()},
                     new double[]{corners[0].getCurrentY(), corners[1].getCurrentY(),
                             corners[2].getCurrentY(), corners[3].getCurrentY()},
-                    panel.getGlowStrengthForPreview(), dirX, dirY);
+                    panel.getGlowStrengthForPreview());
             panel.paintForPreview(g2, getWidth(), getHeight());
         } finally {
             g2.dispose();
