@@ -158,8 +158,16 @@ public final class VSnap {
         JLabel lbl = ui.labelOf(sl);
         setText(tf, "333");
         check("TYP-1 键入 333 后滑块吸附到 350", sl.getValue() == 350, "slider=" + sl.getValue());
-        check("TYP-2 键入期间 pending 仍为旧值 50（apply 前不写）",
-                conf.pendingForProbe().cursorDisappearDelay == 50,
+        // 【2026-11-01 契约变更，非缺陷】
+        //
+        // 旧断言是「键入期间 pending 仍为旧值 50（apply 前不写）」—— 那是 0.9.7x
+        // 「只在 apply 时写精确值」的契约。BUG-A（用户原话「滑块旁边的数字输入没效果」）
+        // 的根因之一正是：不写 pending → 预览窗（只跟 pending 走）在键入期间一动不动。
+        // 修法改为「量程内键入即写 pending」，这条断言随之改方向（见 plans/fix-input-and-fade.md）。
+        // 下方 TYP-4 / TYP-5 仍然守着「apply 后精确值 333 不被吸附值覆盖」这一原始目的，
+        // 变异测试（VInputCommit I-2）证明新断言确实抓得住「不写 pending」。
+        check("TYP-2 键入 333 后 pending 立即变为 333（2026-11-01 契约变更：键入即写）",
+                conf.pendingForProbe().cursorDisappearDelay == 333,
                 "pending=" + conf.pendingForProbe().cursorDisappearDelay);
         check("TYP-3 标签显示用户输入的精确值 333（不篡改）",
                 lbl.getText().startsWith("333"),

@@ -2003,7 +2003,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
     }
 
-    /** 方向 2：输入框 → 滑块位置。只挪滑块，pending 交给 apply（契约 §6.1 的语义表）。 */
+    /**
+     * 方向 2：输入框 → 滑块位置 + <b>量程内立即写 pending</b>（2026-11-01 BUG-A 之后的语义）。
+     *
+     * <p>历史：原来这里只挪滑块，pending 一律交给 {@code apply()} 写。
+     * 现在改成「键入即写（仅量程内）」，理由见方法内 BUG-A 那段注释；
+     * apply 仍以组件文本为准（平台 {@code CellImpl.bind} 的 onApply），两边不冲突：
+     * 键入写一次、apply 再写一次同一个值。
+     */
     private void onTextEdited(SliderBinding b) {
         if (syncingControls) {
             return;
@@ -2030,12 +2037,44 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         // 标签显示【用户输入】而不是滑块值（契约 §6.1 / B-2b）
         b.valueLabel.setText(b.spec.valueText.apply(this, v));
-        refreshDerivedHints();
-        // t7 / R-02：键入时 pending 按契约【不写】（§6.1 的语义表：只在 apply 时写精确值），
-        // 所以不能拿 pending 去匹配预设 —— 否则「键入 3 但 pending 还是 8」时下拉毫无变化，
-        // 而标签已经显示 3，两者对不上。这里用「用户输入值覆盖 pending 后」的视图做匹配，
-        // 只影响<b>显示</b>，不写 pending。
-        refreshPresetDisplayForInput(b, v);
+
+        // ==================== 【2026-11-01 修 BUG-A】量程内立即写 pending + 刷预览 ====================
+        //
+        // 原来这里<b>不写 pending</b>，只在 apply() 时由平台的 onApply 统一写回。
+        // 后果不是「存不下来」（apply 那条路一直是通的，ProbeSettingsV2 S6 早就守着），
+        // 而是<b>时机</b>：
+        //   · 预览窗只跟 pending 走（refreshPreviews 把 pending 推给 previewConfig）；
+        //   · 拖滑块 → ChangeListener → refreshPresetDisplay → afterPendingEdited
+        //     → refreshPreviews，预览实时变；
+        //   · 在输入框里键入 → 只挪滑块和标签，pending 不变 → 预览一动不动。
+        // 同一张面板上两种输入两种观感，用户原话就是「数字输入没效果」。
+        //
+        // 现在键入即写 pending（仅量程内），与滑块的观感对齐。
+        // 越界值<b>仍然不写</b>：apply() 的 getValidatedIntValue 会拒绝越界
+        // （ProbeSettingsV2 S8 的既有契约），这里也不该把 9999 灌进 pending。
+        if (v >= b.spec.min && v <= b.spec.max) {
+            b.spec.writeTick.accept(pending, v);
+        }
+        // 【P-L-7 同构】写 pending 之后的界面刷新包一层：中途抛出会停在
+        // 「数据已改、界面半更新」的混合态。滑块路径（addSlider 的 ChangeListener）
+        // 一直是这么做的，键入路径原来裸奔 —— 2026-11-01 代码审查 M-4 指出后补齐。
+        try {
+            refreshDerivedHints();
+            // t7 / R-02：预设下拉按「用户输入值覆盖 pending 后」的视图匹配。
+            // 量程内时 pending 已经等于该值（上面刚写），这里再算一次是为了
+            // 越界值（不写 pending）也给出正确的<b>显示</b>。
+            //
+            // 【为什么不直接换 refreshPresetDisplay()】
+            // 那会走 afterPendingEdited() → 在每一次按键上派生/更新「XX 副本」。
+            // 键入是中间态（"1"→"12"→"125"），中途派生副本属于用户没要求的副作用；
+            // 而 apply() 末尾本来就会调 afterPendingEdited()，最终状态完全一致。
+            // 代价：键入后、apply 前切换预设，键入的中间值会丢（apply 前本来就不落任何东西）。
+            refreshPresetDisplayForInput(b, v);
+            // BUG-A 的直接修法：把新 pending 推给三个预览窗（与滑块路径同一终点）。
+            refreshPreviews();
+        } catch (Throwable ex) {
+            LOG.warn("neovide-cursor: 输入框刷新失败（pending 已写入 " + v + "）", ex);
+        }
     }
 
     /** 契约 §6.5：失焦规整 —— 非法回滚、越界 clamp 后写回 pending。 */
@@ -2353,12 +2392,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /**
      * 键入路径专用的预设显示重算（t7 / R-02）。
      *
-     * <p><b>为什么不直接调 refreshPresetDisplay()</b>：契约 §6.1 的语义表规定
-     * 「键入合法值 → pending <b>只在 apply() 时写</b>」。所以键入 3 时 pending 仍是 8，
-     * 拿 pending 去匹配会一直匹配「原版粉色」，而下拉与标签（显示 3）就对不上。
+     * <p><b>为什么不直接调 refreshPresetDisplay()</b>：那条路径会走
+     * {@code afterPendingEdited()}，在每一次按键上派生/更新「XX 副本」。
+     * 键入是中间态（"1"→"12"→"125"），中途派生副本是用户没要求的副作用；
+     * apply() 末尾本来就会调 {@code afterPendingEdited()}，最终状态一致。
      *
-     * <p>这里用「把用户输入值临时代入 pending 视图」的方式算匹配 ——
-     * <b>只用于显示，绝不写 pending</b>（真正的落库仍由 apply() 完成）。
+     * <p>【2026-11-01 更新】pending 现在会在量程内<b>立即写入</b>（BUG-A 的修法），
+     * 所以本方法对量程内输入只是「用同一个值再算一遍」；它保留下来是为了
+     * <b>越界输入</b>（不写 pending）也能给出正确的下拉显示。
      */
     private void refreshPresetDisplayForInput(SliderBinding b, int inputTick) {
         if (animPresetCombo == null || colorPresetCombo == null) {
@@ -4226,6 +4267,21 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     /** 探针/调试用：当前预览副本（只读语义，不要改它）。 */
     public NeovideCursorSettings.State pendingForProbe() {
         return pending;
+    }
+
+    /**
+     * 探针：预览窗当前拿到的辉光层数。
+     *
+     * <p><b>为什么需要它</b>（2026-11-01，BUG-A）：用户报告「数字输入没效果」，
+     * 实际链路是「键入 → pending → refreshPreviews → previewConfig」。前两跳可以用
+     * {@link #pendingForProbe()} 断言，但最后一跳只能通过预览配置本身观察。
+     * 如果没有这个钩子，探针只能断言「pending 变了」，<b>无法发现
+     * refreshPreviews() 没被调用</b> —— 而那正是用户看到「预览不动」的直接原因。
+     *
+     * @return 预览配置里的辉光层数；面板还没建预览时返回 -1
+     */
+    public int previewGlowLayersForProbe() {
+        return previewConfig == null ? -1 : previewConfig.glowLayers;
     }
 
     /** 探针/调试用：面板打开那一刻的 state 快照（缺陷 3 的比较基准）。 */

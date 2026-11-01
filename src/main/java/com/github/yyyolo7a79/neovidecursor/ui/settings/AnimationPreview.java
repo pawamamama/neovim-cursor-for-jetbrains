@@ -176,6 +176,15 @@ public final class AnimationPreview extends JComponent {
     /** 辉光最后一次可见的时刻（纳秒）；0 = 从未亮过 */
     private long lastGlowVisibleNanos = 0L;
 
+    /**
+     * 本次 {@link #step()} 之前是否刚发生过一次「动作」（打字 / 退格 / 换行）。
+     *
+     * <p>与生产的 {@code moved} 同义：只有它能把淡出计时起点与保持亮度往前推。
+     * 动作由 {@code actionTimer → advance()} 触发，而物理帧由 {@code physicsTimer → step()}
+     * 驱动，两者是分开的，所以需要一个一次性标志来传递。
+     */
+    private boolean justAdvanced;
+
     /** 辉光最后一次可见时的强度（0~1），与 {@link #lastGlowVisibleNanos} 配套 */
     private float lastGlowStrength = 0f;
 
@@ -573,6 +582,7 @@ public final class AnimationPreview extends JComponent {
     private void advance() {
         if (!placed || getWidth() <= 0 || metrics == null) return;
 
+        justAdvanced = true;      // 交给下一次 step() 消费（见字段注释）
         if (mode == Mode.INLINE) {
             advanceInline();
         } else {
@@ -786,15 +796,20 @@ public final class AnimationPreview extends JComponent {
         // 现在两件事都调 GlowIntensity（与 CaretAnimator 同一份算法）。
         long now = System.nanoTime();
         float strength = GlowIntensity.strengthFor(maxOffset);
-        if (strength > 0f) {
-            // 和 CaretAnimator 一样：只在「辉光可见」时推进计时起点。
-            // 否则停手瞬间强度归零，淡出计时的起点就变成「已经没光可淡」了。
-            lastGlowVisibleNanos = now;
-            lastGlowStrength = strength;
-        }
+        // 【2026-11-01 与生产同步】计时起点 = 最后一次「动作」，
+        // 保持亮度 = 那次动作时的强度（不是「最后可见」的接近 0 的强度）。
+        // 逐帧实测见 FadeDiag / docs/FIX-INPUT-FADE-REPORT-2026-11-01.md §十四。
+        boolean moved = justAdvanced;
+        justAdvanced = false;
         float fade = GlowIntensity.fade(config.overlayFadeOut, lastGlowVisibleNanos, now,
                 config.cursorDisappearDelay, config.cursorFadeOutDuration);
-        panel.setGlowStrength(strength > 0f ? strength : lastGlowStrength * fade);
+        if (moved && strength > 0f) {
+            lastGlowVisibleNanos = now;
+            lastGlowStrength = strength;
+            fade = 1f;
+        }
+        boolean useHeld = GlowIntensity.useLastGlow(config.overlayFadeOut, moved, fade);
+        panel.setGlowStrength(useHeld ? lastGlowStrength : strength);
         panel.setGlowFade(fade);
         repaint();
     }

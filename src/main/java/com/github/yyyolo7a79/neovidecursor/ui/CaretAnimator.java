@@ -1533,7 +1533,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         } else if (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE) {
             anyAnimating = tickAfterimage(now, moved);
         } else {
-            anyAnimating = tickSpring(dt, now);
+            anyAnimating = tickSpring(dt, now, moved);
         }
 
         currentDelayNs = computeNextDelayNs(moved || anyAnimating);
@@ -2734,7 +2734,7 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
-    private boolean tickSpring(double dt, long now) {
+    private boolean tickSpring(double dt, long now, boolean moved) {
         // 多光标：逐光标推进物理
         boolean anyAnimating = false;
         double maxOffset = 0;
@@ -2797,13 +2797,22 @@ public class CaretAnimator implements Disposable, CaretListener {
         //
         // 效果：停止移动后辉光保持 50ms（cursorDisappearDelay），
         // 再从原亮度线性熄灭 75ms（cursorFadeOutDuration）。
-        if (glowStrength > 0f) {
+        // 【2026-11-01 第二次修：只在「真的移动」时记录保持亮度】
+        //
+        // 第一版记的是「辉光最后一次可见的强度」。实测（FadeDiag 驱动预览窗逐帧采样）：
+        // 淡出开始时面板亮度只剩 0.015 —— 因为弹簧收敛的最后几帧强度本来就接近 0，
+        // 「从最后亮度淡出」= 从 1.5% 淡到 0，肉眼不可能看见。
+        //
+        // 现在记「最后一次移动时的强度」（通常是 1.0），并且：停止移动后不再让弹簧的
+        // 自然衰减先把它吃掉 —— 保持阶段直接用这个亮度，由 panel.glowFade 做线性淡出
+        // （只乘一次，不再有 peak × fade 的二次叠加）。
+        float fade = glowFade(now);
+        if (moved && glowStrength > 0f) {
             lastGlowStrength = glowStrength;
             lastAnimatingNanos = now;
+            fade = 1f;                    // 本帧还在动：不淡出
         }
-
-        float fade = glowFade(now);
-        float effectiveGlow = (glowStrength > 0f) ? glowStrength : lastGlowStrength * fade;
+        float effectiveGlow = lastGlowStrength;
         // 【U-M-23】不再每帧写面板的「全局辉光强度」字段。
         //
         // 那个字段在**生产绘制里没有读者**：每个四边形把自己的辉光强度作为
@@ -2819,8 +2828,34 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 【F-2 修复】必须同时要求 fade > 0：fade 到 0 意味着淡出已经结束，
         // 若仍把 fading 置 true，tickSpring() 会恒返回 true →
         // computeNextDelay(active=true) → EDT 永不降频（空闲也在 8ms 空转）。
-        // 这一条在 alwaysHighFps=true 的默认档被掩盖，干净安装（默认 false）时会暴露。
-        boolean fading = config.overlayFadeOut && fade > 0f && fade < 1f;
+        //
+        // 【2026-11-01 修 BUG-B：两个判据必须分开】
+        //
+        // 原来只有一个 `fading`，同时决定两件事：
+        //   ① 调度：这一帧之后还要不要继续出帧；
+        //   ② 渲染：用「最后亮度 × fade」还是用逐组偏移量强度。
+        //
+        // 旧值 `fade > 0f && fade < 1f` 对 ① 漏掉了「保持期」（此刻 fade == 1，
+        // 光标刚停下时 anyAnimating 也已 false → 落到空闲 120ms；默认淡出只有 75ms，
+        // 比一个空闲帧还短，整条曲线被跨过去 → 用户看到「瞬间熄灭」）。
+        //
+        // 但直接把它改成 `fade > 0f` 会让 ② 在<b>运动期间</b>恒为 true
+        // （lastAnimatingNanos 每帧刷新 → fade 恒为 1），于是所有分组都改读全局
+        // effectiveGlow —— 多光标下「一个在动、一个静止」时静止光标也会发光。
+        // 那是 CaretTrailPanel 注释里写明已修掉的串扰，必须保住。
+        //
+        // 所以拆成两个纯函数（都在 GlowIntensity，探针 VFadeTick 逐段断言）：
+        //   needFrames —— 只决定调度；
+        //   fading     —— 只决定本帧用哪个强度。
+        long sinceLastVisibleMs = lastAnimatingNanos == 0L
+                ? Long.MAX_VALUE
+                : Math.max(0L, (now - lastAnimatingNanos) / 1_000_000L);
+        long holdRemainingMs = config.cursorDisappearDelay <= sinceLastVisibleMs
+                ? 0L : config.cursorDisappearDelay - sinceLastVisibleMs;
+        boolean needFrames = GlowIntensity.needsMoreFrames(
+                config.overlayFadeOut, lastGlowStrength, fade,
+                holdRemainingMs, IDLE_DELAY_MS);
+        boolean fading = GlowIntensity.useLastGlow(config.overlayFadeOut, moved, fade);
 
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
         // 【多光标不辉光：全局开关】
@@ -2936,7 +2971,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 后续要优化，前提是先把「静止帧不出残影」变成可断言的事实。
         computeTrailBounds(currentBounds);
         submitRepaint();
-        return anyAnimating || fading;
+        // 【2026-11-01】调度用 needFrames，不再用 fading（后者只管渲染取值来源）。
+        return anyAnimating || needFrames;
     }
 
     /**
@@ -3399,8 +3435,11 @@ public class CaretAnimator implements Disposable, CaretListener {
             return effectiveGlow;
         }
         // 曲线本身不在这里写 —— 唯一实现在 GlowIntensity，与预览窗共用。
-        // 这里只保留 fading 这一条本类特有的短路：淡出进行中时用「最后亮度 × fade」，
-        // 而不是重新按偏移量算（否则停手瞬间会从 0 重新开始，淡出永远看不见）。
+        //
+        // 【2026-11-01】这里的 `fading` 只表示「本帧全部静止，应改用最后亮度」，
+        // 它的值由 {@link GlowIntensity#useLastGlow} 决定（不是「还要不要出帧」）。
+        // 两者曾在 BUG-B 的初版里被合成一个布尔，导致运动期间所有分组都读全局强度，
+        // 多光标分组串扰复发 —— 详见 GlowIntensity.useLastGlow 的注释。
         return GlowIntensity.strengthFor(offset);
     }
 
