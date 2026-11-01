@@ -97,6 +97,17 @@ final class SpringTrail {
     /** 本光标当前所在行号（用于分组判定） */
     int currentLine = -1;
 
+    /**
+     * 本光标（所属分组）最后一次有非零偏移的时刻；0 = 从未活动。
+     *
+     * <p>【2026-11-01 发版前审查修正】辉光淡出的「保持亮度」必须逐组判断。
+     * 原来用全局 {@code moved}（只表示目标位置这一帧变没变）—— 一次按键后弹簧
+     * 还要推进十几帧，这些帧 {@code moved=false}，所有分组都会被切到全局保持亮度，
+     * 多光标下没动过的光标也发光。这里记录每个光标自己的活动时刻，
+     * {@code CaretAnimator} 按组聚合后交给 {@link com.github.yyyolo7a79.neovidecursor.core.GlowIntensity#glowForGroup}。
+     */
+    long lastActiveNanos = 0L;
+
     SpringTrail(NeovideConfig config) {
         this.config = config;
         corners = new TrailCorner[CORNER_RELATIVE.length];

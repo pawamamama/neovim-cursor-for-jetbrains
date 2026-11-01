@@ -125,7 +125,9 @@ useShadow      = false      ← 辉光本身是关的
    - 保持期（fade==1）→ 只在**距淡出开始不足一个空闲帧**时续帧（避免 500ms 全速空转，
      又保证淡出曲线不被跨过去）。
 2. **渲染取值与调度分开**（审查 H-1）：新增
-   `GlowIntensity.useLastGlow(overlayFadeOut, moved, fade)`（第二轮把参数从「本帧强度」改成「本帧是否移动」，见 §14）。
+   `GlowIntensity.glowForGroup(offset, holdGlow, overlayFadeOut, groupRecentlyActive, fade)`
+   （发版前审查把「全局本帧是否移动」改成「本组最近是否活动」，见 §14 与
+   `docs/FINAL-AUDIT-2026-11-01.md` F-01）。
    初版把两者压进同一个 `fading` 布尔，运动期间恒为 true → 所有分组读全局强度，
    多光标「静止光标发光」串扰复发。现在 `fading` 只决定「用最后亮度还是逐组强度」，
    `needFrames` 只决定调度。
@@ -135,7 +137,7 @@ useShadow      = false      ← 辉光本身是关的
 
 ### 验证
 
-- `VFadeTick` 20 条：调度四段 + 渲染四段 + NaN 两条 + 源码扫描 4 条 + 曲线回归 3 条；
+- `VFadeTick` 24 条：调度 8 条 + 渲染 8 条 + 源码守卫 5 条 + 曲线回归 3 条（发版前审查新增 T-16a/b/c、T-17）；
 - 源码扫描（剥注释后）断言 `CaretAnimator` 调用两个纯函数、且不再出现旧判据；
 - 变异测试 5 组（见 §六），每组都红、恢复后全绿。
 
@@ -203,7 +205,7 @@ useShadow      = false      ← 辉光本身是关的
 | M-4/L-3 | MEDIUM | 键入路径的界面刷新没有 try/catch | **已修**：与滑块路径同构 |
 | M-5/L-2 | MEDIUM | I-5 是同义反复 | **已重写**：断言回灌后控件文本 == pending 刻度 |
 | M-6 | MEDIUM | NaN 防御无断言 | **已补** T-6a/T-6b |
-| M-7/L-4 | MEDIUM | NEXT-STEPS 探针行数字自相矛盾 | **已改** 33,111 行 / 130 文件 |
+| M-7/L-4 | MEDIUM | NEXT-STEPS 探针行数字自相矛盾 | **已改** 33,311 行 / 131 文件 |
 | L-3 | LOW | 探针自称复刻真实键入，实际一次性插入 | **已改为逐字符** |
 | L-5 | LOW | 仓库根多出误建目录 | **已删** |
 

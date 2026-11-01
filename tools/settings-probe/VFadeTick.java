@@ -24,8 +24,13 @@ import java.nio.file.Paths;
  * </ul>
  *
  * <p>所以现在是两个纯函数：{@link GlowIntensity#needsMoreFrames}（调度）与
- * {@link GlowIntensity#useLastGlow}（渲染）。本探针对两者逐段断言，
+ * {@link GlowIntensity#glowForGroup}（逐组渲染，内部用
+ * {@link GlowIntensity#useLastGlowForGroup}）。本探针对两者逐段断言，
  * 并扫源码防止有人把它们重新合并或退回旧判据。
+ *
+ * <p>【2026-11-01 发版前审查修正】渲染判据从「全局本帧有没有移动」改成
+ * 「本组最近有没有活动」。全局 moved 在弹簧收敛期间为 false，会把所有分组
+ * 都切到保持亮度 —— 多光标下没动过的光标也发光。T-16b 就是这条回归的守门。
  */
 public final class VFadeTick {
 
@@ -72,28 +77,39 @@ public final class VFadeTick {
         check("T-6b fade=NaN → 不续帧",
                 !GlowIntensity.needsMoreFrames(true, 0.8f, Float.NaN, 0, IDLE_MS), "");
 
-        // ==================== 渲染：useLastGlow ====================
+        // ==================== 渲染：逐组 glowForGroup ====================
 
-        // ---------- T-7：运动期间必须用逐组强度（多光标不串扰） ----------
+        // ---------- T-7：本组未活动 → 不得用保持亮度（多光标不串扰） ----------
         //
         // 这是 2026-11-01 审查 H-1 的守门：运动期间 fade 恒为 1，
         // 若把「续帧判据」当渲染判据，这里会返回 true → 静止光标也发光。
-        check("T-7 本帧在移动（moved=true）→ 用逐组强度（不得用保持亮度）",
-                !GlowIntensity.useLastGlow(true, true, 1f), "");
+        check("T-7 本组未活动（groupRecentlyActive=false）→ 不用保持亮度",
+                !GlowIntensity.useLastGlowForGroup(true, false, 1f), "");
 
-        // ---------- T-8：全部静止、淡出中 → 用最后亮度×fade ----------
-        check("T-8 已停止 + 淡出中（fade=0.5）→ 用保持亮度",
-                GlowIntensity.useLastGlow(true, false, 0.5f), "");
+        // ---------- T-8：本组刚活动、淡出中 → 用保持亮度 ----------
+        check("T-8 本组刚活动 + 淡出中（fade=0.5）→ 用保持亮度",
+                GlowIntensity.useLastGlowForGroup(true, true, 0.5f), "");
 
-        // ---------- T-9：全部静止、保持期 → 用最后亮度（满强度） ----------
-        check("T-9 已停止 + 保持期（fade=1）→ 用保持亮度",
-                GlowIntensity.useLastGlow(true, false, 1f), "");
+        // ---------- T-9：本组刚活动、保持期 → 用保持亮度（满强度） ----------
+        check("T-9 本组刚活动 + 保持期（fade=1）→ 用保持亮度",
+                GlowIntensity.useLastGlowForGroup(true, true, 1f), "");
 
         // ---------- T-10：开关关闭 / 淡出结束 → 不画 ----------
-        check("T-10a 淡出开关关闭 → 不用最后亮度（静止即熄灭）",
-                !GlowIntensity.useLastGlow(false, false, 1f), "");
-        check("T-10b 淡出结束 fade=0 → 不用最后亮度",
-                !GlowIntensity.useLastGlow(true, false, 0f), "");
+        check("T-10a 淡出开关关闭 → 不用保持亮度（静止即熄灭）",
+                !GlowIntensity.useLastGlowForGroup(false, true, 1f), "");
+        check("T-10b 淡出结束 fade=0 → 不用保持亮度",
+                !GlowIntensity.useLastGlowForGroup(true, true, 0f), "");
+
+        // ---------- T-16：最终取值（2026-11-01 发版前审查 HIGH 的守门） ----------
+        //
+        // 全局 moved 在弹簧收敛期间为 false，旧实现让所有分组都读保持亮度。
+        // T-16b 断言「从未活动的组必须是 0」—— 去掉逐组判据它必红。
+        check("T-16a 已停下且本组刚活动过 → 用保持亮度",
+                GlowIntensity.glowForGroup(0.0, 0.8f, true, true, 1f) == 0.8f, "");
+        check("T-16b 静止分组（从未活动）→ 0，不得被全局保持亮度点亮",
+                GlowIntensity.glowForGroup(0.0, 0.8f, true, false, 1f) == 0f, "");
+        check("T-16c 本组最近活动过（即使仍有残余偏移）→ 保持亮度（与曲线连续）",
+                GlowIntensity.glowForGroup(2.5, 0.8f, true, true, 1f) == 0.8f, "");
 
         // ==================== 源码守卫 ====================
 
@@ -106,10 +122,14 @@ public final class VFadeTick {
             String code = stripComments(animator);
             check("T-12 CaretAnimator 调用 GlowIntensity.needsMoreFrames（不是自己写调度判据）",
                     code.contains("GlowIntensity.needsMoreFrames("), "未找到调用");
-            check("T-13 CaretAnimator 调用 GlowIntensity.useLastGlow（不是自己写渲染判据）",
-                    code.contains("GlowIntensity.useLastGlow("), "未找到调用");
+            check("T-13 CaretAnimator 调用 GlowIntensity.glowForGroup（逐组渲染判据）",
+                    code.contains("GlowIntensity.glowForGroup("), "未找到调用");
             check("T-14 CaretAnimator 代码里不再出现旧的 `fade > 0f && fade < 1f` 判据",
                     !code.contains("fade > 0f && fade < 1f"), "旧判据仍在代码里");
+            check("T-17 CaretAnimator 用逐组 glowForGroup，且不再调用全局 useLastGlow",
+                    code.contains("GlowIntensity.glowForGroup(")
+                            && !code.contains("GlowIntensity.useLastGlow("),
+                    "渲染判据未改为逐组");
         }
 
         // ==================== 曲线回归（与 VPreviewParity 同一边界） ====================

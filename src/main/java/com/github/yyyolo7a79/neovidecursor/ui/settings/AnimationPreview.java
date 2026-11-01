@@ -808,8 +808,12 @@ public final class AnimationPreview extends JComponent {
             lastGlowStrength = strength;
             fade = 1f;
         }
-        boolean useHeld = GlowIntensity.useLastGlow(config.overlayFadeOut, moved, fade);
-        panel.setGlowStrength(useHeld ? lastGlowStrength : strength);
+        // 【2026-11-01 发版前审查修正】与生产同一入口 glowForGroup：
+        // 预览是单光标单组，「本组最近活动过」等价于「曾经动过」
+        // （lastGlowVisibleNanos 只在 moved && strength > 0 时刷新）。
+        float glow = GlowIntensity.glowForGroup(maxOffset, lastGlowStrength,
+                config.overlayFadeOut, lastGlowVisibleNanos != 0L, fade);
+        panel.setGlowStrength(glow);
         panel.setGlowFade(fade);
         repaint();
     }

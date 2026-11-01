@@ -502,6 +502,16 @@ public class CaretAnimator implements Disposable, CaretListener {
     private double[] groupMaxScratch = new double[0];
 
     /**
+     * 每个分组最近是否活动过（复用数组，容量 &gt;= 组数）。
+     *
+     * <p>【2026-11-01 发版前审查修正】辉光「保持亮度」必须逐组判断，
+     * 不能用全局 {@code moved} —— 后者在弹簧收敛期间为 false，会把所有分组
+     * （包括从未动过的光标）切到保持亮度。判据的数据来源是
+     * {@link SpringTrail#lastActiveNanos}。
+     */
+    private boolean[] groupRecentScratch = new boolean[0];
+
+    /**
      * 把四个角点当前的 X 写进 {@code out}（原地填充，不分配）。
      *
      * <p><b>为什么拆成静态方法</b>：探针要能直接调用它断言「写出来的值 = 四角真实坐标」——
@@ -2742,8 +2752,14 @@ public class CaretAnimator implements Disposable, CaretListener {
             if (trail.update(dt)) {
                 anyAnimating = true;
             }
-            if (trail.maxOffset() > maxOffset) {
-                maxOffset = trail.maxOffset();
+            double trailOffset = trail.maxOffset();
+            // 【2026-11-01 发版前审查修正】逐光标记录「最后一次有非零偏移」的时刻。
+            // 不能用全局 moved：弹簧收敛期间 moved=false，静止分组会被误判为「该保持」。
+            if (trailOffset > 0.0) {
+                trail.lastActiveNanos = now;
+            }
+            if (trailOffset > maxOffset) {
+                maxOffset = trailOffset;
             }
         }
 
@@ -2775,6 +2791,28 @@ public class CaretAnimator implements Disposable, CaretListener {
         for (SpringTrail trail : activeTrails) {
             if (trail.maxOffset() > groupMaxOffset[trail.groupId]) {
                 groupMaxOffset[trail.groupId] = trail.maxOffset();
+            }
+        }
+
+        // 【2026-11-01 发版前审查修正】逐组「最近活动过」判据。
+        //
+        // 窗口 = 保持时长 + 淡出时长 + 一个空闲帧。最后一个空闲帧是为了覆盖
+        // 调度器可能隔 120ms 才再出一帧的情形（与 needsMoreFrames 的边界一致）。
+        // 从未活动过的组 lastActiveNanos == 0，永远不会被点亮 —— 这正是
+        // 「多光标下静止光标不发光」这条不变量。
+        if (groupRecentScratch.length < groupCount) {
+            groupRecentScratch = new boolean[groupCount];
+        } else {
+            java.util.Arrays.fill(groupRecentScratch, 0, groupCount, false);
+        }
+        boolean[] groupRecentlyActive = groupRecentScratch;
+        long recentWindowNs = (long) (((config.cursorDisappearDelay / 1000.0)
+                + config.cursorFadeOutDuration) * 1_000_000_000.0)
+                + IDLE_DELAY_MS * 1_000_000L;
+        for (SpringTrail trail : activeTrails) {
+            if (trail.lastActiveNanos != 0L
+                    && now - trail.lastActiveNanos <= recentWindowNs) {
+                groupRecentlyActive[trail.groupId] = true;
             }
         }
 
@@ -2845,8 +2883,12 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 那是 CaretTrailPanel 注释里写明已修掉的串扰，必须保住。
         //
         // 所以拆成两个纯函数（都在 GlowIntensity，探针 VFadeTick 逐段断言）：
-        //   needFrames —— 只决定调度；
-        //   fading     —— 只决定本帧用哪个强度。
+        //   needFrames    —— 只决定调度（全局）；
+        //   glowForGroup  —— 只决定本组这一帧用哪个强度（逐组）。
+        //
+        // 【2026-11-01 发版前审查修正】渲染判据从「全局本帧有没有移动」改成
+        // 「本组最近有没有活动」。全局 moved 在弹簧收敛期间为 false，
+        // 会把所有分组都切到保持亮度 —— 多光标下没动过的光标也发光。
         long sinceLastVisibleMs = lastAnimatingNanos == 0L
                 ? Long.MAX_VALUE
                 : Math.max(0L, (now - lastAnimatingNanos) / 1_000_000L);
@@ -2855,7 +2897,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         boolean needFrames = GlowIntensity.needsMoreFrames(
                 config.overlayFadeOut, lastGlowStrength, fade,
                 holdRemainingMs, IDLE_DELAY_MS);
-        boolean fading = GlowIntensity.useLastGlow(config.overlayFadeOut, moved, fade);
 
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
         // 【多光标不辉光：全局开关】
@@ -2913,7 +2954,9 @@ public class CaretAnimator implements Disposable, CaretListener {
         for (SpringTrail trail : activeTrails) {
             // 同组共享组内最大偏移 → 相邻行呈现为一个整体，组间互不影响
             double offForGlow = groupMaxOffset[trail.groupId];
-            float trailGlow = glowStrengthForValue(offForGlow, effectiveGlow, fading);
+            // 逐组判据：只有本组最近活动过，才允许用全局保持亮度。
+            float trailGlow = GlowIntensity.glowForGroup(offForGlow, effectiveGlow,
+                    config.overlayFadeOut, groupRecentlyActive[trail.groupId], fade);
             // 【U-M-2】复用中转数组（addQuad 立即拷贝，调用方不保留引用）
             fillQuadXs(quadScratchX, trail.corners);
             fillQuadYs(quadScratchY, trail.corners);
@@ -3421,26 +3464,6 @@ public class CaretAnimator implements Disposable, CaretListener {
             prevLine = line;
         }
         return out;
-    }
-
-    /**
-     * 由「偏移量」直接算辉光强度（不含 fading 时用 effectiveGlow）。
-     *
-     * <p>由调用方显式传入偏移量（而不是像已删除的 {@code glowStrengthFor} 那样
-     * 自己去读 trail 的 maxOffset）—— 多光标分组后需要传「组内最大值」，
-     * 让同组光标呈现为同一个整体亮度。
-     */
-    private float glowStrengthForValue(double offset, float effectiveGlow, boolean fading) {
-        if (fading) {
-            return effectiveGlow;
-        }
-        // 曲线本身不在这里写 —— 唯一实现在 GlowIntensity，与预览窗共用。
-        //
-        // 【2026-11-01】这里的 `fading` 只表示「本帧全部静止，应改用最后亮度」，
-        // 它的值由 {@link GlowIntensity#useLastGlow} 决定（不是「还要不要出帧」）。
-        // 两者曾在 BUG-B 的初版里被合成一个布尔，导致运动期间所有分组都读全局强度，
-        // 多光标分组串扰复发 —— 详见 GlowIntensity.useLastGlow 的注释。
-        return GlowIntensity.strengthFor(offset);
     }
 
 }

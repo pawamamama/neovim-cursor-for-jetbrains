@@ -8,9 +8,9 @@
 ## 一、当前状态（实测）
 
 ```
-HEAD     46c712d（main，已推 fork，同步 0 0）
-已装     IDEA 2026.1 / PyCharm 2025.2 = 0.9.116（约）
-门禁     112 个 V*.java，ALL PASS（VRegr2 的 2 条 informational 不算失败）
+HEAD     a62afe5（main，已推 fork，同步 0 0）
+已装     IDEA 2026.1 / PyCharm 2025.2 = 0.9.119
+门禁     116 个 V*.java（113 个注册），ALL PASS（VRegr2 的 2 条 informational 不算失败）
 D0       core/NeovideConfig.java 零 diff
 工作区   只有 build/night-run-report.md（不入库）
 ```
@@ -19,6 +19,7 @@ D0       core/NeovideConfig.java 零 diff
 
 | 提交 | 内容 |
 |---|---|
+| `4af8965` + `a62afe5` | 输入框提交链路 + 辉光淡出接线；发版前审查追加多光标逐组修正 |
 | `caca717` + `46c712d` | 界面国际化（165 key，英文默认 + 中文覆盖） |
 | `b5e34d7` + `a99c342` | 半边拖尾回退为「只留开关，逻辑掏空」 |
 | `bef6344` | 第 3 批审查收尾 |

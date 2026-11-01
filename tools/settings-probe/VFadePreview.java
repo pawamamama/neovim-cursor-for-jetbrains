@@ -16,7 +16,7 @@ import java.lang.reflect.Field;
  *
  * <p>修法：起点改用「最后一次<b>移动</b>时的强度」（通常 1.0），并且停止移动后
  * 不再让弹簧的自然衰减先把它吃掉。本探针驱动 <b>AnimationPreview</b>（与生产共用
- * {@code GlowIntensity} 和同一套 {@code useLastGlow} 判据），逐帧采样面板亮度，
+ * {@code GlowIntensity} 和同一套 {@code glowForGroup} 判据），逐帧采样面板亮度，
  * 断言：保持期亮度接近满值、随后单调下降、最终归零。
  *
  * <p>为什么不直接驱动 {@code CaretAnimator}：它需要真实 {@code Editor}，

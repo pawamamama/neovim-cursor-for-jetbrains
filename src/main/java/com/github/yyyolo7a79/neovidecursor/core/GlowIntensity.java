@@ -169,43 +169,65 @@ public final class GlowIntensity {
     }
 
     /**
-     * 这一帧是否应该用「最后亮度 × fade」（全局值）代替逐组偏移量强度（2026-11-01）。
+     * 本组这一帧是否应改用「保持亮度」—— 逐组判据（2026-11-01 发版前审查修正）。
      *
-     * <h2>为什么不能和 {@link #needsMoreFrames} 合成一个布尔</h2>
+     * <h2>为什么判据必须逐组，而不是「全局本帧有没有移动」</h2>
      *
-     * <p>两者是<b>不同的问题</b>，答案在运动期间恰好相反：
-     * <ul>
-     *   <li>调度（要不要出帧）：运动期间当然要出帧 —— 但那是 {@code anyAnimating} 的事；</li>
-     *   <li>渲染（用哪个强度）：运动期间必须用<b>逐组</b>偏移量强度，
-     *       否则「一个光标在动、另一个静止」时，静止光标也会读到全局最大值而发光。</li>
-     * </ul>
+     * <p>{@code moved} 只表示「光标目标位置这一帧变没变」。一次按键之后弹簧还要推进
+     * 十几帧，这些帧 {@code moved == false}，于是全局判据会把<b>所有</b>分组都切到
+     * 保持亮度 —— 多光标下那个从头到尾没动过的光标也会满强度发光。
+     * 这正是 {@code CaretTrailPanel} 注释里写明已修掉的串扰。
      *
-     * <p>2026-11-01 的初版把两者压进同一个 {@code fading} 布尔，结果是运动期间
-     * {@code fading} 恒为 true（{@code lastAnimatingNanos} 每帧刷新 → {@code fade == 1}），
-     * 多光标分组串扰被重新引入 —— 正是 {@code CaretTrailPanel} 注释里写明已修掉的那个 bug。
-     * 现在拆成两个纯函数，各有守门断言。
+     * <p>所以调用方按组传 {@code groupRecentlyActive}：本组在「保持 + 淡出」窗口内
+     * 有过非零偏移才为 true。从未活动过的组永远拿不到保持亮度。
      *
-     * <p><b>为什么判据是「这一帧有没有移动」而不是「本帧强度是否为 0」</b>
-     * （2026-11-01 第二次修，实测数据见 {@code docs/FIX-INPUT-FADE-REPORT-2026-11-01.md}）：
+     * <p>它仍然不能和 {@link #needsMoreFrames} 合成一个布尔：后者决定「还要不要出帧」，
+     * 本方法决定「用哪个强度」，两者在运动期间答案恰好相反。
      *
-     * <p>弹簧收敛需要约 100ms，这段时间里强度从 1.0 平滑衰减到 0。若等到强度为 0 才切到
-     * 「保持亮度」，上一帧是 0.02、下一帧突然变成保持值 —— 画面会闪一下。
-     * 用「最后一次移动」作切换点则完全连续：最后一次移动那一帧逐组强度就是保持值。
-     *
-     * @param overlayFadeOut 总开关；关闭时辉光应随弹簧自然衰减，没有「保持」阶段
-     * @param moved          本帧光标是否发生了移动
-     * @param fade           {@link #fade} 的返回值
-     * @return true = 用保持亮度（{@code lastGlowStrength}）；false = 用逐组 {@link #strengthFor}
+     * @param overlayFadeOut      总开关；关闭时辉光随弹簧自然衰减，没有保持阶段
+     * @param groupRecentlyActive 本组最近是否活动过（窗口 = 保持时长 + 淡出时长）
+     * @param fade                {@link #fade} 的返回值
+     * @return true = 本组可用保持亮度；false = 用逐组 {@link #strengthFor}
      */
-    public static boolean useLastGlow(boolean overlayFadeOut, boolean moved, float fade) {
+    public static boolean useLastGlowForGroup(boolean overlayFadeOut, boolean groupRecentlyActive,
+                                              float fade) {
         if (!overlayFadeOut) {
             return false;                 // 关闭淡出：随弹簧自然衰减，没有保持阶段
         }
         if (!(fade > 0f)) {
             return false;                 // 淡出结束 / NaN：不画
         }
-        // 本帧还在移动 → 逐组强度（多光标下静止组保持为 0，不串扰）；
-        // 停止移动后 → 保持「最后一次移动时的亮度」，直到 delay 结束再线性熄灭。
-        return !moved;
+        return groupRecentlyActive;
+    }
+
+    /**
+     * 本组这一帧最终交给绘制层的辉光强度（生产与预览共用的唯一入口）。
+     *
+     * <p>两种状态：
+     * <ul>
+     *   <li>本组最近活动过 → 保持亮度（{@code lastGlowStrength} 在最后一次移动帧刚刷新，
+     *       与逐组曲线连续，不会闪）；</li>
+     *   <li>本组从未活动 / 已过淡出窗口 → 逐组曲线 {@link #strengthFor}，
+     *       静止组自然是 0，不发光。</li>
+     * </ul>
+     *
+     * <p><b>为什么不能加「偏移必须归零才保持」的条件</b>：弹簧收敛到 0.5px 以下需要时间，
+     * 淡出开始时往往还有约 0.7px 残余。若此时退回逐组曲线，强度只剩 0.088 ——
+     * 又变成「从 1.5% 淡到 0」，正是 B-4 要修的观感。判据只看「本组是否最近活动过」。
+     *
+     * @param offset              本组四角相对目标的最大偏移（像素）
+     * @param holdGlow            保持亮度（调用方记录的「最后一次动作时的强度」）
+     * @param overlayFadeOut      淡出总开关
+     * @param groupRecentlyActive 本组最近是否活动过
+     * @param fade                {@link #fade} 的返回值
+     * @return 0~1 的辉光强度
+     */
+    public static float glowForGroup(double offset, float holdGlow,
+                                     boolean overlayFadeOut, boolean groupRecentlyActive,
+                                     float fade) {
+        if (useLastGlowForGroup(overlayFadeOut, groupRecentlyActive, fade)) {
+            return holdGlow;
+        }
+        return strengthFor(offset);
     }
 }

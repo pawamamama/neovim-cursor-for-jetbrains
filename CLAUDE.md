@@ -506,14 +506,14 @@ TR（前缘单角）   2.11     7.43    11.58
 
 | 探针:行 | 断言 | 加什么会红 |
 |---|---|---|
-| `VAddSetting.java:115` | `sliders == 14 && checks == 9 && combos == 4` | 加滑块/复选框/下拉 |
-| `VerifyPanel.java:97` | `sliders == 14` | 加滑块 |
-| `VerifyPanel.java:104` | `checks == 9` | **加复选框** |
-| `VerifyPanel.java:108` | `combos == 4` | 加下拉 |
-| `VPreset.java:385-386` | `State` public 实例字段数 `== 30` | **加任何 State 字段** |
+| `VAddSetting.java:120` | `sliders == 14 && checks == 10 && combos == 4` | 加滑块/复选框/下拉 |
+| `VerifyPanel.java:98` | `sliders == 14` | 加滑块 |
+| `VerifyPanel.java:106` | `checks == 10` | **加复选框** |
+| `VerifyPanel.java:110` | `combos == 4` | 加下拉 |
+| `VPreset.java:389-390` | `State` public 实例字段数 `== 34` | **加任何 State 字段** |
 | `VDefaultFreeze.java:40-45` | `GOLDEN` 金表逐字段默认值 | 加字段必须登记，否则红 |
 
-**正确做法是改这些常数（14→15、9→10、30→31）并在旁边写清「契约变更，非缺陷」。**
+**正确做法是改这些常数（14→15、10→11、34→35）并在旁边写清「契约变更，非缺陷」。**
 **不要反过来动生产代码去迁就断言** —— 那是纪律四铁律「不要为了让测试通过而改测试」的镜像错误。
 
 ### C. 控件定位表的插入位置（比 B 更隐蔽）

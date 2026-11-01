@@ -354,5 +354,5 @@ TR（前缘单角）   2.11     7.43    11.58
 | 项 | 现状 |
 |---|---|
 | `git tag` | 停在 `v0.9.83`；实际已装到 **0.9.119**，中间三十六个版本无 tag |
-| 探针总数 | **97 个** `V*.java`（新增 `VBoot` / `VDocCheck` / `VBuildDecl` / `VReadAction`），文档数字已由 `VDocCheck` 纳入门禁 |
-| `CLAUDE.md` 状态数字 | 已同步为 0.9.104 / 97 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |
+| 探针总数 | **116 个** `V*.java`（新增 `VInputCommit` / `VFadeTick` / `VFadePreview`），文档数字已由 `VDocCheck` 纳入门禁 |
+| `CLAUDE.md` 状态数字 | 已同步为 0.9.119 / 116 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |
