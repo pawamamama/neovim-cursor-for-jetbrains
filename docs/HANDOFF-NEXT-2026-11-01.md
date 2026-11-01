@@ -9,7 +9,7 @@
 
 ```
 HEAD     a62afe5（main，已推 fork，同步 0 0）
-已装     IDEA 2026.1 / PyCharm 2025.2 = 0.9.119
+已装     IDEA 2026.1 / PyCharm 2025.2 = 0.9.120
 门禁     116 个 V*.java（113 个注册），ALL PASS（VRegr2 的 2 条 informational 不算失败）
 D0       core/NeovideConfig.java 零 diff
 工作区   只有 build/night-run-report.md（不入库）

@@ -93,8 +93,8 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 # 二、当前状态（用这组数字判断一切）
 
 ```
-版本         v0.9.119（IDEA 2026.1 已装；PyCharm 2025.2 仍是旧版。读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
-             git tag 仍停在 v0.9.83 —— 0.9.84~0.9.119 共 36 个版本没打 tag（版本未发布）
+版本         v0.9.120（IDEA 2026.1 已装；PyCharm 2025.2 仍是旧版。读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
+             git tag 仍停在 v0.9.83 —— 0.9.84~0.9.120 共 37 个版本没打 tag（版本未发布）
 HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过期一次）
 远程         fork/main 与本机 main 是否同步，**用命令核实，不要写结论**：
              git rev-list --left-right --count fork/main...HEAD  → 应为 0 0

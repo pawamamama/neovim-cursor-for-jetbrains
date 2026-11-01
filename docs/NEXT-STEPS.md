@@ -1,6 +1,6 @@
 # 下一步做什么
 
-> 状态：**v0.9.119 本地已装**（未发布）· fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· git tag 停在 0.9.83
+> 状态：**v0.9.120 本地已装**（未发布）· fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· git tag 停在 0.9.83
 > 本文最后更新：2026-10-27
 
 > ⚠️ **本文的数字曾长期失真，请勿直接采信或转抄。**
@@ -16,9 +16,9 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v0.9.119**（IDEA 2026.1 已装；PyCharm 2025.2 仍是旧版；读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
-| dist 最新 jar | `dist/neovide-cursor-0.9.119.jar`（2026-11-01） |
-| git tag | 停在 **v0.9.83**（0.9.84~0.9.119 缺 36 个，版本未发布） |
+| 版本 | **v0.9.120**（IDEA 2026.1 已装；PyCharm 2025.2 仍是旧版；读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
+| dist 最新 jar | `dist/neovide-cursor-0.9.120.jar`（2026-11-01） |
+| git tag | 停在 **v0.9.83**（0.9.84~0.9.120 缺 37 个，版本未发布） |
 | 探针文件 | **116 个 `V*.java`**（全部 .java 131 个，2026-11-01 实测） |
 | 探针基线 | **ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针，见 §7.1 第 1 项 |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
@@ -353,6 +353,6 @@ TR（前缘单角）   2.11     7.43    11.58
 
 | 项 | 现状 |
 |---|---|
-| `git tag` | 停在 `v0.9.83`；实际已装到 **0.9.119**，中间三十六个版本无 tag |
+| `git tag` | 停在 `v0.9.83`；实际已装到 **0.9.120**，中间三十七个版本无 tag |
 | 探针总数 | **116 个** `V*.java`（新增 `VInputCommit` / `VFadeTick` / `VFadePreview`），文档数字已由 `VDocCheck` 纳入门禁 |
-| `CLAUDE.md` 状态数字 | 已同步为 0.9.119 / 116 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |
+| `CLAUDE.md` 状态数字 | 已同步为 0.9.120 / 116 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |
