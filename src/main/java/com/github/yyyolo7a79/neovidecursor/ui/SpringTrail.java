@@ -143,6 +143,19 @@ final class SpringTrail {
     }
 
     /**
+     * 前缘贴合（半边拖尾）开关 —— <b>设备级</b>，由 {@code CaretAnimator} 从 State 推送。
+     *
+     * <p>默认 {@code false}（与 State 默认值一致）。只有为 true 时
+     * {@link #assignRanks()} 才会把 rank 最高的两个角钉死在目标位置。
+     */
+    private boolean leadingSnap;
+
+    /** 设置前缘贴合。下一帧 {@code assignRanks()} 起生效（光标静止时无可观察差异）。 */
+    void setLeadingSnap(boolean leadingSnap) {
+        this.leadingSnap = leadingSnap;
+    }
+
+    /**
      * 让本光标从另一个光标的当前形状起飞（多光标新增时调用）。
      *
      * <p>源光标尚未就位时不做处理，交给首次 {@link #setTarget} 直接吸附。
@@ -313,6 +326,25 @@ final class SpringTrail {
         // 排序后 order[k] = 「第 k 靠后」的角点下标；k 就是它的 rank
         for (int k = 0; k < n; k++) {
             corners[order[k]].jump(width, height, centerX, centerY, k);
+        }
+
+        // ==================== 前缘贴合（半边拖尾，2026-10-31）====================
+        //
+        // 【在哪】必须在上面 jump 循环【之后】：jump 内部会
+        // setAnimationLength(animationLength)，先设会被覆盖。
+        //
+        // 【锁哪两个】order[n-1] / order[n-2] = rank 最高的两个 = 对齐度最大的两个
+        // = 运动方向那一侧的「前缘」。纯水平右移时是 TR/BR；删除时镜像成 TL/BL。
+        // 用 n-1 / n-2 而不是写死 2/3，理由与 alignmentScratch 相同：
+        // 角点表增删时自动跟随，不会出现「表改了 5 个、这里还锁 2/3」。
+        //
+        // 【效果】前缘当帧贴住目标（DampedSpring 短路到 0），后缘两个角仍走
+        // shortAnimationLength × trailFactors 的正常梯度 —— 形变体全堆在后缘，
+        // 视觉上就是「半边」。后缘拖尾长度不变，因此不会出现上游 B 版
+        // 「2px 光标每次击键都是大跳」那种整条线被拉成对角线的情形。
+        if (leadingSnap && n >= 2) {
+            corners[order[n - 1]].setLeadingSnap();
+            corners[order[n - 2]].setLeadingSnap();
         }
     }
 

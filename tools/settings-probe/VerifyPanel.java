@@ -100,8 +100,9 @@ public final class VerifyPanel {
         // （性能诊断是唯一不持久化的那个，见 NeovideCursorConfigurable#paintDiag）。
         // 0.9.28：新增「诊断日志」复选框（CursorDiag 开关）→ 6 变 7。
         // 0.9.54：新增「多光标时关闭辉光」→ 7 变 8
-        check("U8 9 个复选框（含 0.9.58 新增的 RGB 渐变）",
-                checks == 9, "实际 " + checks);
+        // 【2026-10-31 契约变更，非缺陷】新增「前缘贴合（半边拖尾）」→ 9 变 10。
+        check("U8 10 个复选框（含 2026-10-31 新增的前缘贴合）",
+                checks == 10, "实际 " + checks);
         // 0.9.5 的 t3 新增两个预设下拉（动画 / 颜色），加上 trailMode = 3 个。
         // 0.9.78 新增「目标帧率」下拉 = 4 个。
         check("U9 4 个下拉（trailMode + 动画预设 + 颜色预设 + 目标帧率）",
@@ -224,7 +225,9 @@ public final class VerifyPanel {
         for (JComponent c : all) {
             if (c instanceof JCheckBox) { boxes.add((JCheckBox) c); }
         }
-        check("U19 复选框数量=9（多光标不辉光 + RGB 渐变）", boxes.size() == 9, "实际 " + boxes.size());
+        // 【2026-10-31 契约变更，非缺陷】新增「前缘贴合（半边拖尾）」→ 9 变 10。
+        check("U19 复选框数量=10（多光标不辉光 + RGB 渐变 + 前缘贴合）",
+                boxes.size() == 10, "实际 " + boxes.size());
 
         String[] names = {"enabled", "hideNativeCaret", "alwaysHighFps", "overlayFadeOut", "useShadow"};
 

@@ -893,7 +893,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     /**
-     * 把光标尺寸 / 渐变 / 彩虹三项推给三个预览窗 —— 拖动滑块时立即生效，不需要点「应用」。
+     * 把光标尺寸 / 渐变 / 彩虹 / 前缘贴合推给三个预览窗 —— 改动立即生效，不需要点「应用」。
      *
      * <p><b>名字为什么从 syncPreviewCursorSize 改过来（P-L-16）</b>：它经 {@code pushStyleTo}
      * 推的不止尺寸，还有渐变与彩虹。旧名字与行为不符，正是纪律四-J ③「名字与行为不符 → 改名」。
@@ -931,6 +931,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 否则选「彩虹（动态）」时预览完全不变（用户报「彩虹没有到预览」）。
         // 判据与 CaretAnimator.resolveRgbWash 一致：颜色匹配到的预设带 rgbWash 标记。
         preview.setCursorRgbWash(isRainbowSelected());
+        // 【2026-10-31】前缘贴合同样是 State-only 字段（NeovideConfig 无此字段，D0 红线），
+        // 必须由面板显式推给预览 —— 否则勾选后真机变、预览窗不变（陷阱 6）。
+        preview.setLeadingSnap(pending.leadingSnap);
     }
 
     /**
@@ -1462,6 +1465,28 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             g.row("斜度（单行倾斜）", row -> {
                 addSlider(row, specOf("slopeTicks"), springMode);
                 row.rowComment(W_SLOPE, COMMENT, NO_LINK).enabledIf(springMode);
+                return kotlin.Unit.INSTANCE;
+            });
+            // 【2026-10-31 前缘贴合（半边拖尾）】
+            //
+            // 位置：紧跟在「斜度」之后 —— 两者都改变单行拖尾的**形状**，
+            // 与「拉伸强度 / 斜度」同类；设备级开关不跟随预设，所以文案挂 TAG_GLOBAL。
+            // 默认关闭：它改变整体观感，做成可选最安全（用户 2026-10-28 拍板）。
+            g.row("前缘贴合（半边拖尾 · 全局）", row -> {
+                // 【M-6】与同组「拉伸强度 / 斜度」同一条规则：本项只被 SpringTrail 消费，
+                // 残影（AFTERIMAGE）模式走 tickAfterimage、根本不跑 assignRanks ——
+                // 不置灰的话用户会点一个「看起来可点但完全无效」的开关。
+                bindCheck(row, () -> pending.leadingSnap,
+                        v -> pending.leadingSnap = v).enabledIf(springMode);
+                // 【文案口径】与同组「输入平滑（拖尾形状 · 全局）」一致：
+                // 标签后缀「· 全局」+ 蓝色 [全局] 开头，第一句就说「全局生效」。
+                row.rowComment(TAG_GLOBAL
+                        + "全局生效：光标<b>最靠前的两个角</b>（始终是同一条边）"
+                        + "<b>直接贴住目标</b>，只剩后缘拉出拖尾 —— 就是「左半边」效果。"
+                        + "<br/>关闭时是现在的完整四角拖尾。"
+                        + "<br/><b>不随动画预设变化</b>：切任何预设都不改本项。"
+                        + "<br/><b>仅弹簧拖尾模式生效</b>：残影模式下本项置灰。", COMMENT, NO_LINK)
+                        .enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });
             return kotlin.Unit.INSTANCE;

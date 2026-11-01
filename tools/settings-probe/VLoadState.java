@@ -72,7 +72,7 @@ public final class VLoadState {
                 lost.add(f + "(" + want + "→" + got + ")");
             }
         }
-        check("L-2 loadState 往返不丢任何字段（实测 28 个字段写入后读回）",
+        check("L-2 loadState 往返不丢任何字段（实测全部 State 字段写入后读回）",
                 lost.isEmpty(),
                 lost.isEmpty() ? "全部保留" : "丢失=" + lost);
 
@@ -105,8 +105,9 @@ public final class VLoadState {
                 runtimeCount++;
             }
         }
-        check("L-5 SettingsField.runtimeSwitch 已标注（9 项，两条 restore 路径共用）",
-                runtimeCount == 9,
+        // 【2026-10-31 契约变更，非缺陷】新增设备级字段 leadingSnap（前缘贴合）→ 9 变 10。
+        check("L-5 SettingsField.runtimeSwitch 已标注（10 项，两条 restore 路径共用）",
+                runtimeCount == 10,
                 "带 runtimeSwitch 标志的字段 = " + runtimeCount + " 项");
 
         System.out.println();

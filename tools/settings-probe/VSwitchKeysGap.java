@@ -37,6 +37,8 @@ public final class VSwitchKeysGap {
             // 0.9.87 补齐：设备级
             "targetFps", "cursorWidthPx", "cursorHeightRatio",
             "diagLogging", "multiCursorNoGlow",
+            // 2026-10-31：前缘贴合（半边拖尾）—— 设备级，切预设不该改动它
+            "leadingSnap",
     };
 
     private static final Set<String> EXPECTED_RUNTIME_SET =
@@ -114,10 +116,12 @@ public final class VSwitchKeysGap {
      * <b>测不到真正要紧的兼容路径</b>：用户磁盘上已经存在的旧预设串里仍然带着这 9 个 key。
      */
     private static void checkC() {
-        // 旧格式毒快照：9 个运行开关（值都取「与默认相反」）+ 3 个观感字段
+        // 旧格式毒快照：9 个运行开关（值都取「与默认相反」）+ 3 个观感字段。
+        // 【2026-10-31】leadingSnap 是新增的第 10 个运行开关，但旧快照里不会有它 ——
+        // 这正好覆盖「老 XML 没有该 key」的兼容路径（C-1 会确认它保持默认 false）。
         String snap = "enabled=0;hideNativeCaret=0;alwaysHighFps=0;trailMode=AFTERIMAGE;"
                 + "multiCursorNoGlow=1;targetFps=144;cursorWidthPx=5;cursorHeightRatio=0.5;"
-                + "diagLogging=1;"
+                + "diagLogging=1;leadingSnap=1;"
                 + "slopeTicks=77;trailSize=0.9;glowLayers=3";
 
         NeovideCursorSettings.State dst = new NeovideCursorSettings.State();

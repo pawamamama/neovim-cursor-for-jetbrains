@@ -115,8 +115,9 @@ public final class VAddSetting {
         int sliders = ui.sliders.size();
         int checks = ui.checkBoxes.size();
         int combos = ui.combos.size();
-        check("C-2 控件数量与已知基线一致（滑块 14 / 复选框 9 / 下拉 4）",
-                sliders == 14 && checks == 9 && combos == 4,
+        // 【2026-10-31 契约变更，非缺陷】新增「前缘贴合（半边拖尾）」复选框 → 9 变 10。
+        check("C-2 控件数量与已知基线一致（滑块 14 / 复选框 10 / 下拉 4）",
+                sliders == 14 && checks == 10 && combos == 4,
                 "滑块=" + sliders + " 复选框=" + checks + " 下拉=" + combos
                         + "（若这里变了，说明面板结构被改动，需同步更新探针）");
 

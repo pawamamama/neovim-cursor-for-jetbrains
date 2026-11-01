@@ -267,6 +267,49 @@ public final class AnimationPreview extends JComponent {
     }
 
     /**
+     * 前缘贴合（半边拖尾）—— 由面板推送，与 {@link #rgbGradient} 同一条通道。
+     *
+     * <p><b>为什么必须显式推</b>：{@code NeovideConfig} 是 D0 红线、不能加字段，
+     * 这个开关只存在于 {@code State}。若不推，用户在标签 3 勾选后真机会变、
+     * 预览窗不变 —— 正是陷阱 6「预览与生产必须同源」记录过的分家。
+     */
+    private boolean leadingSnap;
+
+    /** 上一次 {@link #pushTarget()} 算出的四角 rank（用于开启时立刻重贴，不必等下一轮）。 */
+    private int[] lastRanks = new int[4];
+
+    /**
+     * 设置前缘贴合（面板在 {@code pushStyleTo} 里推送）。
+     *
+     * <p><b>关闭时在下一次 {@link #advance()} 生效</b>，不是立即：开启会立刻把
+     * 正在播的前缘两角贴住；关闭只清标志，两个角被写成 0 的时长要等下一次
+     * {@code jump} 才会恢复（约一个步进间隔，静止段无可观察差异）。
+     * 不在这里立刻重跑 {@code jump}，是因为那会打断当前动画、比等待更跳。
+     */
+    public void setLeadingSnap(boolean on) {
+        if (leadingSnap == on) {
+            return;
+        }
+        leadingSnap = on;
+        if (on) {
+            // 勾选那一刻正在播的这一段动画也要立刻呈现「前缘贴住」，
+            // 否则用户要等下一次 advance（约一个演示周期）才看得到，会以为没生效。
+            int n = Math.min(corners.length, lastRanks.length);
+            for (int i = 0; i < n; i++) {
+                if (lastRanks[i] >= 2) {
+                    corners[i].setLeadingSnap();
+                }
+            }
+        }
+        repaint();
+    }
+
+    /** 供探针断言 */
+    public boolean leadingSnapForProbe() {
+        return leadingSnap;
+    }
+
+    /**
      * 设置用户的光标尺寸，并立即重排。
      *
      * @param widthPx     1~5；传 -1 表示沿用自动值
@@ -703,6 +746,28 @@ public final class AnimationPreview extends JComponent {
         int[] ranks = assignRanks(centerX, centerY);
         for (int i = 0; i < 4; i++) {
             corners[i].jump(cursorW, cursorH, centerX, centerY, ranks[i]);
+        }
+
+        // ==================== 前缘贴合（2026-10-31）====================
+        //
+        // 【顺序】与生产 {@code SpringTrail.assignRanks()} 相同：
+        // 必须在 jump 循环【之后】（jump 内部会用 setAnimationLength 覆盖时长），
+        // 否则刚设的 0 会被冲掉。
+        //
+        // 【判据】生产取「排序后的前两名」{@code order[n-1] / order[n-2]}；
+        // 预览取 {@code ranks[i] >= 2}。当前角点恒为 4 个时两者等价，
+        // 但**不是同一份实现** —— 角点表若增删，生产自动跟随、预览不会。
+        // 守门由 VLeadingSnap 的 L-16（逐角比对两侧被钉住的角集合）负责。
+        // 预览侧不能自己重算 rank（陷阱 3），这里只复用本类已有的 ranks 结果。
+        // corners 恒为 4、ranks 恒与 corners 等长（ranksForAlignment 按 corners.length 建），
+        // 所以不需要长度守卫 —— 原来那段不可达的 realloc 已删（审查 L-5）。
+        System.arraycopy(ranks, 0, lastRanks, 0, corners.length);
+        if (leadingSnap) {
+            for (int i = 0; i < corners.length && i < ranks.length; i++) {
+                if (ranks[i] >= 2) {
+                    corners[i].setLeadingSnap();
+                }
+            }
         }
     }
 

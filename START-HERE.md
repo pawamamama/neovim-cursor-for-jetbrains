@@ -17,8 +17,8 @@ Gradle 也完整入库（`build.gradle.kts` / `gradlew` / `gradle/wrapper/`）�
 
 **规模**（2026-10-31 实测，`wc -l` 口径）：
 ```
-生产代码   src/main/java/.../neovidecursor/   36 文件 / 20,547 行
-探针       tools/settings-probe/*.java        126 文件 / 32,057 行（111 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/   36 文件 / 21,127 行
+探针       tools/settings-probe/*.java        127 文件 / 32,589 行（112 个 V*.java）
 基准程序   tools/bench/Bench*.java            16 个
 ```
 

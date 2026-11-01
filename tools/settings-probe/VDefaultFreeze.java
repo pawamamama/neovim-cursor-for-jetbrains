@@ -44,6 +44,8 @@ public final class VDefaultFreeze {
         GOLDEN.put("enabled", "true");
         GOLDEN.put("diagLogging", "false");
         GOLDEN.put("multiCursorNoGlow", "false");
+        // 【2026-10-31】前缘贴合（半边拖尾）：设备级，默认关（用户 2026-10-28 拍板）。
+        GOLDEN.put("leadingSnap", "false");
         GOLDEN.put("cursorWidthPx", "2");
         GOLDEN.put("cursorHeightRatio", "1.0");
         GOLDEN.put("rgbGradient", "false");
@@ -129,6 +131,8 @@ public final class VDefaultFreeze {
         //          总开关除了多光标关闭辉光 都开 其他持久化 比如平滑关闭」
         boolean factoryOk = def.enabled && def.hideNativeCaret && def.alwaysHighFps
                 && !def.multiCursorNoGlow && !def.rgbGradient
+                // 2026-10-31：前缘贴合（半边拖尾）出厂必须是关的（AC-003）。
+                && !def.leadingSnap
                 && def.cursorWidthPx == 2
                 && Math.abs(def.cursorHeightRatio - 1.0f) < 1e-6f
                 && Math.abs(def.typingSmoothness) < 1e-6f

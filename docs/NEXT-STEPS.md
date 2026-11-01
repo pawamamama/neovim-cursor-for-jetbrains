@@ -19,7 +19,7 @@
 | 版本 | **v0.9.104**（IDEA 2026.1 与 PyCharm 2025.2 都已装；读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
 | dist 最新 jar | `dist/neovide-cursor-0.9.104.jar`（2026-10-29） |
 | git tag | 停在 **v0.9.83**（0.9.84~0.9.104 缺 21 个，版本未发布） |
-| 探针文件 | **111 个 `V*.java`**（全部 .java 126 个，2026-10-31 实测） |
+| 探针文件 | **112 个 `V*.java`**（全部 .java 127 个，2026-10-31 实测） |
 | 探针基线 | **ALL PASS（0 红）** —— 2026-10-28 修绿了最后 6 个过期断言探针，见 §7.1 第 1 项 |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
 | PhysicsParity | PASS |
@@ -159,23 +159,29 @@ TR（前缘单角）   2.11     7.43    11.58
 物理层本来就支持。缺的只是「锁哪两个角」的判断。
 
 **用户已决定（2026-10-25）：做成开关（B 方案）。**
-**2026-10-29 更新：已排期，见 `docs/THREE-DAY-PLAN.md` Day 2 —— 不再是「先不做」。**
+**2026-10-31 更新：✅ 已实现，探针 `VLeadingSnap` 守门（22 条断言全绿）。**
 
 ```
-形态：加一个复选框「前缘贴合（半边拖尾）」，默认关
-原因：它改变整体观感，做成可选最安全
-状态：⬜ 待实现（笔记本没电，押后）
+形态：标签 3「光标行手感」→「单行输入输出」组「斜度」之后的复选框
+      「前缘贴合（半边拖尾 · 全局）」，默认关（文案带蓝色 [全局] 说明）
+归属：设备级（runtimeSwitch=true）—— 不跟随任何动画预设
+状态：✅ 已完成（2026-10-31）
 ```
 
-实现要点（已验证可行，不需要新机制）：
-1. `TrailCorner` 加 `setLeadingSnap()`：把 `springX`/`springY` 的
-   `setAnimationLength(0.0)`（该方法已是 public）
-2. `SpringTrail.assignRanks()` 末尾，按 `config.leadingSnap` 给
-   `order[2]` 和 `order[3]`（rank 2/3 = 前缘两角）调 `setLeadingSnap()`
-3. State 加 `leadingSnap` 字段 —— 注意**六层拷贝**（纪律四-B 写的「四层」只覆盖持久化回路，
-   缺 ⑤消费者 / ⑥UI 控件；完整清单见 CLAUDE.md 陷阱 2 与 §7.0 落点表）
-4. 面板加复选框 —— **加 UI 控件前先问用户**（纪律）
-5. 守门探针：断言「开启时前缘斜度 == 0.00 且后缘斜度 > 0」
+最终落点（与最初计划的差异已注明）：
+1. `TrailCorner.setLeadingSnap()`：`springX`/`springY.setAnimationLength(0.0)`。
+2. `SpringTrail.assignRanks()` 末尾锁 **`order[n-1]` / `order[n-2]`**（rank 最高的两个
+   = 前缘）—— 不写死 `order[2]/order[3]`，沿用该类「不写死 4」的既有做法。
+3. 开关**不走** `NeovideConfig`（D0 红线），走 `CaretAnimator.syncGlobalSettings()`
+   的 State 通道；新建 `SpringTrail` 时补设一次；标志变化时 `forceResync + wakeUp()`。
+4. 六层全部落齐（State / FIELDS / copyFrom / loadState / 消费 / UI）。
+5. 守门探针 `VLeadingSnap`（22 条）：开启后前缘斜度**精确** 0.000000、后缘 2.1127；
+   关闭时右边缘 4.0565（与 §四-B 基线一致）；出厂默认 slope=0 下前缘首帧位移精确 0、
+   后缘滞后 22.9px；**设置页预览窗同步**（L-14 预览四角、L-15 推送链路）。
+   变异测试两组：删 `assignRanks()` 两行 → L-1/L-12/L-3a/L-13b 红；
+   删 `pushStyleTo` 一行 → L-15 红。
+6. **预览窗**：`AnimationPreview.setLeadingSnap` + `pushTarget` 在 jump 之后按 rank
+   应用；面板 `pushStyleTo` 推送 —— 勾选即时可见，无需点「应用」。
 
 ---
 
@@ -281,7 +287,7 @@ TR（前缘单角）   2.11     7.43    11.58
 |---|---|---|---|
 | 1 | ✅ **已完成 2026-10-28**：6 个过期断言探针全部修绿 —— `VTools / VHints / VCustom / VReset2 / VSepBound / VSleep` | `tools/settings-probe/` | 只改探针、**生产代码零改动**；门禁 `V-PROBES RESULT: ALL PASS`（另有一次独立复跑核对，非本人自证）。逐条根因与修法见 §7.1.1。提交号见 `git log -1` |
 | 2 | 旧 `[trail]` 日志仍是「每 15 次慢路径一条、无上限」 | `CaretAnimator.tickSpring` | 本轮新增的 trace 已有 5000 行上限 + `[clear]` 去重，**旧行未动** |
-| 3 | 「半边拖尾」开关（`leadingSnap`，默认关） | 5 个落点见 §四-B | **2026-10-29 已排期**，见 `docs/THREE-DAY-PLAN.md` Day 2 |
+| 3 | ✅ **已完成 2026-10-31**：「半边拖尾」开关（`leadingSnap`，默认关，设备级） | 六层落点见 §四-B | 探针 `VLeadingSnap`（22 条断言，含预览同步与两侧角集合一致性）；变异测试已做；**待用户实机验收观感** |
 | 4 | 三版基础预设的最终手感数值落库 | `CursorPresets.ANIM_PRESETS` + `State` 默认值 | 等用户给数值（§四-C） |
 | 5 | 块选区 `charsMoved` 语义拆参数 | `TrailCorner.jump` / `CaretAnimator` | §五-2 |
 | 6 | 预览窗「节奏：慢 / 正常 / 快」三档 | `AnimationPreview` | 加下拉会让 `VAddSetting:115` 的 `combos == 4`、`VerifyPanel:108` 变红——契约变更，按 §7.0 B 表改常数 |

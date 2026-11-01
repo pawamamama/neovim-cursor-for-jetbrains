@@ -10,9 +10,11 @@ package com.github.yyyolo7a79.neovidecursor.core;
  *
  * <p>移植自 VS Code 版 {@code neovide-cursor.js} 的 {@code Corner} 类。
  *
- * <p><b>与上游的已知差异</b>：上游有「前缘瞬间硬吸附」（{@code useHardSnap}），
- * 本实现<b>没有</b>。原因见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1
- * （上游 2 个角点、我们 4 个，几何上做不出来）。
+ * <p><b>与上游的差异</b>：上游用「对齐度 &gt; 0.5 的单点硬吸附」（{@code useHardSnap}）。
+ * 本实现默认<b>没有</b>硬吸附；可选的「前缘贴合（半边拖尾）」由
+ * {@link #setLeadingSnap()} 实现，由 {@code SpringTrail.assignRanks()} 对
+ * <b>rank 最高的两个角</b>调用 —— 不是照搬上游的阈值方案（那个方案在 4 角点模型下
+ * 会同时命中同侧两角、把斜度抹平，见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1）。
  */
 public class TrailCorner {
 
@@ -124,6 +126,30 @@ public class TrailCorner {
         return springX.getAnimationLengthForProbe();
     }
 
+    /**
+     * 前缘贴合（「半边拖尾」）：把本角点的动画时长压成 <b>0</b>，下一帧直接贴住目标。
+     *
+     * <p><b>机制</b>：{@link DampedSpring#update(double)} 首句判
+     * {@code animationLength <= dt}（{@code 0.0 <= 0.008}）→ 把位移与速度归零
+     * → {@code currentX = destX}。这不是「时长很短」，而是<b>精确</b>到位，
+     * 所以前缘的斜度是精确的 0，不随帧率漂移。
+     *
+     * <p><b>必须在 {@link #jump} 之后调用</b>：{@code jump} 内部会
+     * {@code setAnimationLength(animationLength)} 覆盖时长，先设会被冲掉。
+     * 调用方有两处，都只对 rank 最高的两个角：
+     * {@code SpringTrail.assignRanks()}（真机）与
+     * {@code AnimationPreview.pushTarget()}（设置页预览）。
+     *
+     * <p><b>为什么不用 alignment &gt; 0.5 判据</b>：0.9.83 试过，纯轴向移动时
+     * 同侧两角的对齐度完全相等，阈值会同时命中两个角、把时长差抹平、斜度反而变小。
+     * 完整数据见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1。
+     * 现在改用「rank 前两名 = 前缘」，只依赖已经稳定下来的排序。
+     */
+    public void setLeadingSnap() {
+        springX.setAnimationLength(0.0);
+        springY.setAnimationLength(0.0);
+    }
+
     // ==================== 目标位置计算 ====================
 
     private double destX(double centerX, double width) {
@@ -161,10 +187,13 @@ public class TrailCorner {
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
-     * <p><b>注意：本实现<b>没有</b>「前缘硬吸附」</b>（上游的 {@code useHardSnap}）。
-     * 0.9.83 尝试过并放弃 —— 不是实现难度问题，是几何上不成立：
-     * 上游 2 个角点，我们 4 个，纯轴向移动时同侧两角的对齐度完全相等，
-     * 吸附会同时命中两个角、把时长差抹平，反而让斜度变小。
+     * <p><b>注意：本方法不做「前缘硬吸附」</b>。吸附由
+     * {@code SpringTrail.assignRanks()} 在 jump 之后对 rank 最高的两个角单独调用
+     * {@link #setLeadingSnap()} —— 放在 jump 内部会被本方法结尾的
+     * {@code setAnimationLength(animationLength)} 覆盖掉。
+     *
+     * <p>0.9.83 试过的「对齐度 &gt; 0.5」阈值方案已否决：纯轴向移动时同侧两角的
+     * 对齐度完全相等，阈值会同时命中两个角、把时长差抹平，反而让斜度变小。
      * 完整数据见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1。
      *
      * <p><b>【忠实还原原版】</b>本方法的时长分配已按 VS Code 原版
@@ -345,11 +374,13 @@ public class TrailCorner {
             // 同一套（用移动向量算 alignment，只判前缘一个点）；我们的 4 档 rank
             // 已经把四角差分配好了，再加一层吸附就是两套机制打架。
             //
-            // 【如果将来真要做】需要先改 rank 体系（用移动向量而非角点残余位移），
-            // 让「前缘」只对应 1 个角，再叠加吸附。那是动核心物理的活，
-            // 不在这一轮的范围。
+            // 【2026-10-31 已实现】没有走「改 rank 体系」那条路，而是直接用
+            // **已经稳定的 rank 排序**：rank 最高的两个角就是前缘（纯水平移动时
+            // 是右侧两角、删除时镜像成左侧两角），由 SpringTrail 在 jump 之后
+            // 调 setLeadingSnap() 把它们钉死。开关是设备级的 leadingSnap，默认关。
+            // 这样既不需要连续的 alignment 值，也不与 4 档 rank 打架。
             //
-            // 保留此段注释，避免下次又从头试一遍。
+            // 保留此段注释，避免下次又从头试一遍（阈值方案仍然不可行）。
         } else {
             // ---- 原版三档分配（跨行 / 大跨度）----
             //

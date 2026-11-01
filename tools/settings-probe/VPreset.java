@@ -385,8 +385,9 @@ public final class VPreset {
         // 【2026-10-29 契约变更，非缺陷】颜色预设三件套（colorPresetBase /
         // customColorPresets / colorCustomName）→ 30 变 33。
         // 用户要求「颜色也做成完整预设」，与动画的三件套完全对称。
-        check("V14-1 State 的 public 实例字段数 == 33（30 + 颜色预设三件套）",
-                fields == 33, "fields=" + fields);
+        // 【2026-10-31 契约变更，非缺陷】新增设备级字段 leadingSnap（前缘贴合）→ 33 变 34。
+        check("V14-1 State 的 public 实例字段数 == 34（33 + 前缘贴合）",
+                fields == 34, "fields=" + fields);
 
         // 契约 §5.2 的 P-1 语义是「预设是纯动作，不持久化『当前选中了哪个预设的哪个值副本』」，
         // 但它允许两个**元数据**字段：

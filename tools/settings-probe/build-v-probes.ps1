@@ -224,7 +224,21 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         #   T-3 U-M-6 调度退避升级 / T-4 U-M-8 块选区 key 不退化 /
         #   T-5 P-M-1 apply 中途抛出回滚。每条都做过变异验证。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VBatch3Tail')
+        'VBatch3Tail',
+        # 【2026-10-31】前缘贴合（半边拖尾）leadingSnap 的守门：
+        #   L-1 开启后前缘斜度精确 0.00 且后缘 > 0（AC-001）/
+        #   L-2 关闭时行为不变（AC-002）/ L-3 关闭可逆（无 0 残留）/
+        #   L-4 设备级字段（不进 CONFIG、不进预设快照、runtimeSwitch=true）/
+        #   L-5 copyFrom / L-6 loadState / L-7 默认 false / L-8 切预设不改它 /
+        #   L-9 AnimPreset 不含它 / L-10~L-11 CaretAnimator 真的读它并推给 trail /
+        #   L-12 左移镜像 / L-13 出厂默认（slope=0）按位移判定 /
+        #   L-14 预览把前缘两角（TR/BR）钉死、后缘不钉 /
+        #   L-15 pending → refreshPreviews → inlinePreview 收到开关 /
+        #   L-16 预览与生产被钉住的角集合一致。
+        # 变异已验证：删掉 assignRanks() 里对 order[n-1]/order[n-2] 的调用 → L-1/L-12/L-3a/L-13b 红；
+        # 删掉 pushStyleTo 里的预览推送 → L-15 红。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VLeadingSnap')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

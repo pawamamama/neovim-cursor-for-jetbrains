@@ -232,6 +232,9 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
 
         target.diagLogging = from.diagLogging;
         target.multiCursorNoGlow = from.multiCursorNoGlow;
+        // 【2026-10-31】前缘贴合（设备级）。漏这一行 = 重启即失效。
+        // 布尔无需 clamp，也不参与区间夹取（见本方法末尾的字段表遍历）。
+        target.leadingSnap = from.leadingSnap;
         target.cursorWidthPx = from.cursorWidthPx;
         target.cursorHeightRatio = from.cursorHeightRatio;
         target.rgbGradient = from.rgbGradient;
@@ -893,6 +896,22 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
     public boolean multiCursorNoGlow = false;
 
     /**
+     * 前缘贴合（半边拖尾）—— 默认关，<b>设备级</b>，不随动画预设变化。
+     *
+     * <p><b>效果</b>：运动方向那一侧的两个角（rank 最高）直接贴住目标，
+     * 只有后缘两个角拉出拖尾 —— 就是「左半边 / 右半边」的观感。
+     *
+     * <p><b>为什么是设备级</b>：它改变整体观感，用户明确要求做成可选开关，
+     * 且不应被「切动画预设」顺带改掉（与 {@link #multiCursorNoGlow} 同一判据：
+     * 设备/环境开关不进预设域）。
+     *
+     * <p><b>实现入口</b>：{@code CaretAnimator.syncGlobalSettings()} 读取，
+     * 推给每个 {@code SpringTrail}；{@code TrailCorner.setLeadingSnap()} 把
+     * 前缘弹簧时长设为 0，下一帧精确到位。
+     */
+    public boolean leadingSnap = false;
+
+    /**
      * 光标宽度（像素，0–5）。<b>0 = 跟随 IDEA 原生宽度</b>。
      *
      * <p><b>用户需求（2026-10-24）</b>：「光标自由大小…宽度最大 5px
@@ -1165,12 +1184,14 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // （第一层原因是它不在 SettingsField.FIELDS 里，apply 时不拷贝。）
         diagLogging = from.diagLogging;
         multiCursorNoGlow = from.multiCursorNoGlow;
+        // 【2026-10-31】前缘贴合（设备级）。漏这一行 = 面板打开时复选框永远不勾。
+        leadingSnap = from.leadingSnap;
         cursorWidthPx = from.cursorWidthPx;
         cursorHeightRatio = from.cursorHeightRatio;
         rgbGradient = from.rgbGradient;
         }
 
-        /** 调试/探针用：一行显示全部 16 项 + 版本号。 */
+        /** 调试/探针用：一行显示主要字段 + 版本号（不是逐字段穷举，加字段时按需补）。 */
         @Override
         public String toString() {
             return "State{stateVersion=" + stateVersion

@@ -851,6 +851,15 @@ public final class SettingsField {
         out.add(bools("multiCursorNoGlow", s -> s.multiCursorNoGlow,
                 (s, v) -> s.multiCursorNoGlow = v, null, null, true));
 
+        // 【2026-10-31 前缘贴合（半边拖尾）】同样是「只进 State、不进 CONFIG」的
+        // 运行期开关：生效逻辑在 CaretAnimator 读 State 后推给 SpringTrail。
+        // 最后一个参数 true = runtimeSwitch → inPreset 自动为 false：
+        //   · 不进自定义预设快照（PRESET_FIELDS 不含它）；
+        //   · restoreSkipping 会把它当设备开关**跳过**（`if (f.runtimeSwitch) continue;`），
+        //     即恢复预设时不会覆盖用户的当前值。
+        out.add(bools("leadingSnap", s -> s.leadingSnap,
+                (s, v) -> s.leadingSnap = v, null, null, true));
+
         // 【光标尺寸】只进 State（绘制时读 State，不进 CONFIG）
         out.add(ints("cursorWidthPx", s -> s.cursorWidthPx,
                 (s, v) -> s.cursorWidthPx = v, null, null, true).range(1, 5));

@@ -63,8 +63,8 @@ do not hold back on token usage.
 ## 规模（实测 · 2026-10-31，命令见本节末尾）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    36 文件 / 20,547 行
-探针       tools/settings-probe/*.java        126 文件 / 32,057 行（111 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/    36 文件 / 21,127 行
+探针       tools/settings-probe/*.java        127 文件 / 32,589 行（112 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
 
@@ -103,7 +103,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         111 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail）/ **ALL PASS（0 失败）**
+探针         112 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap）/ **ALL PASS（0 失败）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）
@@ -187,7 +187,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <本次
 - 先看清单不动手：`-DryRun`
 - 备份落在 `D:\deepseekwork\_config-backup\`（`personal-state-<时间戳>.json` + 原始 XML 副本）
 - **加了新的 State 字段 / 改了字段语义后，必须回来复核这个脚本**（见其文件头「维护须知」）；
-  脚本会用「结构指纹」（`SettingsField.java` 的 `out.add(<工厂>(` 条数，当前 27 —— 不是裸的
+  脚本会用「结构指纹」（`SettingsField.java` 的 `out.add(<工厂>(` 条数，当前 28 —— 不是裸的
   `out.add(`，那样会把 `buildPresetFields()` 里的 `out.add(f)` 多算一条）在每次安装时对比上次，
   对不上就打 ⚠ 警告。**这个数必须等于 §7.0 里说的字段数**，不等就是脚本正则漏计了工厂。
 
@@ -475,11 +475,11 @@ TR（前缘单角）   2.11     7.43    11.58
 
 | # | 位置 | 改什么 | 漏了的症状 |
 |---|---|---|---|
-| 1 | `SettingsField.java` `build()`（现 27 项 → 28） | `out.add(...)` | `apply()` 不拷贝 → 一应用就回滚 |
+| 1 | `SettingsField.java` `build()`（现 28 项 → 29） | `out.add(...)` | `apply()` 不拷贝 → 一应用就回滚 |
 | 2 | `NeovideCursorSettings.java` State 字段区 | 字段 + 默认值 | 编译不过（最好发现） |
 | 3 | 同文件 `copyFrom()`（1031 起） | 一行赋值 | 面板回显不出 |
 | 4 | 同文件 `loadState()`（108 起） | 一行 + 必要 clamp/迁移 | 重启即失效 |
-| 5 | 消费者（`TrailCorner` / `CaretAnimator` / `CaretTrailPanel`） | 真正读它 | **能存能读，界面毫无反应**（`targetFps` 事故） |
+| 5 | 消费者（`TrailCorner` / `CaretAnimator` / `CaretTrailPanel` / **`AnimationPreview`**） | 真正读它 | **能存能读，界面毫无反应**（`targetFps` 事故）；漏了 `AnimationPreview` = 设置页预览与真机分家（陷阱 6） |
 | 6 | `NeovideCursorConfigurable.java` `SPECS` 数组 | `SliderSpec` 条目 | 控件量程缺失 |
 | 7 | 同文件某个 `build*Group()` | `g.row(...)` + `addSlider` | 控件根本不出现 |
 | 8 | `CursorPresets.java` `AnimPreset` | 字段+ctor+赋值+访问器 | 仅预设域需要 |
@@ -487,11 +487,12 @@ TR（前缘单角）   2.11     7.43    11.58
 | 10 | `applyAnimPresetFields()` | 一行赋值 | 切预设不生效 |
 | 11 | `CursorPresetApplier.matchAnimPreset()`（现 9 个条件） | 加 1 个比较 | 下拉/菜单显示「已选中」但观感不是它 |
 
-> **「现 27 项」这个数怎么来的（2026-10-30 补，防止再被误判成过期）**
+> **「现 28 项」这个数怎么来的（2026-10-30 补，2026-10-31 更新，防止再被误判成过期）**
 >
 > 数法唯一：`SettingsField.java` 的 `build()` 里，`out.add(<工厂>(` 的条数。
 > 第 608 行 `buildPresetFields()` 里的 `out.add(f)` **不算** —— 那是循环搬自定义预设，不是字段声明。
-> 当前 27 = `bools 7 + boolsGlobal 1 + enums 1 + floats 9 + floatsGlobal 1 + hexColors 2 + ints 5 + presetPointer 1`。
+> 当前 28 = `bools 8 + boolsGlobal 1 + enums 1 + floats 9 + floatsGlobal 1 + hexColors 2 + ints 5 + presetPointer 1`
+> （2026-10-31 新增 `leadingSnap`，落在 `bools` 那一组）。
 >
 > **同一口径下，`build/install.ps1` 打印的「结构指纹」也必须等于这个数。**
 > 两个数对不上，就是安装脚本的正则漏计了某种工厂，**不是字段数变了** ——
@@ -540,27 +541,47 @@ TR（前缘单角）   2.11     7.43    11.58
   → 否：那是真回归，回头查
 ```
 
-## 7.1 用户已决定、已排期
+## 7.1 用户已决定、已实现
 
-**半边拖尾开关** —— 状态：⬜ 待实现（2026-10-29 排入 `docs/THREE-DAY-PLAN.md` Day 2）
+**半边拖尾开关（`leadingSnap`）** —— 状态：✅ 已实现（2026-10-31）
 ```
-形态：加复选框「前缘贴合（半边拖尾）」，默认关
-理由：它改变整体观感，做成可选最安全
+形态：标签 3「光标行手感」→「单行输入输出」组「斜度」之后的复选框
+      「前缘贴合（半边拖尾 · 全局）」，默认关（文案带蓝色 [全局] 说明）
+归属：设备级（runtimeSwitch=true）—— 不进 AnimPreset / 三个内置预设 /
+      applyAnimPresetFields / matchAnimPreset
 ```
 
-实现要点（已验证可行）：
-1. `TrailCorner` 加 `setLeadingSnap()` → `springX/springY.setAnimationLength(0.0)`
-2. `SpringTrail.assignRanks()` 末尾按 `config.leadingSnap` 给 `order[2]/order[3]` 调它
-3. State 加字段 —— **注意六层拷贝**（见陷阱 2），并按 **§7.0** 的 A 表逐项做完
-4. 面板加复选框 —— **加 UI 控件前先问用户**；加完按 **§7.0 的 B 表**改探针常数
-   （`VAddSetting:115` 的 `checks == 9`、`VPreset:385` 的字段数 30 会红，那是契约变更不是 bug）
-5. 控件 key 必须插进 `VUi.KEYS` / `SPEC` 的**正确渲染位置**（见 §7.0 的 C）
-6. 探针断言「开启时前缘斜度 == 0.00 且后缘 > 0」
+**最终落点（与最初计划的两处差异，都是实现时修正的）：**
 
-**还有一个未定的产品决策**：`leadingSnap` 跟不跟随动画预设。机制上 `inPreset`
-在 `SettingsField` 的 5 个工厂里恒为 `true`（`SettingsField.java:373/395/417/439/461`），
-所以它**必然**进自定义预设快照；但要不要给 3 个内置 `ANIM_PRESETS` 各补值、
-要不要进 `matchAnimPreset` 的 9 个条件 —— 没有决定。按纪律四-L 应先问用户。
+1. `TrailCorner.setLeadingSnap()` → `springX/springY.setAnimationLength(0.0)`；
+   `DampedSpring.update()` 首句 `animationLength <= dt` 直接归零 → **精确**到位。
+2. `SpringTrail.assignRanks()` 末尾锁 `order[n-1] / order[n-2]`（rank 最高的两个
+   = 前缘）。**不是** `order[2]/order[3]` 写死 —— 沿用该类「不写死 4」的既有做法，
+   角点表增删时自动跟随。
+3. 开关**不走** `NeovideConfig`（D0 红线），走 `CaretAnimator.syncGlobalSettings()`
+   的 State 通道，与 `multiCursorNoGlow` 同一条路；新建 `SpringTrail` 时补设一次
+   （否则新开文件要等一次 apply）。标志变化时 `forceResync + wakeUp()`。
+4. 六层：State 字段 / `SettingsField.build()`（第 28 个）/ `copyFrom()` /
+   `loadState()` / `CaretAnimator` 消费 / 面板复选框（斜度之后，带 `TAG_GLOBAL`）。
+
+**探针 `VLeadingSnap`（22 条断言，全绿）**：L-1 开启后右边缘斜度精确 `0.000000`
+且左边缘 `2.1127`；L-1b 后缘斜度不变；L-2 关闭时右边缘 `4.0565`（与 §六基线一致）；
+L-3/L-3a 关闭可逆；L-4 设备级四项；L-5/L-6 拷贝与持久化；L-7 默认 false；
+L-8 切预设不改；L-9 `AnimPreset` 不含；L-10/L-11 剥注释后的 `syncGlobalSettings`
+真的读它并推给 trail；L-12 左移镜像；L-13 出厂默认（slope=0）下前缘首帧位移精确 0、
+后缘滞后 `22.9px`；**L-14/L-15/L-16 设置页预览窗同步**（预览把**哪两个角**钉死、`refreshPreviews`
+链路把 pending 推到 `inlinePreview`、预览与生产被钉住的角集合一致）。
+变异测试两组：删掉 `assignRanks()` 的两行 → L-1/L-12/L-3a/L-13b 同时红；
+删掉 `pushStyleTo` 的一行 → L-15 红。
+
+**预览窗已接入（2026-10-31）**：`AnimationPreview.setLeadingSnap` + `pushTarget`
+在 jump 之后按 rank 应用，`pushStyleTo` 由面板推送 —— 勾选即时可见，不需要点「应用」。
+
+**产品决策已定**：设备级，**不**跟随动画预设（用户 2026-10-28 拍板）。
+
+本次交付的完整记录（含终检结论、三组变异测试、实机验收清单）见
+`docs/LEADING-SNAP-REPORT-2026-10-31.md`。
+
 
 ## 7.2 需要用户拍板
 

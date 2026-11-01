@@ -80,6 +80,7 @@ applyAnimPresetFields 实写   13 个
 | 输入平滑 | `typingSmoothness` | [G] 全局项（0.9.73 起不参与预设；2026-10-28 才真正移出快照） |
 | 拉伸强度 | `stretchRatioK` | [P] |
 | 斜度（单行倾斜） | `slopeTicks` | [P] —— 三个内置预设的常量是 **基础 0 / 缎带 0 / 纯平滑输入 100**，所以**切到「纯平滑输入」会把斜度改成 100**（设计如此，不是数据丢失，见 [BUG-LOG BUG-013](BUG-LOG.md)） |
+| 前缘贴合（半边拖尾 · 全局） | `leadingSnap` | [L]（2026-10-31 新增）—— 设备级，**不跟随任何预设**：切预设不改它、不进自定义快照、不进 `matchAnimPreset`。默认关 |
 
 ### 多行缎带组（buildCrossGroup）
 
