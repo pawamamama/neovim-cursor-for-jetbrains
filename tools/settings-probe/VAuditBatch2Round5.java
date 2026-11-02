@@ -112,19 +112,29 @@ public final class VAuditBatch2Round5 {
         String spring = bodyOf(animator, "private boolean tickSpring(", "private boolean tickAfterimage(");
         String staticCaret = bodyOf(animator, "private boolean tickStaticCaret()", "private boolean tickSpring(");
 
-        // 用 `new double[` 而不是字面 `new double[]{`：回归不一定写成数组字面量
-        // （`double[] a = new double[4]; a[0]=...` 同样每帧分配）。
-        // tickSpring 允许恰好 1 处 —— 那是 groupMaxScratch 的**扩容分支**（组数变大时才走）；
-        // 每帧路径上出现第二处就是回归。tickStaticCaret 则必须 0 处。
-        check("G1-a【结构】tickSpring 内 new double[ 至多 1 处（仅 groupMax 扩容分支）",
-                !spring.isEmpty() && count(spring, "new double[") <= 1,
-                spring.isEmpty() ? "★ 找不到方法体（源码解析失败）" : "命中 " + count(spring, "new double[") + " 处");
-        check("G1-b【结构】tickStaticCaret 内无 new double[",
-                !staticCaret.isEmpty() && count(staticCaret, "new double[") == 0,
-                staticCaret.isEmpty() ? "★ 找不到方法体" : "命中 " + count(staticCaret, "new double[") + " 处");
-        check("G1-c【结构】tickSpring 内 groupMaxOffset 不再每帧 new",
-                !spring.contains("new double[maxGroup + 1]"),
-                spring.contains("new double[maxGroup + 1]") ? "★ 仍在每帧分配" : "已改为成员数组复用");
+        // 0.9.126：scratch 从 double[] 改成 float[]，守卫必须同时覆盖两种类型。
+        // tickSpring 允许恰好 1 处分配 —— 必须是 groupBrightnessScratch 的扩容分支；
+        // 每帧路径上出现第二处（或无条件 new）就是回归。tickStaticCaret 则必须 0 处。
+        int springAllocs = count(spring, "new double[") + count(spring, "new float[");
+        check("G1-a【结构】tickSpring 内数组分配至多 1 处（仅 scratch 扩容分支）",
+                !spring.isEmpty() && springAllocs <= 1,
+                spring.isEmpty() ? "★ 找不到方法体（源码解析失败）" : "命中 " + springAllocs + " 处");
+        check("G1-b【结构】tickStaticCaret 内无数组分配",
+                !staticCaret.isEmpty()
+                        && count(staticCaret, "new double[") + count(staticCaret, "new float[") == 0,
+                staticCaret.isEmpty() ? "★ 找不到方法体"
+                        : "命中 " + (count(staticCaret, "new double[")
+                        + count(staticCaret, "new float[")) + " 处");
+        check("G1-c【结构】tickSpring 不再按 maxGroup 每帧 new",
+                !spring.contains("new double[maxGroup + 1]")
+                        && !spring.contains("new float[maxGroup + 1]"),
+                spring.contains("new double[maxGroup + 1]")
+                        || spring.contains("new float[maxGroup + 1]")
+                        ? "★ 仍在每帧分配" : "已改为成员数组复用");
+        check("G1-e【结构】float scratch 只在扩容分支分配（无条件 new 会红）",
+                spring.contains("if (groupBrightnessScratch.length < groupCount) {")
+                        && spring.contains("groupBrightnessScratch = new float[groupCount];"),
+                "未找到扩容分支");
 
         // 行为：fillQuadXs/fillQuadYs 写出的值必须与四角当前坐标逐位相等
         Field fx = null;
@@ -340,8 +350,9 @@ public final class VAuditBatch2Round5 {
         String animator = src("ui/CaretAnimator.java");
         String spring = bodyOf(animator, "private boolean tickSpring(", "private boolean tickAfterimage(");
         check("H1-a【结构】tickSpring 内不再调用 setGlowStrength",
-                !spring.contains("setGlowStrength"),
-                spring.isEmpty() ? "★ 找不到方法体" : (spring.contains("setGlowStrength") ? "★ 仍在每帧写" : "已摘除"));
+                !spring.isEmpty() && !spring.contains("setGlowStrength"),
+                spring.isEmpty() ? "★ 找不到方法体"
+                        : (spring.contains("setGlowStrength") ? "★ 仍在每帧写" : "已摘除"));
 
         String panel = src("ui/CaretTrailPanel.java");
         check("H1-b【结构】面板不再声称 glowStrength「为 0 时完全不绘制光晕」",

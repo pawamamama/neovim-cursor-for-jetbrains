@@ -500,8 +500,11 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 每个拖尾的辉光亮度状态（B 方案，0.9.126）。
      *
      * <p>用 {@link java.util.IdentityHashMap} 而不是给 {@code SpringTrail} 加字段：
-     * trail 对象在帧之间稳定复用（按 caret / 块选区行号缓存），身份键足够；
-     * 每帧用 {@code retainAll(activeTrails)} 清理已消失的条目。
+     * trail 对象在帧之间稳定复用（按 caret / 块选区行号缓存），身份键足够。
+     * spring 模式下每帧用 {@code retainAll(activeTrails)} 清理；afterimage / 静态模式
+     * 不经过 {@code tickSpring}，旧条目随 animator 回收（有界，不是持续泄漏）。
+     * 注意 {@code retainAll} 走 {@code List.contains} → {@code SpringTrail.equals}；
+     * 今天没有重写 equals，所以等价于身份判定。若将来重写 equals，这里要同步改。
      */
     private final java.util.IdentityHashMap<SpringTrail, GlowState> glowStates =
             new java.util.IdentityHashMap<>();
@@ -2788,6 +2791,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         boolean needFrames = false;
         for (SpringTrail trail : activeTrails) {
             GlowState st = glowStates.computeIfAbsent(trail, k -> new GlowState());
+            // 注意：advanceTrailGlow 内部也会算一遍 target/hold。两份公式必须同步；
+            // 阶段 2 会合并为一个返回结果，避免漂移（审查 M-4）。
             float target = GlowIntensity.strengthFor(trail.maxOffset());
             long holdRemainingMs = GlowIntensity.holdRemainingMs(
                     st.lastMoveNanos, now, config.cursorDisappearDelay);
@@ -2808,7 +2813,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 面板的全局 fade 乘子固定为 1：最终亮度由每个四边形的 quadGlow 携带。
         panel.setGlowFade(1f);
 
-        // 调度：needFrames 已在上面按组算好（保持期最后一段 + 下降期逐帧）。
+        // 调度：needFrames 已在上面逐 trail 求 OR（保持期最后一段 + 下降期逐帧）。
         // 这里不再有全局 fade 乘子，也不再需要 lastAnimatingNanos 计时。
 
         // 多光标：每个光标一个四边形，辉光强度逐光标独立

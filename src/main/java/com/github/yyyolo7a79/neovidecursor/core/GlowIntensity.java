@@ -125,8 +125,9 @@ public final class GlowIntensity {
             return target;                 // 0 / 负数：立即到位
         }
         if (!Double.isFinite(fadeOutSeconds)) {
-            // NaN / Infinity：立即到位。若返回 current，亮度会永久冻结，
-            // 而 needsMoreFrames 仍会每帧返回 true —— EDT 永久空转（审查 M-1）。
+            // ±Infinity：立即到位。NaN 已被上一行 `!(fadeOutSeconds > 0)` 拦下；
+            // 若返回 current，亮度会永久冻结，而 needsMoreFrames 仍会每帧返回 true
+            // —— EDT 永久空转（审查 M-1）。
             return target;
         }
         if (!Double.isFinite(dtSeconds)) {

@@ -457,8 +457,8 @@ public class CaretTrailPanel extends JComponent {
     /**
      * 设置全局辉光乘子（0~1，超出范围截断）。
      *
-     * <p>0.9.126 起生产只写 1；保留此 API 是为了预览/旧探针兼容。
-     * 真正的淡出在 {@code GlowIntensity.advanceTrailGlow}。
+     * <p>0.9.126 起生产只写 1；<b>当前无读者</b>，保留仅为阶段 2 的兼容过渡，
+     * 应尽快删除。真正的淡出在 {@code GlowIntensity.advanceTrailGlow}。
      */
     public void setGlowFade(float fade) {
         this.glowFade = fade < 0f ? 0f : (fade > 1f ? 1f : fade);
@@ -982,7 +982,7 @@ public class CaretTrailPanel extends JComponent {
             return;
         }
 
-        // 峰值再乘上强度：光标静止时 glowStrength 为 0，此处直接返回，光晕完全不绘制
+        // 峰值再乘上本四边形的 quadGlow：光标静止时 quadGlow 为 0，此处直接返回，光晕完全不绘制
         //
         // 【0.9.126】glowFade 生产恒为 1，保留乘法只为兼容旧探针；
         // 真正的淡出已由 quadGlow（逐 trail 亮度）携带。

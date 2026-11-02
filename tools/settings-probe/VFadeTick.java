@@ -210,6 +210,16 @@ public final class VFadeTick {
             check("D-12 每个 trail 用 advanceTrailGlow 推进",
                     code.contains("st.brightness = GlowIntensity.advanceTrailGlow("),
                     "未找到 per-trail 推进");
+            // 【审查 M-1】D-10 只匹配 `brightness = groupBrightness` 紧邻形式；
+            // 两步写回（先取局部变量再赋值）会绕过。这里数 tickSpring 内
+            // `.brightness =` 的出现次数：只允许 1 处，且右值必须是 advanceTrailGlow。
+            String springBody = bodyOf(code,
+                    "private boolean tickSpring(", "private boolean tickAfterimage(");
+            int brightnessAssigns = count(springBody, ".brightness =");
+            check("D-13 tickSpring 内 .brightness 只赋值一次且来自 advanceTrailGlow",
+                    !springBody.isEmpty() && brightnessAssigns == 1
+                            && springBody.contains(".brightness = GlowIntensity.advanceTrailGlow("),
+                    "assigns=" + brightnessAssigns + " bodyLen=" + springBody.length());
         }
 
         String glowSrc = readSource(
@@ -233,6 +243,27 @@ public final class VFadeTick {
 
     private static boolean eq(float got, float exp) {
         return Math.abs(got - exp) <= 1e-5f;
+    }
+
+    /** 取两个方法签名之间的源码片段；找不到起始标记返回空串。 */
+    private static String bodyOf(String src, String startMarker, String endMarker) {
+        int i = src.indexOf(startMarker);
+        if (i < 0) {
+            return "";
+        }
+        int j = src.indexOf(endMarker, i + startMarker.length());
+        return j < 0 ? src.substring(i) : src.substring(i, j);
+    }
+
+    /** 统计子串出现次数。 */
+    private static int count(String s, String needle) {
+        int n = 0;
+        int i = 0;
+        while ((i = s.indexOf(needle, i)) >= 0) {
+            n++;
+            i += needle.length();
+        }
+        return n;
     }
 
     /**
