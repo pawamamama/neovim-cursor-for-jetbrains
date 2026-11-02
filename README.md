@@ -378,7 +378,7 @@ Per-layer alpha is solved from the layer count: `A = 1 - (1 - peak)^(1/N)`
 
 ## Contributors
 
-- **pawamamama** ([@pawamamama](https://github.com/pawamamama)) — fork maintainer and
+- **pawamamama (帕瓦马马马)** ([@pawamamama](https://github.com/pawamamama)) — fork maintainer and
   commit author. Since v0.9.83: **106 commits**, **239 files changed**,
   **+42,323 / −3,464 lines** (code, tests and docs; as of 2026-11-02). Current tree:
   **37 production files / 21,342 lines** and **131 probe files / 33,487 lines**

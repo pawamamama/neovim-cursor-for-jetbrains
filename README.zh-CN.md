@@ -401,7 +401,7 @@ Swing/AWT 的 `invokeLater` 优先级低于原生输入事件，编辑器繁忙�
 
 ## 贡献者
 
-- **pawamamama**（[@pawamamama](https://github.com/pawamamama)）—— 本 fork 维护者与提交作者。
+- **帕瓦马马马（pawamamama）**（[@pawamamama](https://github.com/pawamamama)）—— 本 fork 维护者与提交作者。
   自 v0.9.83 以来：**106 个提交、239 个文件、+42,323 / −3,464 行**（代码 + 测试 + 文档，2026-11-02 实测）。
   当前代码：**生产 37 文件 / 21,342 行**，**探针 131 文件 / 33,487 行**（116 个 `V*.java`，113 个注册）。
   维护了设置 / 预设层、i18n、平台 252 read action 修复和 0.9.126 辉光淡出模型。
