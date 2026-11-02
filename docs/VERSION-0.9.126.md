@@ -18,12 +18,12 @@
 | 主修复提交 | **`2c1004b`**（10 文件，+565 / −589） | 提交记录与报告 §9.2 |
 | 审查补强提交 | **`3aabb0c`**（5 文件，+71 / −23，只改探针与注释） | 报告 §9.2 |
 | 报告 / tag 提交 | **`1dcaa7a`** | `git show -s v0.9.126` |
-| 状态文档同步 | **`54cebef`**（当前 HEAD） | `git log -1` |
+| 状态文档同步 | **`54cebef`**；版本说明 / README **`9933be5`**；当前 HEAD 见 `git log -1` | `git log -1` |
 | 已安装 IDE | **IDEA 2026.1** 与 **PyCharm 2025.2**，均为 0.9.126 | 两边 jar 内 `<version>0.9.126`；md5 与 `dist/neovide-cursor-0.9.126.jar` 一致 |
 | dist 产物 | `dist/neovide-cursor-0.9.126.jar`，**246,919 B**，md5 **`4cbbd854719879bfd522b63df8e80897`** | `md5sum` / `stat` 实测；报告 §5.4 |
-| 发布状态 | 本地与 `fork` 已同步（`git rev-list --left-right --count fork/main...HEAD` = `0 0`），tag 已推到 `fork`；**GitHub Release 仍停在 v0.9.83**，没有 v0.9.126 的 Release；Marketplace 上架状态未在仓库内记录，**待核实** | `git ls-remote --tags fork refs/tags/v0.9.126`；`gh release list` |
+| 发布状态 | 本地与 `fork` 已同步（`git rev-list --left-right --count fork/main...HEAD` = `0 0`），tag 已推到 `fork`；**GitHub Release 原本停在 v0.9.83**；v0.9.126 的 Release 在本次发布流程中创建（见仓库 Releases）；Marketplace 上架状态未在仓库内记录，**待核实** | `git ls-remote --tags fork refs/tags/v0.9.126`；`gh release list` |
 
-**版本区间背景**：自 `v0.9.83` 以来共有 **105 个提交**（`git log --oneline v0.9.83..HEAD | wc -l`）。`v0.9.83` 之后，**0.9.84 至 0.9.125 连续 42 个版本号没有打 tag**；`v0.9.126` 是这一段区间里唯一新打的 tag。因此不要用「tag 列表」判断中间版本，`git tag` 在 0.9.83 与 0.9.126 之间是空的。
+**版本区间背景**：自 `v0.9.83` 以来共有 **106 个提交**（含版本说明与文档同步；`git log --oneline v0.9.83..HEAD | wc -l`）。`v0.9.83` 之后，**0.9.84 至 0.9.125 连续 42 个版本号没有打 tag**；`v0.9.126` 是这一段区间里唯一新打的 tag。因此不要用「tag 列表」判断中间版本，`git tag` 在 0.9.83 与 0.9.126 之间是空的。
 
 ---
 
@@ -285,7 +285,7 @@ cursorRgbWash = false + rgbGradient = true -> 双拼：上端拖尾色 / 下端�
 | 安装脚本入库 | `c951a65`：`install.ps1` 与 release notes 入库保护 | 安装流程可追溯、可复现，不再只存在于某台机器的 `build/` 里 | 提交 `c951a65` |
 | 文档整理 | 2026-10-28 起把 44 份历史文档移入 `docs/archive/`；`docs/INDEX.md` 加「最后核对版本」；`CLAUDE.md` 重写为接手入口 | 根目录不再被历史留痕占位；新会话能先读一份状态入口再干活 | 提交 `49bcc94` / `e1fce94` / `2807b5f` |
 
-**规模变化**：`v0.9.83..HEAD` 共 **105 个提交 / 238 个文件 / +41,805 −3,463 行**（`git diff --stat v0.9.83..HEAD` 实测）。其中生产代码当前是 **37 文件 / 21,342 行**，探针是 **131 文件 / 33,487 行**（`find` + `wc -l`，2026-11-02 实测）。
+**规模变化**：`v0.9.83..HEAD` 共 **106 个提交 / 239 个文件 / +42,323 −3,464 行**（含版本说明与文档同步；`git diff --stat v0.9.83..HEAD` 实测）。其中生产代码当前是 **37 文件 / 21,342 行**，探针是 **131 文件 / 33,487 行**（`find` + `wc -l`，2026-11-02 实测）。
 
 ---
 
@@ -506,6 +506,16 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File tools/settings-probe/build-v-probe
 # D0
 git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java
 ```
+
+---
+
+## 十、贡献者与代码量
+
+- **维护者 / 提交作者：pawamamama**（[@pawamamama](https://github.com/pawamamama)）。
+  自 v0.9.83 以来：**106 个提交 / 239 个文件 / +42,323 −3,464 行**（代码 + 测试 + 文档，2026-11-02 实测）。
+  当前仓库：**生产 37 文件 / 21,342 行**；**探针 131 文件 / 33,487 行**（116 个 `V*.java`，113 个注册）。
+- **上游：yyyyolo7a79-sketch/neovim-cursor-for-jetbrains** —— 原项目与核心拖尾物理。
+- **参数语义与效果来源：LengineerC/vscode-neovide-cursor、Neovide**。
 
 > 注：`grep -cE '^\s+out\.add\(\w+\('` 会数到 `SettingsField.java` 第 200 行 javadoc 里的示例；按 `build()` 方法体内的 28 条工厂调用计，实际就是 **28**。`buildPresetFields()` 里的 `out.add(f)` 不算字段声明。
 

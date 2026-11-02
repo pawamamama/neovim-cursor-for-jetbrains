@@ -72,6 +72,44 @@ Built on [yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyy
 | **Tools menu entries** | 4 | ✅ **8** |
 | **Slant control (prev/next frame asymmetry)** | ❌ | ✅ **0–100, preset-aware** |
 | **Live preview in panel** | ❌ | ✅ |
+| **Glow fade** | ❌ | ✅ **rate-limited, parameterized (0.9.126)** |
+| **i18n** | ❌ | ✅ **165 keys (EN + zh_CN)** |
+
+### What's new since v0.9.83
+
+`v0.9.83` was the last tagged baseline. Since then the fork has **106 commits**
+(**239 files**, **+42,323 / −3,464 lines** as of 2026-11-02, including docs).
+The full per-version detail is in [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md).
+
+| Area | What changed | Why it matters |
+|---|---|---|
+| Settings panel | 7 tabs; 14 sliders + 10 checkboxes + 4 dropdowns | Every parameter is adjustable in the IDE; no source edits |
+| Presets | 3 animation + 6 color presets; up to 50 custom; parent-chain snapshots; 13 preset-scoped fields | Switching presets no longer silently changes colors or drops hand-tuned values |
+| i18n | 165 keys; English root + Simplified Chinese | No mixed Chinese/English in an English IDE |
+| Color paths | Rainbow / dual-tone / solid are three explicit, mutually exclusive paths | The label matches the behavior; no more "rainbow turns pink" |
+| Trail / input | Default slant 0; font-size and block-inlay drift fixes; character-based short-jump detection | New installs start as a clean rectangle; CJK, emoji and font changes stay smooth |
+| Glow fade (0.9.126) | Target curve + rate-limited decay; per-trail state; fade parameters change the tail | The glow dims with the trail, not only after the caret stops; cross-line ribbons keep their glow |
+| Multi-cursor / platform | Per-trail glow state; platform-252 read-action fix; PyCharm 2025.2 sync | Static carets stay dark after a group splits; PyCharm no longer freezes |
+| Quality | Gate script repaired; 113 registered probes ALL PASS; 116 `V*.java`; VDocCheck | "All tests pass" is reproducible, not hand-copied |
+
+### Why it feels better
+
+- **Stretch, not afterimage.** Four corners run independent damped springs; the
+  direction-aware rank gives the leading corner a short duration and the trailing
+  corner a long one. The caret is *deformed* into a ribbon instead of leaving ghosts.
+- **Character-based short jumps.** The editor's native offset gives the exact
+  character count, so a single CJK char, an emoji, or a font-size change is not
+  misjudged as a long jump.
+- **Three continuous feel knobs.** Stretch strength, typing smoothness and slant
+  replace upstream's hard-coded four-factor array; the panel and runtime share the
+  same `deriveTrailFactors` formula.
+- **Glow follows the trail (0.9.126).** The target is the trail's own intensity
+  curve; brightness may only fall at `dt / fadeOutDuration` per frame. The fade
+  parameters control *how slowly* it dims, not *when* it starts; cross-line
+  ribbons never lose their glow mid-flight, and the glow does not step down by layer.
+- **Multi-cursor isolation.** Each trail keeps its own brightness; a group only
+  shares the *displayed* maximum. A static caret no longer lights up when a
+  neighbour moves, and no longer glows after the moving caret leaves the group.
 
 ### Core contribution: character-based input detection
 
@@ -291,6 +329,17 @@ which directly contradicts "typing smoothness".
 "Basic" must bit-match the `NeovideConfig` defaults (contract requirement), while the other two
 use longer short-move durations and therefore smaller per-frame displacement.
 
+### 7. Very fast typing can make the glow breathe
+
+At roughly 10 keys/second, the trail almost collapses between keystrokes, so the
+0.9.126 rate-limited fade starts to dim before the next key and then jumps back to
+full on the keypress. With the default 25 ms hold / 50 ms fade the brightness can
+move between about **0.32 and 1.0** (50 ms / 75 ms gives about 0.57–1.0).
+This is a parameter trade-off, not a correctness bug: raise **Hold before fade** to
+100 ms to cover a 100 ms key interval, or raise **Fade duration** to make the dip
+shallower. A future optional "continuous typing guard" is documented in the
+release report but is not enabled in 0.9.126.
+
 ---
 
 ## Implementation notes
@@ -324,6 +373,18 @@ Hence: "background thread sleeping on a schedule + `invokeLater` back to the EDT
 
 Per-layer alpha is solved from the layer count: `A = 1 - (1 - peak)^(1/N)`
 — so "layers" and "intensity" don't interfere. Radius is linear, decaying to 60% of peak at `r ≈ glowWidth/2`.
+
+---
+
+## Contributors
+
+- **pawamamama** ([@pawamamama](https://github.com/pawamamama)) — fork maintainer and
+  commit author. Since v0.9.83: **106 commits**, **239 files changed**,
+  **+42,323 / −3,464 lines** (code, tests and docs; as of 2026-11-02). Current tree:
+  **37 production files / 21,342 lines** and **131 probe files / 33,487 lines**
+  (116 `V*.java`, 113 registered probes). Maintained the settings/preset layer,
+  i18n, the platform-252 read-action fix and the 0.9.126 glow-fade model.
+- **yyyyolo7a79-sketch** — original project and core trailing physics; see Acknowledgements.
 
 ---
 
