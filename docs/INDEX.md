@@ -46,6 +46,7 @@
 | 代码审计记录 | [CODE-AUDIT-0.9.87.md](CODE-AUDIT-0.9.87.md) | 722 | 0.9.87（描述当时） |
 | **面板二次重构决策（2026-10-31）** | [DECISIONS-PANEL-2026-10-31.md](DECISIONS-PANEL-2026-10-31.md) | 192 | 2026-10-31，用户看完 0.9.108 实机后拍板 |
 | **数字输入框 / 辉光淡出 修复交付（2026-11-01）** | [FIX-INPUT-FADE-REPORT-2026-11-01.md](FIX-INPUT-FADE-REPORT-2026-11-01.md) | 506 | 0.9.120，含根因、变异测试与验收步骤 |
+| **辉光淡出交付与决策层优化报告（2026-11-02）** | [GLOW-FADE-0.9.126-REPORT-2026-11-02.md](GLOW-FADE-0.9.126-REPORT-2026-11-02.md) | 294 | 0.9.126，含 B 方案、113 探针、6 组变异、P0~P3 路线图 |
 | **发版前最终审查（2026-11-01）** | [FINAL-AUDIT-2026-11-01.md](FINAL-AUDIT-2026-11-01.md) | 517 | 3 代理并行；P0 修复记录见 §十 |
 | **设置系统重构分步方案** | [../plans/settings-refactor.md](../plans/settings-refactor.md) | 830 | 0.9.80 实测结论 |
 | 清理清单与执行记录 | [../plans/cleanup-inventory.md](../plans/cleanup-inventory.md) | 222 | 0.9.61 实测 |
