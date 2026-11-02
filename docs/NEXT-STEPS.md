@@ -1,6 +1,6 @@
 # 下一步做什么
 
-> 状态：**v0.9.127 已装 IDEA（PyCharm 仍为 0.9.126）并推送 fork，tag v0.9.127** · fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· 0.9.84~0.9.125 仍未打 tag
+> 状态：**v0.9.127 已装 IDEA（PyCharm 2025.2 装的是上游 0.6.0，用于对比）并推送 fork，tag v0.9.127** · fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· 0.9.84~0.9.125 仍未打 tag
 > 本文最后更新：2026-11-02
 
 > ⚠️ **本文的数字曾长期失真，请勿直接采信或转抄。**
@@ -16,7 +16,7 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v0.9.127**（IDEA 2026.1 已装 0.9.127；PyCharm 2025.2 仍为 0.9.126。读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
+| 版本 | **v0.9.127**（IDEA 2026.1 已装 0.9.127；PyCharm 2025.2 装的是上游 0.6.0，用于对比。读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
 | dist 最新 jar | `dist/neovide-cursor-0.9.127.jar`（2026-11-02） |
 | git tag | **v0.9.127**（0.9.84~0.9.125 缺 42 个；0.9.126 / 0.9.127 已打并推送 fork） |
 | 探针文件 | **117 个 `V*.java`**（全部 .java 132 个，2026-11-02 实测；其中 114 个注册进门禁） |
