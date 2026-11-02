@@ -163,30 +163,24 @@ public final class AnimationPreview extends JComponent {
     private boolean placed;
     private boolean glowSized;
 
-    // ==================== 辉光淡出状态（2026-10-29）====================
+    // ==================== 辉光状态（0.9.126 B 方案）====================
     //
-    // 语义与 CaretAnimator.lastAnimatingNanos / lastGlowStrength 逐字相同。
+    // 与生产同源：目标 = strengthFor(偏移)，亮度按 1/淡出时长 限速下降，
+    // 保持期从「最后一次动作」起算。预览是单光标单组，状态就是这三个字段。
     //
-    // 【为什么补这两个字段】在此之前预览只做一件事：
-    //     panel.setGlowStrength(min(1, maxOffset / 8));
+    // 【为什么必须同源】预览窗是用户拖滑块时看到的唯一反馈；0.9.125 之前它
     // 既没有淡出（从不调 setGlowFade），强度曲线也和生产的 (offset-0.5)/2 不同。
     // 结果：预览里辉光永不熄灭、且亮度随偏移变化的节奏与真实编辑器不一致 ——
     // 用户拖滑块看到的观感，回车后并不成立。这正是陷阱 6（预览与生产必须同源）。
 
-    /** 辉光最后一次可见的时刻（纳秒）；0 = 从未亮过 */
-    private long lastGlowVisibleNanos = 0L;
+    /** 当前辉光亮度（0~1）。 */
+    private float glowBrightness = 0f;
 
-    /**
-     * 本次 {@link #step()} 之前是否刚发生过一次「动作」（打字 / 退格 / 换行）。
-     *
-     * <p>与生产的 {@code moved} 同义：只有它能把淡出计时起点与保持亮度往前推。
-     * 动作由 {@code actionTimer → advance()} 触发，而物理帧由 {@code physicsTimer → step()}
-     * 驱动，两者是分开的，所以需要一个一次性标志来传递。
-     */
+    /** 最后一次「动作」的时刻（纳秒）；0 = 尚未动作过。 */
+    private long lastMovedNanos = 0L;
+
+    /** 本次 {@link #step()} 之前是否刚发生过一次「动作」（与生产的 {@code moved} 同义）。 */
     private boolean justAdvanced;
-
-    /** 辉光最后一次可见时的强度（0~1），与 {@link #lastGlowVisibleNanos} 配套 */
-    private float lastGlowStrength = 0f;
 
     /** 字体来源（诊断用：独立窗口里能看出取到的是哪个） */
     private String fontSource = "(未取)";
@@ -582,7 +576,7 @@ public final class AnimationPreview extends JComponent {
     private void advance() {
         if (!placed || getWidth() <= 0 || metrics == null) return;
 
-        justAdvanced = true;      // 交给下一次 step() 消费（见字段注释）
+        justAdvanced = true;      // 交给下一次 step() 消费（与生产 moved 同义）
         if (mode == Mode.INLINE) {
             advanceInline();
         } else {
@@ -795,26 +789,21 @@ public final class AnimationPreview extends JComponent {
         //
         // 现在两件事都调 GlowIntensity（与 CaretAnimator 同一份算法）。
         long now = System.nanoTime();
-        float strength = GlowIntensity.strengthFor(maxOffset);
-        // 【2026-11-01 与生产同步】计时起点 = 最后一次「动作」，
-        // 保持亮度 = 那次动作时的强度（不是「最后可见」的接近 0 的强度）。
-        // 逐帧实测见 FadeDiag / docs/FIX-INPUT-FADE-REPORT-2026-11-01.md §十四。
+        // 【0.9.126 与生产同步】目标曲线 + 限速下降：
+        //   · 上升立即（动作帧重新点亮）；
+        //   · 保持期从最后一次动作起算；
+        //   · 下降速度由 cursorFadeOutDuration 限制。
         boolean moved = justAdvanced;
         justAdvanced = false;
-        float fade = GlowIntensity.fade(config.overlayFadeOut, lastGlowVisibleNanos, now,
-                config.cursorDisappearDelay, config.cursorFadeOutDuration);
-        if (moved && strength > 0f) {
-            lastGlowVisibleNanos = now;
-            lastGlowStrength = strength;
-            fade = 1f;
+        if (moved) {
+            lastMovedNanos = now;
         }
-        // 【2026-11-01 发版前审查修正】与生产同一入口 glowForGroup：
-        // 预览是单光标单组，「本组最近活动过」等价于「曾经动过」
-        // （lastGlowVisibleNanos 只在 moved && strength > 0 时刷新）。
-        float glow = GlowIntensity.glowForGroup(maxOffset, lastGlowStrength,
-                config.overlayFadeOut, lastGlowVisibleNanos != 0L, fade);
-        panel.setGlowStrength(glow);
-        panel.setGlowFade(fade);
+        glowBrightness = GlowIntensity.advanceTrailGlow(config.overlayFadeOut,
+                glowBrightness, maxOffset, lastMovedNanos, now,
+                FRAME_MS / 1000.0, config.cursorDisappearDelay,
+                config.cursorFadeOutDuration);
+        panel.setGlowStrength(glowBrightness);
+        panel.setGlowFade(1f);
         repaint();
     }
 

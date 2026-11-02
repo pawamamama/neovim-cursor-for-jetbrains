@@ -158,17 +158,18 @@ public final class VPreviewParity {
                         GlowIntensity.strengthFor(1.5), GlowIntensity.strengthFor(2.5),
                         GlowIntensity.strengthFor(99.0)));
 
-        long t0 = 1_000_000_000L;           // 基准时刻（ns）
-        float fOff = GlowIntensity.fade(false, 0L, t0, 50, 0.1);                     // 开关关
-        float fNever = GlowIntensity.fade(true, 0L, t0, 50, 0.1);                    // 从未亮过
-        float fHold = GlowIntensity.fade(true, t0, t0 + 40_000_000L, 50, 0.1);       // 40ms < delay
-        float fMid = GlowIntensity.fade(true, t0, t0 + 100_000_000L, 50, 0.1);       // 50ms 后 50ms → 半程
-        float fDone = GlowIntensity.fade(true, t0, t0 + 200_000_000L, 50, 0.1);      // 超出 fade 时长
-        check("12 淡出曲线：关开关→1 / 从未亮→0 / delay 内→1 / 半程≈0.5 / 超时→0",
-                fOff == 1f && fNever == 0f && fHold == 1f
+        // 【0.9.126 契约变更】GlowIntensity.fade 已删除，改为限速下降 advanceGlow。
+        // 本断言随之从「到点乘 0 的曲线」改为「关开关→曲线 / 保持期→不动 /
+        // 半程→0.5 / 超时→0」；这是移除旧 API 的必然波及，不是为通过而改测试。
+        float fOff = GlowIntensity.advanceGlow(false, 1f, 0.2f, 0.008, 0.1, false);
+        float fHold = GlowIntensity.advanceGlow(true, 1f, 0f, 0.008, 0.1, true);
+        float fMid = GlowIntensity.advanceGlow(true, 1f, 0f, 0.05, 0.1, false);
+        float fDone = GlowIntensity.advanceGlow(true, 1f, 0f, 0.2, 0.1, false);
+        check("12 限速下降：关开关→曲线 / 保持期→不动 / 半程→0.5 / 超时→0",
+                Math.abs(fOff - 0.2f) < 1e-4f && fHold == 1f
                         && Math.abs(fMid - 0.5f) < 0.02f && fDone == 0f,
-                String.format("off=%.2f never=%.2f hold=%.2f mid=%.2f done=%.2f",
-                        fOff, fNever, fHold, fMid, fDone));
+                String.format("off=%.2f hold=%.2f mid=%.2f done=%.2f",
+                        fOff, fHold, fMid, fDone));
 
         System.out.println();
         System.out.printf("=== PASS %d，FAIL %d ===%n", pass, fail);

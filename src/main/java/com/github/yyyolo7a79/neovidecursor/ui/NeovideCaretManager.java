@@ -569,9 +569,10 @@ public class NeovideCaretManager implements EditorFactoryListener {
     /**
      * 开启 / 关闭「辉光淡出」（F2 / 批次2）。
      *
-     * <p>开启：拖尾停止后辉光先保持 {@code cursorDisappearDelay}(50ms)，
-     * 再用 {@code cursorFadeOutDuration}(75ms) 线性熄灭 —— 只淡辉光，光标本体不淡。
-     * <p>关闭：行为与 0.9.1 一致（辉光瞬时归零）。
+     * <p>开启：亮度按自身偏移曲线点亮；停止后先保持 {@code cursorDisappearDelay}，
+     * 再以 {@code cursorFadeOutDuration} 为<b>下降速度上限</b>逐帧降到 0
+     * （0.9.126 限速模型）—— 只淡辉光，光标本体不淡。
+     * <p>关闭：亮度直接跟随偏移曲线（辉光随拖尾熄灭，没有额外保持/淡出）。
      */
     public static void setOverlayFadeOut(boolean on) {
         assertEdtContract("setOverlayFadeOut");

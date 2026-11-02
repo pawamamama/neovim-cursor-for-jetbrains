@@ -493,23 +493,24 @@ public class CaretAnimator implements Disposable, CaretListener {
     private final double[] quadScratchX = new double[4];
     private final double[] quadScratchY = new double[4];
 
-    /**
-     * 组内最大偏移（按需扩容，容量 &gt;= 组数）。
-     *
-     * <p>原来是每帧按组数新建一个数组：8 光标 144 数组/秒。
-     * 复用后只在组数变大时扩容；每帧先清零已用区间。
-     */
-    private double[] groupMaxScratch = new double[0];
+    /** 每个分组的当前辉光亮度（0~1，复用数组，容量 &gt;= 组数）。 */
+    private float[] groupBrightnessScratch = new float[0];
 
     /**
-     * 每个分组最近是否活动过（复用数组，容量 &gt;= 组数）。
+     * 每个拖尾的辉光亮度状态（B 方案，0.9.126）。
      *
-     * <p>【2026-11-01 发版前审查修正】辉光「保持亮度」必须逐组判断，
-     * 不能用全局 {@code moved} —— 后者在弹簧收敛期间为 false，会把所有分组
-     * （包括从未动过的光标）切到保持亮度。判据的数据来源是
-     * {@link SpringTrail#lastActiveNanos}。
+     * <p>用 {@link java.util.IdentityHashMap} 而不是给 {@code SpringTrail} 加字段：
+     * trail 对象在帧之间稳定复用（按 caret / 块选区行号缓存），身份键足够；
+     * 每帧用 {@code retainAll(activeTrails)} 清理已消失的条目。
      */
-    private boolean[] groupRecentScratch = new boolean[0];
+    private final java.util.IdentityHashMap<SpringTrail, GlowState> glowStates =
+            new java.util.IdentityHashMap<>();
+
+    /** 一个拖尾的辉光状态：当前亮度 + 最后一次移动的时刻。 */
+    private static final class GlowState {
+        float brightness;
+        long lastMoveNanos;
+    }
 
     /**
      * 把四个角点当前的 X 写进 {@code out}（原地填充，不分配）。
@@ -601,23 +602,9 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     volatile long lastDispatchedDueNanos = Long.MIN_VALUE;
 
-    /**
-     * 最近一次「仍在运动」的时刻（纳秒）；{@code 0} 表示自创建以来从未运动过。
-     *
-     * <p><b>F2 / 批次2</b>：只用于辉光淡出计时（{@link #glowFade}）。
-     * 只在 {@code anyAnimating == true} 的帧里更新，<b>不是每帧更新</b> ——
-     * 否则「停止后开始计时」就永远起不来。
-     */
-    private long lastAnimatingNanos = 0L;
-
-    /**
-     * 辉光最后一次可见时的强度（0~1），与 {@link #lastAnimatingNanos} 配套。
-     *
-     * <p><b>F-1 修复的关键</b>：{@code glowStrength} 归零之后，需要以「归零前的那个亮度」
-     * 为起点做淡出。若没有这个字段，淡出就只能从一个已经是 0 的亮度开始 —— 像素上不可见
-     * （这正是第一版被验证方实测否定的原因）。
-     */
-    private float lastGlowStrength = 0f;
+    // 【0.9.126】原 lastAnimatingNanos / lastGlowStrength 已删除。
+    // 辉光状态改为逐拖尾的 GlowState（见 glowStates），保持期从「最后一次移动」
+    // 起算而不是「最后一次可见」，因此不再需要这两个全局计时字段。
 
     /**
      * IME 组合态连续跳过的帧数（F1-c）。
@@ -991,7 +978,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             }
         });
 
-        // 首次定位
+        // 首次定位（初始定位没有动画，时间戳只用于状态初始化）
         refreshTarget();
 
         // 【U-M-22】register 把 this 放进全局静态表并可能起线程 —— 失败时必须摘掉，
@@ -1478,7 +1465,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
         lastTickNanos = now;
 
-        boolean moved = refreshTarget();
+        boolean moved = refreshTarget(now);
 
         // 多光标：只要没有任何活跃拖尾就退出（等价于旧的 !initialized）
         if (activeTrails.isEmpty()) {
@@ -1543,7 +1530,7 @@ public class CaretAnimator implements Disposable, CaretListener {
         } else if (config.trailMode == NeovideConfig.TrailMode.AFTERIMAGE) {
             anyAnimating = tickAfterimage(now, moved);
         } else {
-            anyAnimating = tickSpring(dt, now, moved);
+            anyAnimating = tickSpring(dt, now);
         }
 
         currentDelayNs = computeNextDelayNs(moved || anyAnimating);
@@ -1817,28 +1804,47 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /**
-     * 重新读取光标位置并更新动画目标点。
+     * 无参重载：首次定位与反射探针用当前时刻。
      *
-     * <p><b>这一层只做 read action 包装</b>，真正的实现见
-     * {@link #refreshTargetInReadAction()}。
-     *
-     * <p>为什么要拆成两个方法而不是把 try 块整体缩进进 lambda：
-     * 方法体近 500 行，缩进一层会让整份代码的 diff 变成「全文重排」，
-     * 未来 review 时看不出改了什么。拆出来只有一个 6 行的包装层，
-     * 实现体一行未动 —— 这样「行为不变」是可验证的，而不是靠声明。
-     *
-     * @return true 表示位置确实发生了变化
+     * <p>保留这个签名是有意的：{@code VerifyApplyConfig} / {@code VFontScale} /
+     * {@code VInlay} / {@code VReadAction} / {@code VCatchRollback} 通过反射
+     * 精确查找 {@code refreshTarget()}；直接把签名改成 {@code refreshTarget(long)}
+     * 会让它们全部 {@code NoSuchMethodException}（2026-11-02 门禁实测）。
      */
     private boolean refreshTarget() {
-        return readEditor(() -> refreshTargetInReadAction());
+        return refreshTarget(System.nanoTime());
     }
 
     /**
-     * {@link #refreshTarget()} 的实现体 —— <b>必须在 read action 内执行</b>，不要直接调用。
+     * 重新读取光标位置并更新动画目标点（read action 包装）。
+     *
+     * <p>真正的实现见 {@link #refreshTargetInReadAction(long)}；这里只做包装，
+     * 避免把近 500 行的实现体缩进一层导致 diff 全文重排。
      *
      * @return true 表示位置确实发生了变化
      */
+    private boolean refreshTarget(long now) {
+        return readEditor(() -> refreshTargetInReadAction(now));
+    }
+
+    /**
+     * 无参重载：反射探针用当前时刻。
+     *
+     * <p>{@code VReadAction} 的 R-10 通过反射精确查找
+     * {@code refreshTargetInReadAction()} 来绕过包装层自证；改签名会让它拿到 null，
+     * R-10 / R-11 一起变红（2026-11-02 门禁实测）。
+     */
     private boolean refreshTargetInReadAction() {
+        return refreshTargetInReadAction(System.nanoTime());
+    }
+
+    /**
+     * {@link #refreshTarget(long)} 的实现体 —— <b>必须在 read action 内执行</b>，
+     * 不要直接调用。
+     *
+     * @return true 表示位置确实发生了变化
+     */
+    private boolean refreshTargetInReadAction(long now) {
         // 【MEDIUM-2】「这一次没抛异常」就打平连续失败计数。
         //
         // 原来只在方法末尾（慢路径走到底）归零，但快速路径 / IME skip / 无拖尾
@@ -2437,6 +2443,9 @@ public class CaretAnimator implements Disposable, CaretListener {
                                 (float) lineHeight, offsetX, cx, cy, w, h);
                     }
                     if (trail.setTarget(cx, cy, w, h)) {
+                        // 【0.9.126】逐 trail 记录最后一次移动：辉光保持期从这里起算，
+                        // 而不是从「拖尾收拢」起算（那是 0.9.125「停下才暗」的根因）。
+                        glowStates.computeIfAbsent(trail, k -> new GlowState()).lastMoveNanos = now;
                         changed = true;
                     }
                 } else {
@@ -2744,159 +2753,63 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /** 弹簧模式的一帧：推动物理模拟并绘制四边形 */
-    private boolean tickSpring(double dt, long now, boolean moved) {
+    private boolean tickSpring(double dt, long now) {
         // 多光标：逐光标推进物理
         boolean anyAnimating = false;
-        double maxOffset = 0;
         for (SpringTrail trail : activeTrails) {
             if (trail.update(dt)) {
                 anyAnimating = true;
             }
-            double trailOffset = trail.maxOffset();
-            // 【2026-11-01 发版前审查修正】逐光标记录「最后一次有非零偏移」的时刻。
-            // 不能用全局 moved：弹簧收敛期间 moved=false，静止分组会被误判为「该保持」。
-            if (trailOffset > 0.0) {
-                trail.lastActiveNanos = now;
-            }
-            if (trailOffset > maxOffset) {
-                maxOffset = trailOffset;
-            }
         }
 
-        // 【按组取最大偏移】—— 消除串扰
+        // 【0.9.126】清理已消失的 trail 的辉光状态，避免旧状态串到新光标。
+        glowStates.keySet().retainAll(activeTrails);
+
+        // 【0.9.126 B 方案】逐 trail 推进亮度，组内只共享「本帧显示亮度」。
         //
-        // 用户反馈：「多光标下输入输出快速按感觉有的撕裂」。
-        //
-        // 根因：第一版直接用全局 maxOffset 驱动所有光标，于是
-        // 「一个光标在动」会拉长「所有光标」的辉光淡出状态，
-        // 相邻行之间互相干扰。
-        //
-        // 现在：同组内共享组内最大值（相邻行看起来是一个整体），
-        // 不同组各算各的（第 5 行不受 1/2/3 行影响）。
+        // 为什么状态必须逐 trail（2026-11-02 审查 H-1 / M-1）：初版把组亮度写回
+        // 每个 trail，拆组或移除活跃光标后，从未移动的 trail 会带着组亮度单独发光。
+        // 现在每个 trail 只按自己的 offset / lastMove 推进；组内显示取 max，
+        // 相邻行仍然看起来是一个整体，拆组后静止成员回到 0。
         int maxGroup = -1;
         for (SpringTrail trail : activeTrails) {
             if (trail.groupId > maxGroup) {
                 maxGroup = trail.groupId;
             }
         }
-        // 【U-M-2】复用成员数组，不再每帧按组数新建。
-        // 容量只在组数变大时扩；常用路径只清零已用区间（组数通常 1~3）。
         int groupCount = maxGroup + 1;
-        if (groupMaxScratch.length < groupCount) {
-            groupMaxScratch = new double[groupCount];
+        if (groupBrightnessScratch.length < groupCount) {
+            groupBrightnessScratch = new float[groupCount];
         } else {
-            java.util.Arrays.fill(groupMaxScratch, 0, groupCount, 0d);
+            java.util.Arrays.fill(groupBrightnessScratch, 0, groupCount, 0f);
         }
-        double[] groupMaxOffset = groupMaxScratch;
+        float[] groupBrightness = groupBrightnessScratch;
+
+        boolean needFrames = false;
         for (SpringTrail trail : activeTrails) {
-            if (trail.maxOffset() > groupMaxOffset[trail.groupId]) {
-                groupMaxOffset[trail.groupId] = trail.maxOffset();
+            GlowState st = glowStates.computeIfAbsent(trail, k -> new GlowState());
+            float target = GlowIntensity.strengthFor(trail.maxOffset());
+            long holdRemainingMs = GlowIntensity.holdRemainingMs(
+                    st.lastMoveNanos, now, config.cursorDisappearDelay);
+            boolean holdActive = config.overlayFadeOut && st.lastMoveNanos != 0L
+                    && holdRemainingMs > 0;
+            st.brightness = GlowIntensity.advanceTrailGlow(config.overlayFadeOut,
+                    st.brightness, trail.maxOffset(), st.lastMoveNanos, now, dt,
+                    config.cursorDisappearDelay, config.cursorFadeOutDuration);
+            if (st.brightness > groupBrightness[trail.groupId]) {
+                groupBrightness[trail.groupId] = st.brightness;
+            }
+            if (!needFrames && GlowIntensity.needsMoreFrames(config.overlayFadeOut,
+                    st.brightness, target, holdActive, holdRemainingMs, IDLE_DELAY_MS)) {
+                needFrames = true;
             }
         }
 
-        // 【2026-11-01 发版前审查修正】逐组「最近活动过」判据。
-        //
-        // 窗口 = 保持时长 + 淡出时长 + 一个空闲帧。最后一个空闲帧是为了覆盖
-        // 调度器可能隔 120ms 才再出一帧的情形（与 needsMoreFrames 的边界一致）。
-        // 从未活动过的组 lastActiveNanos == 0，永远不会被点亮 —— 这正是
-        // 「多光标下静止光标不发光」这条不变量。
-        if (groupRecentScratch.length < groupCount) {
-            groupRecentScratch = new boolean[groupCount];
-        } else {
-            java.util.Arrays.fill(groupRecentScratch, 0, groupCount, false);
-        }
-        boolean[] groupRecentlyActive = groupRecentScratch;
-        long recentWindowNs = (long) (((config.cursorDisappearDelay / 1000.0)
-                + config.cursorFadeOutDuration) * 1_000_000_000.0)
-                + IDLE_DELAY_MS * 1_000_000L;
-        for (SpringTrail trail : activeTrails) {
-            if (trail.lastActiveNanos != 0L
-                    && now - trail.lastActiveNanos <= recentWindowNs) {
-                groupRecentlyActive[trail.groupId] = true;
-            }
-        }
+        // 面板的全局 fade 乘子固定为 1：最终亮度由每个四边形的 quadGlow 携带。
+        panel.setGlowFade(1f);
 
-        // 辉光只在拖尾展开时点亮 —— 静止的光标顶着一圈光晕并不好看，
-        // 那是"运动中"才该有的效果。曲线与边界见 GlowIntensity（唯一实现）。
-        float glowStrength = GlowIntensity.strengthFor(maxOffset);
-
-        // 【F2 / 批次2】辉光淡出（方案 B：只淡辉光，光标本体始终不透明）。
-        //
-        // ==================== 为什么用「辉光最后可见时刻」而不是 anyAnimating ====================
-        //
-        // 第一版用 anyAnimating 当计时起点，验证方用逐帧位模式实测发现：淡出**在像素上
-        // 完全不可见**（`gs>0 且 gf<1` 的帧数 = 0），因为两者是同一条曲线上的读数 ——
-        //   anyAnimating 为 false 的时刻 ≈ glowStrength 归零的时刻（maxOffset 跌破 0.5），
-        // 于是淡出计时刚开始，已经没有辉光可淡了。
-        //
-        // 正确做法：以「glowStrength 最后一次 > 0 的时刻」为计时起点，并把那一帧的
-        // glowStrength 记住（lastGlowStrength）。glowStrength 归零后，用
-        // `lastGlowStrength × fade` 作为有效强度 —— 这才是真正的"从当前亮度淡出"。
-        //
-        // 效果：停止移动后辉光保持 50ms（cursorDisappearDelay），
-        // 再从原亮度线性熄灭 75ms（cursorFadeOutDuration）。
-        // 【2026-11-01 第二次修：只在「真的移动」时记录保持亮度】
-        //
-        // 第一版记的是「辉光最后一次可见的强度」。实测（FadeDiag 驱动预览窗逐帧采样）：
-        // 淡出开始时面板亮度只剩 0.015 —— 因为弹簧收敛的最后几帧强度本来就接近 0，
-        // 「从最后亮度淡出」= 从 1.5% 淡到 0，肉眼不可能看见。
-        //
-        // 现在记「最后一次移动时的强度」（通常是 1.0），并且：停止移动后不再让弹簧的
-        // 自然衰减先把它吃掉 —— 保持阶段直接用这个亮度，由 panel.glowFade 做线性淡出
-        // （只乘一次，不再有 peak × fade 的二次叠加）。
-        float fade = glowFade(now);
-        if (moved && glowStrength > 0f) {
-            lastGlowStrength = glowStrength;
-            lastAnimatingNanos = now;
-            fade = 1f;                    // 本帧还在动：不淡出
-        }
-        float effectiveGlow = lastGlowStrength;
-        // 【U-M-23】不再每帧写面板的「全局辉光强度」字段。
-        //
-        // 那个字段在**生产绘制里没有读者**：每个四边形把自己的辉光强度作为
-        // addQuad 的第三个实参传下去，drawQuadGlow 只用 quadGlow 这个形参。
-        // 它真正的读者只有两处 —— 设置页预览窗（另一个面板实例，自己 step() 里写）
-        // 和 updateCorners（零生产调用）。原来每帧写一次，等于每帧制造一个
-        // 「看起来在生效、其实没人读」的假象，正是陷阱 2「⑤消费者」的反向样本：
-        // 下一个照 javadoc 去调辉光的人，改完画面毫无变化。
-        panel.setGlowFade(fade);
-
-        // 淡出未完成时必须继续 tick，否则最后一帧不刷新 → 辉光残留。
-        //
-        // 【F-2 修复】必须同时要求 fade > 0：fade 到 0 意味着淡出已经结束，
-        // 若仍把 fading 置 true，tickSpring() 会恒返回 true →
-        // computeNextDelay(active=true) → EDT 永不降频（空闲也在 8ms 空转）。
-        //
-        // 【2026-11-01 修 BUG-B：两个判据必须分开】
-        //
-        // 原来只有一个 `fading`，同时决定两件事：
-        //   ① 调度：这一帧之后还要不要继续出帧；
-        //   ② 渲染：用「最后亮度 × fade」还是用逐组偏移量强度。
-        //
-        // 旧值 `fade > 0f && fade < 1f` 对 ① 漏掉了「保持期」（此刻 fade == 1，
-        // 光标刚停下时 anyAnimating 也已 false → 落到空闲 120ms；默认淡出只有 75ms，
-        // 比一个空闲帧还短，整条曲线被跨过去 → 用户看到「瞬间熄灭」）。
-        //
-        // 但直接把它改成 `fade > 0f` 会让 ② 在<b>运动期间</b>恒为 true
-        // （lastAnimatingNanos 每帧刷新 → fade 恒为 1），于是所有分组都改读全局
-        // effectiveGlow —— 多光标下「一个在动、一个静止」时静止光标也会发光。
-        // 那是 CaretTrailPanel 注释里写明已修掉的串扰，必须保住。
-        //
-        // 所以拆成两个纯函数（都在 GlowIntensity，探针 VFadeTick 逐段断言）：
-        //   needFrames    —— 只决定调度（全局）；
-        //   glowForGroup  —— 只决定本组这一帧用哪个强度（逐组）。
-        //
-        // 【2026-11-01 发版前审查修正】渲染判据从「全局本帧有没有移动」改成
-        // 「本组最近有没有活动」。全局 moved 在弹簧收敛期间为 false，
-        // 会把所有分组都切到保持亮度 —— 多光标下没动过的光标也发光。
-        long sinceLastVisibleMs = lastAnimatingNanos == 0L
-                ? Long.MAX_VALUE
-                : Math.max(0L, (now - lastAnimatingNanos) / 1_000_000L);
-        long holdRemainingMs = config.cursorDisappearDelay <= sinceLastVisibleMs
-                ? 0L : config.cursorDisappearDelay - sinceLastVisibleMs;
-        boolean needFrames = GlowIntensity.needsMoreFrames(
-                config.overlayFadeOut, lastGlowStrength, fade,
-                holdRemainingMs, IDLE_DELAY_MS);
+        // 调度：needFrames 已在上面按组算好（保持期最后一段 + 下降期逐帧）。
+        // 这里不再有全局 fade 乘子，也不再需要 lastAnimatingNanos 计时。
 
         // 多光标：每个光标一个四边形，辉光强度逐光标独立
         // 【多光标不辉光：全局开关】
@@ -2952,11 +2865,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         double diagMaxX = -Double.MAX_VALUE;
 
         for (SpringTrail trail : activeTrails) {
-            // 同组共享组内最大偏移 → 相邻行呈现为一个整体，组间互不影响
-            double offForGlow = groupMaxOffset[trail.groupId];
-            // 逐组判据：只有本组最近活动过，才允许用全局保持亮度。
-            float trailGlow = GlowIntensity.glowForGroup(offForGlow, effectiveGlow,
-                    config.overlayFadeOut, groupRecentlyActive[trail.groupId], fade);
+            // 【0.9.126】组亮度已在上面的循环里推进；同组共享同一个值。
+            float trailGlow = groupBrightness[trail.groupId];
             // 【U-M-2】复用中转数组（addQuad 立即拷贝，调用方不保留引用）
             fillQuadXs(quadScratchX, trail.corners);
             fillQuadYs(quadScratchY, trail.corners);
@@ -3018,21 +2928,8 @@ public class CaretAnimator implements Disposable, CaretListener {
         return anyAnimating || needFrames;
     }
 
-    /**
-     * 辉光淡出系数（0~1）：拖尾停止后先保持 delay，再线性淡出到 0。
-     *
-     * <p><b>只作用于辉光层</b>（{@code drawQuadGlow} 的峰值 alpha），
-     * 光标本体（{@code fillPolygon}）始终不透明 —— 详见 FIX-BATCH2.md §3。
-     *
-     * <p>开关 {@code config.overlayFadeOut} 关闭时恒返回 1f，行为与 0.9.1 一致。
-     */
-    private float glowFade(long now) {
-        // 曲线本身不在这里写 —— 唯一实现在 GlowIntensity，与设置页预览窗共用。
-        // 之前这里是它的一份私有副本，而预览窗根本没有淡出（从不调 setGlowFade），
-        // 于是「预览里辉光永不熄灭、真实编辑器里会熄灭」这组差异没有任何守门。
-        return GlowIntensity.fade(config.overlayFadeOut, lastAnimatingNanos, now,
-                config.cursorDisappearDelay, config.cursorFadeOutDuration);
-    }
+    // 【0.9.126】glowFade(now) 已删除：淡出不再是「到点乘 0」的全局乘子，
+    // 而是逐组 advanceGlow 的限速下降（见 tickSpring）。
 
     /**
      * 残影模式的一帧：记录当前位置并绘制历史残影。

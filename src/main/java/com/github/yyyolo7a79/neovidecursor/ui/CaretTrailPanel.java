@@ -445,23 +445,20 @@ public class CaretTrailPanel extends JComponent {
     private float glowStrength = 1f;
 
     /**
-     * 辉光淡出系数（0~1），由 animator 每帧写入（F2 / 批次2）。
+     * 历史保留的全局辉光乘子；0.9.126 起生产恒写 1。
      *
-     * <p><b>只作用于辉光层</b>：在 {@link #drawQuadGlow} 里乘到峰值 alpha 上，
-     * 光标本体（{@code fillPolygon}）始终不透明。
-     *
-     * <p>为什么不把它做成整体 {@code AlphaComposite}：那样会连光标本体一起淡出。
-     * 默认档（{@code hideNativeCaret = true}，原生光标已隐藏）下，覆盖层就是肉眼
-     * 看到的"光标"，整体淡出会变成"光标自己消失"。
+     * <p>淡出已经改由 {@code CaretAnimator} 的逐 trail 亮度（{@code quadGlow}）
+     * 携带；这里只保留字段与乘法，避免一次大范围删除牵动预览/旧探针。
+     * <b>不要在这里实现新的淡出曲线</b>——它会和逐 trail 亮度重复相乘。
+     * 只作用于辉光层，光标本体（{@code fillPolygon}）始终不透明。
      */
     private float glowFade = 1f;
 
     /**
-     * 设置辉光淡出系数（0~1，超出范围截断）。
+     * 设置全局辉光乘子（0~1，超出范围截断）。
      *
-     * <p>由 animator 按「距离上次运动的时长」写入：运动中为 1（满强度），
-     * 停止后先保持 1 一段时间（{@code cursorDisappearDelay}），
-     * 再线性降到 0（历时 {@code cursorFadeOutDuration}）。
+     * <p>0.9.126 起生产只写 1；保留此 API 是为了预览/旧探针兼容。
+     * 真正的淡出在 {@code GlowIntensity.advanceTrailGlow}。
      */
     public void setGlowFade(float fade) {
         this.glowFade = fade < 0f ? 0f : (fade > 1f ? 1f : fade);
@@ -987,9 +984,8 @@ public class CaretTrailPanel extends JComponent {
 
         // 峰值再乘上强度：光标静止时 glowStrength 为 0，此处直接返回，光晕完全不绘制
         //
-        // 【F2 / 批次2】再乘上 glowFade：拖尾停止后辉光淡出，光标本体不受影响。
-        // 这是本批唯一改动的算式位置 —— 其余几何算法（角点、外扩方向、层数、
-        // 半序、Math.pow 反解）一字未改。
+        // 【0.9.126】glowFade 生产恒为 1，保留乘法只为兼容旧探针；
+        // 真正的淡出已由 quadGlow（逐 trail 亮度）携带。
         // 【多光标】强度改为逐四边形传入（quadGlow），不再读全局 glowStrength。
         //
         // 为什么要改：多光标时每个光标独立运动，有的在动（辉光满强度）、

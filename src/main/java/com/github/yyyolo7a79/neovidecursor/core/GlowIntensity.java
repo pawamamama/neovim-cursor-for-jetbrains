@@ -1,7 +1,7 @@
 package com.github.yyyolo7a79.neovidecursor.core;
 
 /**
- * 辉光的「强度曲线」与「淡出曲线」—— <b>全项目唯一实现</b>。
+ * 辉光的「强度曲线」与「限速淡出」—— <b>全项目唯一实现</b>。
  *
  * <h2>为什么要有这个类（2026-10-29）</h2>
  *
@@ -24,8 +24,10 @@ package com.github.yyyolo7a79.neovidecursor.core;
  *
  * <p>偏移量 = 四个角相对目标位置的当前距离（{@code TrailCorner.getOffsetMagnitude()}）。
  * 它天然表达「拖尾展开到什么程度」：静止时为 0，真实移动时至少是一个字符宽（约 8px）
- * 或一行高（约 32px）。用偏移量驱动，辉光就在运动时亮起、停下时熄灭，
- * 不需要额外维护任何状态机。
+ * 或一行高（约 32px）。用偏移量驱动「目标亮度」，运动时亮起、静止时目标为 0。
+ *
+ * <p>【0.9.126】淡出不再是「到点乘 0」，而是 {@link #advanceTrailGlow} 的限速下降：
+ * 状态是「当前亮度 + 最后一次移动时刻」，由调用方按 trail 维护；组内只共享显示亮度。
  */
 public final class GlowIntensity {
 
@@ -78,156 +80,144 @@ public final class GlowIntensity {
     }
 
     /**
-     * 辉光淡出系数（0~1）。
+     * 辉光亮度的一帧推进 —— <b>目标曲线 + 限速下降</b>（0.9.126 B 方案）。
      *
-     * <p>语义：光标停止后先保持满强度 {@code disappearDelayMs} 毫秒，
-     * 再用 {@code fadeOutSeconds} 秒线性降到 0。只作用于<b>辉光层</b>，
-     * 光标本体始终不透明（见 {@code CaretTrailPanel.setGlowFade} 的说明）。
-     *
-     * <p><b>为什么用「辉光最后可见时刻」而不是「是否还在动」作计时起点</b>：
-     * 两者是同一条曲线上的读数 —— 判定「不动了」的那一刻，强度也已经归零，
-     * 于是淡出计时刚开始就没有东西可淡。所以调用方要在强度 &gt; 0 的每一帧
-     * 记录时刻，强度归零后用「最后一次的强度 × 本方法返回的 fade」当有效强度。
-     *
-     * @param overlayFadeOut   总开关；关闭时不淡出，恒为 1
-     * @param lastVisibleNanos 辉光最后一次可见的时刻；{@code 0} = 从未亮过
-     * @param nowNanos         当前时刻
-     * @param disappearDelayMs 停止后保持满强度的时长（毫秒）
-     * @param fadeOutSeconds   线性熄灭所需秒数
-     * @return 0 = 已完全熄灭，1 = 满强度
-     */
-    public static float fade(boolean overlayFadeOut, long lastVisibleNanos, long nowNanos,
-                             int disappearDelayMs, double fadeOutSeconds) {
-        if (!overlayFadeOut) {
-            return 1f;                              // 开关关闭：不淡出
-        }
-        if (lastVisibleNanos == 0L) {
-            // 尚未出现过可见辉光：没有可淡的东西。
-            // 返回 0 与返回 1 等价 —— 调用方只在强度 > 0 时才让 fade 参与乘法，
-            // 强度为 0 时有效强度是 lastStrength(0) × fade = 0 × 任何值。
-            return 0f;
-        }
-        double sinceStop = (nowNanos - lastVisibleNanos) / 1_000_000_000.0
-                - disappearDelayMs / 1000.0;
-        if (sinceStop <= 0) {
-            return 1f;                              // 停止后 delay 内：保持满强度
-        }
-        if (fadeOutSeconds <= 0 || sinceStop >= fadeOutSeconds) {
-            return 0f;                              // 淡出完毕
-        }
-        return (float) (1.0 - sinceStop / fadeOutSeconds);
-    }
-
-    /**
-     * 淡出是否还需要继续出帧（2026-11-01，BUG-B 的修法）。
-     *
-     * <h2>为什么需要这个判据，而不是「fade 在 (0,1) 之间」</h2>
-     *
-     * <p>调用方（{@code CaretAnimator.tickSpring()}）原来写的是
-     * {@code fade > 0f && fade < 1f}。问题出在<b>「淡出前保持时长」那一段</b>：
-     * 此时 {@code fade == 1f}，判据为 false；而光标刚停下时弹簧通常也已经收敛
-     * （{@code anyAnimating == false}），于是调度器降到空闲档
-     * {@code IDLE_DELAY_MS = 120ms}。默认淡出时长只有 75ms ——
-     * <b>整条淡出曲线比一个空闲帧还短</b>，下一次出帧时 {@code sinceStop} 已经越过终点，
-     * fade 直接等于 0：用户看到的是「保持一会儿，然后瞬间消失」，而不是淡出。
-     * 把保持时长调到 500ms 只会让「瞬间消失」晚 500ms 发生，观感上仍然「没有淡出」。
-     *
-     * <p>正确语义是：<b>只要还有可淡的辉光，就必须继续出帧</b>。
-     * 「保持期」也是淡出过程的一部分（这一段的输出恒为 1），必须被采样，
-     * 否则保持期与熄灭之间的边界只能靠空闲帧去碰运气。
-     *
-     * <p>判据放在本类而不是 {@code CaretAnimator}：后者需要真实 {@code Editor} 才能构造，
-     * 探针无法直接驱动；这里是纯函数，逐段可断言（守门探针 {@code VFadeTick}）。
-     *
-     * @param overlayFadeOut        总开关；关闭时没有淡出过程
-     * @param lastGlowStrength      辉光最后一次可见时的强度；0 = 从未亮过，没有可淡的东西
-     * @param fade                  {@link #fade} 的返回值
-     * @param millisUntilFadeStarts 保持期还剩多少毫秒；淡出已开始 / 无保持期时为 0
-     * @param idleFrameMs           空闲档的帧间隔（{@code CaretAnimator.IDLE_DELAY_MS}）
-     * @return true = 下一帧仍需以高帧率推进
-     */
-    public static boolean needsMoreFrames(boolean overlayFadeOut, float lastGlowStrength, float fade,
-                                          long millisUntilFadeStarts, long idleFrameMs) {
-        if (!overlayFadeOut) {
-            return false;                 // 开关关闭：fade 恒为 1，也没有淡出可推进
-        }
-        // 写成 `!(x > 0f)` 而不是 `x <= 0f`：NaN 与 0 比较恒为 false，
-        // 后者会让「强度算坏了」变成永久空转（与 strengthFor 的 M-4 同一类防御）。
-        if (!(lastGlowStrength > 0f)) {
-            return false;                 // 从未亮过 / 已彻底熄灭：没有可淡的东西
-        }
-        if (!(fade > 0f)) {
-            return false;                 // NaN / 已结束：不再续帧
-        }
-        if (fade < 1f) {
-            return true;                  // 淡出中：每一帧都在变，必须逐帧推进
-        }
-        // 保持期：画面逐帧完全相同（恒为「最后亮度 × 1」），没必要全速空转。
-        // 但最后一段必须逐帧 —— 否则又会回到「淡出曲线比空闲帧还短、被整段跳过」的老问题。
-        // 判据：距离淡出开始不足一个空闲帧时开始续帧。
-        return millisUntilFadeStarts <= idleFrameMs;
-    }
-
-    /**
-     * 本组这一帧是否应改用「保持亮度」—— 逐组判据（2026-11-01 发版前审查修正）。
-     *
-     * <h2>为什么判据必须逐组，而不是「全局本帧有没有移动」</h2>
-     *
-     * <p>{@code moved} 只表示「光标目标位置这一帧变没变」。一次按键之后弹簧还要推进
-     * 十几帧，这些帧 {@code moved == false}，于是全局判据会把<b>所有</b>分组都切到
-     * 保持亮度 —— 多光标下那个从头到尾没动过的光标也会满强度发光。
-     * 这正是 {@code CaretTrailPanel} 注释里写明已修掉的串扰。
-     *
-     * <p>所以调用方按组传 {@code groupRecentlyActive}：本组在「保持 + 淡出」窗口内
-     * 有过非零偏移才为 true。从未活动过的组永远拿不到保持亮度。
-     *
-     * <p>它仍然不能和 {@link #needsMoreFrames} 合成一个布尔：后者决定「还要不要出帧」，
-     * 本方法决定「用哪个强度」，两者在运动期间答案恰好相反。
-     *
-     * @param overlayFadeOut      总开关；关闭时辉光随弹簧自然衰减，没有保持阶段
-     * @param groupRecentlyActive 本组最近是否活动过（窗口 = 保持时长 + 淡出时长）
-     * @param fade                {@link #fade} 的返回值
-     * @return true = 本组可用保持亮度；false = 用逐组 {@link #strengthFor}
-     */
-    public static boolean useLastGlowForGroup(boolean overlayFadeOut, boolean groupRecentlyActive,
-                                              float fade) {
-        if (!overlayFadeOut) {
-            return false;                 // 关闭淡出：随弹簧自然衰减，没有保持阶段
-        }
-        if (!(fade > 0f)) {
-            return false;                 // 淡出结束 / NaN：不画
-        }
-        return groupRecentlyActive;
-    }
-
-    /**
-     * 本组这一帧最终交给绘制层的辉光强度（生产与预览共用的唯一入口）。
-     *
-     * <p>两种状态：
+     * <p>这是「跟着拖尾一起暗，但淡出参数仍然有效」的核心：
      * <ul>
-     *   <li>本组最近活动过 → 保持亮度（{@code lastGlowStrength} 在最后一次移动帧刚刷新，
-     *       与逐组曲线连续，不会闪）；</li>
-     *   <li>本组从未活动 / 已过淡出窗口 → 逐组曲线 {@link #strengthFor}，
-     *       静止组自然是 0，不发光。</li>
+     *   <li>目标始终是 {@link #strengthFor(double)}。拖尾还在时目标不会归零，
+     *       所以跨行缎带不会中途灭（0.9.118 的回归）；</li>
+     *   <li>目标高于当前亮度时立即上升 —— 每次按键必须立刻回到满值（AC-2）；</li>
+     *   <li>目标低于当前亮度时，每帧最多下降 {@code dt / fadeOutSeconds}。
+     *       这就是「淡出时长」的实际作用：不是决定何时开始，而是决定降多慢；</li>
+     *   <li>保持期内不下降，保证「保持时长」仍然有效。</li>
      * </ul>
      *
-     * <p><b>为什么不能加「偏移必须归零才保持」的条件</b>：弹簧收敛到 0.5px 以下需要时间，
-     * 淡出开始时往往还有约 0.7px 残余。若此时退回逐组曲线，强度只剩 0.088 ——
-     * 又变成「从 1.5% 淡到 0」，正是 B-4 要修的观感。判据只看「本组是否最近活动过」。
+     * <p><b>为什么不用「到点乘 0」</b>：0.9.125 把计时起点挂在「最后一次可见」，
+     * 拖尾收拢期间计时被每帧重置，于是只能等光标停下再淡 —— 用户感知为「停下才熄灭」。
+     * 限速下降把「什么时候开始」交给拖尾曲线，把「降多慢」交给参数，两者不再打架。
      *
-     * @param offset              本组四角相对目标的最大偏移（像素）
-     * @param holdGlow            保持亮度（调用方记录的「最后一次动作时的强度」）
-     * @param overlayFadeOut      淡出总开关
-     * @param groupRecentlyActive 本组最近是否活动过
-     * @param fade                {@link #fade} 的返回值
-     * @return 0~1 的辉光强度
+     * @param overlayFadeOut 总开关；关闭时直接返回目标曲线（旧行为）
+     * @param current        当前亮度（0~1）
+     * @param target         目标亮度（通常是 {@link #strengthFor(double)} 的返回值）
+     * @param dtSeconds      本帧时长（秒）
+     * @param fadeOutSeconds 淡出时长（秒）：每帧最多下降 dt / fadeOutSeconds
+     * @param holdActive     是否处于「保持期」；true = 本帧不下降
+     * @return 本帧结束时的亮度（0~1）
      */
-    public static float glowForGroup(double offset, float holdGlow,
-                                     boolean overlayFadeOut, boolean groupRecentlyActive,
-                                     float fade) {
-        if (useLastGlowForGroup(overlayFadeOut, groupRecentlyActive, fade)) {
-            return holdGlow;
+    public static float advanceGlow(boolean overlayFadeOut, float current, float target,
+                                    double dtSeconds, double fadeOutSeconds,
+                                    boolean holdActive) {
+        if (!overlayFadeOut) {
+            return Float.isFinite(target) ? target : 0f;
         }
-        return strengthFor(offset);
+        // 非有限值按 0 处理：NaN 会让所有比较为 false，静默画出「没有辉光」，
+        // 与 strengthFor 的 M-4 守卫同构。
+        if (!Float.isFinite(current) || !Float.isFinite(target)) {
+            return 0f;
+        }
+        if (target >= current) {
+            return target;                 // 上升立即：按键立刻回到满值
+        }
+        if (holdActive) {
+            return current;                // 保持期：本帧不降
+        }
+        if (!(fadeOutSeconds > 0)) {
+            return target;                 // 0 / 负数：立即到位
+        }
+        if (!Double.isFinite(fadeOutSeconds)) {
+            // NaN / Infinity：立即到位。若返回 current，亮度会永久冻结，
+            // 而 needsMoreFrames 仍会每帧返回 true —— EDT 永久空转（审查 M-1）。
+            return target;
+        }
+        if (!Double.isFinite(dtSeconds)) {
+            return target;                 // 非法步长：立即到位，避免冻结
+        }
+        if (!(dtSeconds > 0)) {
+            return current;                // 零步长：本帧不动
+        }
+        double maxDrop = dtSeconds / fadeOutSeconds;
+        return (float) Math.max(target, current - maxDrop);
     }
+
+    /**
+     * 单个 trail 的辉光推进 —— 生产与预览共用的唯一入口（0.9.126）。
+     *
+     * <p>把「目标 = 自身偏移曲线」「保持期 = 自身最后一次移动」「下降速度受
+     * 淡出时长限制」三件事合成一次调用。状态必须按 trail 保存，不能把组亮度
+     * 写回成员：否则拆组/移除活跃光标后，从未移动的 trail 会带着组亮度单独发光
+     * （2026-11-02 审查 H-1 / M-1）。
+     *
+     * <p>组内显示亮度由调用方取 max（相邻行看起来是一个整体），但每个 trail
+     * 自己的状态只由自己的 offset / lastMove 决定。
+     *
+     * @param overlayFadeOut 总开关
+     * @param current        本 trail 当前亮度（0~1）
+     * @param offset         本 trail 当前最大偏移（像素）
+     * @param lastMoveNanos  本 trail 最后一次移动的时刻；0 = 从未移动
+     * @param nowNanos       当前时刻
+     * @param dtSeconds      本帧时长（秒）
+     * @param delayMs        保持时长（毫秒）
+     * @param fadeOutSeconds 淡出时长（秒）
+     * @return 本帧结束时的亮度（0~1）
+     */
+    public static float advanceTrailGlow(boolean overlayFadeOut, float current, double offset,
+                                         long lastMoveNanos, long nowNanos, double dtSeconds,
+                                         int delayMs, double fadeOutSeconds) {
+        float target = strengthFor(offset);
+        long holdRemaining = holdRemainingMs(lastMoveNanos, nowNanos, delayMs);
+        boolean holdActive = overlayFadeOut && lastMoveNanos != 0L && holdRemaining > 0;
+        return advanceGlow(overlayFadeOut, current, target, dtSeconds, fadeOutSeconds, holdActive);
+    }
+
+    /**
+     * 保持期还剩多少毫秒（0 = 已结束或从未移动）。
+     *
+     * @param lastMoveNanos 最后一次移动的时刻；0 = 从未移动
+     * @param nowNanos      当前时刻
+     * @param delayMs       保持时长（毫秒）
+     */
+    public static long holdRemainingMs(long lastMoveNanos, long nowNanos, int delayMs) {
+        if (lastMoveNanos == 0L || delayMs <= 0) {
+            return 0L;
+        }
+        if (nowNanos <= lastMoveNanos) {
+            return delayMs;
+        }
+        long elapsedMs = (nowNanos - lastMoveNanos) / 1_000_000L;
+        return elapsedMs >= delayMs ? 0L : delayMs - elapsedMs;
+    }
+
+    /**
+     * 淡出是否还需要继续出帧（0.9.126 版）。
+     *
+     * <p>与 0.9.125 的区别：判据从「全局 fade 乘子」改成「本组亮度」。
+     * 保持期画面恒定，可以降到空闲档；但最后一段必须逐帧，否则淡出曲线会被
+     * 一个 120ms 的空闲帧整段跨过去（BUG-B 的老问题）。
+     *
+     * @param overlayFadeOut  总开关
+     * @param brightness      本组当前亮度
+     * @param target          本组目标亮度
+     * @param holdActive      是否处于保持期
+     * @param holdRemainingMs 保持期还剩多少毫秒
+     * @param idleFrameMs     空闲档帧间隔
+     * @return true = 下一帧仍需以高帧率推进
+     */
+    public static boolean needsMoreFrames(boolean overlayFadeOut, float brightness, float target,
+                                          boolean holdActive, long holdRemainingMs,
+                                          long idleFrameMs) {
+        if (!overlayFadeOut) {
+            return false;
+        }
+        if (!(brightness > 0f) || !Float.isFinite(target)) {
+            return false;
+        }
+        if (target > 0f) {
+            return true;                   // 拖尾还在可见区间：继续画
+        }
+        if (!holdActive) {
+            return true;                   // 正在下降：逐帧
+        }
+        return holdRemainingMs <= idleFrameMs;
+    }
+
 }

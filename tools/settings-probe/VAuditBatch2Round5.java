@@ -109,7 +109,7 @@ public final class VAuditBatch2Round5 {
     private static void g1() throws Exception {
         String animator = src("ui/CaretAnimator.java");
 
-        String spring = bodyOf(animator, "private boolean tickSpring(", "private float glowFade(");
+        String spring = bodyOf(animator, "private boolean tickSpring(", "private boolean tickAfterimage(");
         String staticCaret = bodyOf(animator, "private boolean tickStaticCaret()", "private boolean tickSpring(");
 
         // 用 `new double[` 而不是字面 `new double[]{`：回归不一定写成数组字面量
@@ -338,7 +338,7 @@ public final class VAuditBatch2Round5 {
      */
     private static void h1() {
         String animator = src("ui/CaretAnimator.java");
-        String spring = bodyOf(animator, "private boolean tickSpring(", "private float glowFade(");
+        String spring = bodyOf(animator, "private boolean tickSpring(", "private boolean tickAfterimage(");
         check("H1-a【结构】tickSpring 内不再调用 setGlowStrength",
                 !spring.contains("setGlowStrength"),
                 spring.isEmpty() ? "★ 找不到方法体" : (spring.contains("setGlowStrength") ? "★ 仍在每帧写" : "已摘除"));

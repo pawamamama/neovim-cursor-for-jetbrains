@@ -6,31 +6,32 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * 守门探针：辉光淡出的两个判据（BUG-B，2026-11-01）。
+ * 守门探针：辉光的「目标曲线 + 限速下降」（B 方案，0.9.126）。
  *
  * <h2>它抓的是什么 bug</h2>
  *
- * <p>{@code CaretAnimator.tickSpring()} 原来只有一个布尔：
- * <pre>
- *   boolean fading = config.overlayFadeOut &amp;&amp; fade &gt; 0f &amp;&amp; fade &lt; 1f;
- * </pre>
- * 它同时决定「还要不要出帧」和「用最后亮度还是逐组强度」。两个问题在运动期间
- * 答案相反，合成一个布尔必然有一边错：
- * <ul>
- *   <li>对调度：漏掉「淡出前保持期」（fade == 1）→ 落到空闲 120ms，
- *       而默认淡出只有 75ms → 整条曲线被跨过去，用户看到「瞬间熄灭」；</li>
- *   <li>若改成 {@code fade > 0f}：运动期间恒为 true → 所有分组读全局强度，
- *       多光标下静止光标也会发光（CaretTrailPanel 注释里写明已修掉的串扰）。</li>
- * </ul>
+ * <p>0.9.125 的淡出是「保持满亮 → 到点乘 0」：{@code CaretAnimator} 在拖尾还有偏移时
+ * 每帧把计时起点重置、并强制 {@code fade = 1}，于是只能等拖尾归零、再等保持期结束
+ * 才开始淡。用户感知为「停下后才熄灭」，而且淡出作用在已经缩到最小的光晕上，很突兀。
  *
- * <p>所以现在是两个纯函数：{@link GlowIntensity#needsMoreFrames}（调度）与
- * {@link GlowIntensity#glowForGroup}（逐组渲染，内部用
- * {@link GlowIntensity#useLastGlowForGroup}）。本探针对两者逐段断言，
- * 并扫源码防止有人把它们重新合并或退回旧判据。
+ * <p>0.9.126 改成限速下降：目标仍是 {@link GlowIntensity#strengthFor(double)}，
+ * 但每帧最多下降 {@code dt / fadeOutSeconds}，保持期从「最后一次移动」起算。
+ * 本探针对纯函数逐段断言，并扫源码防止有人退回「全局 fade 乘子」。
  *
- * <p>【2026-11-01 发版前审查修正】渲染判据从「全局本帧有没有移动」改成
- * 「本组最近有没有活动」。全局 moved 在弹簧收敛期间为 false，会把所有分组
- * 都切到保持亮度 —— 多光标下没动过的光标也发光。T-16b 就是这条回归的守门。
+ * <h2>【0.9.126 契约变更】旧断言逐条去向</h2>
+ *
+ * <p>旧版 T-1~T-19 断言的是 {@code fade()} / {@code useLastGlowForGroup()} /
+ * {@code glowForGroup()} 三个函数。它们表达的是「到点乘 0」模型，本次按用户决定
+ * 整体替换为限速模型，因此旧断言不再成立。这是<b>契约变更，不是为了让测试通过而改测试</b>：
+ *  <ul>
+ *   <li>旧 T-1~T-6（fade 曲线 / needsMoreFrames 旧签名）→ 新 C-1~C-7；</li>
+ *   <li>旧 T-7~T-10、T-16（保持亮度 / 逐组判据）→ 新 A-5、A-11、新源码守卫 D-2~D-5；</li>
+ *   <li>旧 T-15（线性 fade 0.5 / 0 / 1）→ 新 A-2~A-4、A-12（限速速率与 75/300/500 差异）；</li>
+ *   <li>旧 T-18（计时不被 moved 包住）→ 新 A-11（无新移动时必须单调不增）。</li>
+ *  </ul>
+ *
+ * <p>为什么保留源码守卫思路：纯函数测试无法发现「生产代码根本没用它」。
+ * 0.9.125 的 BUG-B 就是判据写对了、调用点仍然把两个语义合成一个布尔。
  */
 public final class VFadeTick {
 
@@ -40,107 +41,184 @@ public final class VFadeTick {
     private static final long IDLE_MS = 120;   // = CaretAnimator.IDLE_DELAY_MS
 
     public static void main(String[] args) {
-        System.out.println("=== V-FADE-TICK：淡出续帧判据 + 渲染取值判据 ===");
+        System.out.println("=== V-FADE-TICK：限速下降（B 方案，0.9.126）===");
 
-        // ==================== 调度：needsMoreFrames ====================
+        // ==================== A. advanceGlow 纯函数 ====================
 
-        // ---------- T-1：开关关闭 → 不续帧 ----------
-        check("T-1 淡出开关关闭 → 不需要续帧",
-                !GlowIntensity.needsMoreFrames(false, 1f, 1f, 0, IDLE_MS), "");
+        // ---------- A-1：目标高于当前 → 立即上升（AC-2 按键回满） ----------
+        check("A-1 目标高于当前 → 立即到目标（按键立刻回满）",
+                eq(GlowIntensity.advanceGlow(true, 0.2f, 1f, 0.008, 0.075, false), 1f),
+                "got=" + GlowIntensity.advanceGlow(true, 0.2f, 1f, 0.008, 0.075, false));
 
-        // ---------- T-2：从未亮过 → 没有可淡的东西 ----------
-        check("T-2 辉光从未亮过（lastGlowStrength=0）→ 不需要续帧",
-                !GlowIntensity.needsMoreFrames(true, 0f, 1f, 0, IDLE_MS), "");
+        // ---------- A-2：单帧降幅 = dt / 淡出时长 ----------
+        float exp75 = 1f - (float) (0.008 / 0.075);
+        check("A-2 fade=75ms：单帧降幅 = 8/75",
+                eq(GlowIntensity.advanceGlow(true, 1f, 0f, 0.008, 0.075, false), exp75),
+                "got=" + GlowIntensity.advanceGlow(true, 1f, 0f, 0.008, 0.075, false)
+                        + " exp=" + exp75);
 
-        // ---------- T-3：保持期还早 → 不空转（2026-11-01 审查 M-3/L-1） ----------
-        check("T-3 保持期还剩 400ms（> 一个空闲帧）→ 不需要全速出帧",
-                !GlowIntensity.needsMoreFrames(true, 0.8f, 1f, 400, IDLE_MS), "");
+        // ---------- A-3 / A-4：300ms、500ms 的单帧降幅更小 ----------
+        float exp300 = 1f - (float) (0.008 / 0.300);
+        float exp500 = 1f - (float) (0.008 / 0.500);
+        check("A-3 fade=300ms：单帧降幅 = 8/300",
+                eq(GlowIntensity.advanceGlow(true, 1f, 0f, 0.008, 0.300, false), exp300), "");
+        check("A-4 fade=500ms：单帧降幅 = 8/500",
+                eq(GlowIntensity.advanceGlow(true, 1f, 0f, 0.008, 0.500, false), exp500), "");
 
-        // ---------- T-3b：保持期即将结束 → 必须开始续帧 ----------
-        //
-        // 这是 BUG-B 的核心：若这一段不续帧，淡出曲线（默认 75ms）会在一个
-        // 120ms 的空闲帧里被整段跨过去。
-        check("T-3b 保持期只剩 100ms（≤ 一个空闲帧）→ 必须续帧（否则淡出被跳过）",
-                GlowIntensity.needsMoreFrames(true, 0.8f, 1f, 100, IDLE_MS), "");
+        // ---------- A-5：保持期内不下降 ----------
+        check("A-5 保持期 holdActive=true → 亮度不变",
+                eq(GlowIntensity.advanceGlow(true, 0.5f, 0f, 0.008, 0.075, true), 0.5f), "");
 
-        // ---------- T-4：淡出中 → 必须逐帧 ----------
-        check("T-4 淡出中 fade=0.5 → 必须续帧",
-                GlowIntensity.needsMoreFrames(true, 0.8f, 0.5f, 0, IDLE_MS), "");
+        // ---------- A-6：目标地板，不允许降到目标以下 ----------
+        check("A-6 目标 0.1、单帧本应降到 0.093 → 被目标托住",
+                eq(GlowIntensity.advanceGlow(true, 0.2f, 0.1f, 0.008, 0.075, false), 0.1f),
+                "got=" + GlowIntensity.advanceGlow(true, 0.2f, 0.1f, 0.008, 0.075, false));
 
-        // ---------- T-5：淡出结束 → 停止 ----------
-        check("T-5 淡出结束 fade=0 → 停止出帧",
-                !GlowIntensity.needsMoreFrames(true, 0.8f, 0f, 0, IDLE_MS), "");
+        // ---------- A-7：开关关闭 → 直接走曲线（旧行为） ----------
+        check("A-7 overlayFadeOut=false → 直接返回目标曲线",
+                eq(GlowIntensity.advanceGlow(false, 0.5f, 0.2f, 0.008, 0.075, false), 0.2f), "");
 
-        // ---------- T-6：NaN 防御（与 strengthFor 的 M-4 同构） ----------
-        check("T-6a lastGlowStrength=NaN → 不续帧（不能永久空转）",
-                !GlowIntensity.needsMoreFrames(true, Float.NaN, 1f, 0, IDLE_MS), "");
-        check("T-6b fade=NaN → 不续帧",
-                !GlowIntensity.needsMoreFrames(true, 0.8f, Float.NaN, 0, IDLE_MS), "");
+        // ---------- A-8：淡出时长 0 → 立即到位（不是归零） ----------
+        check("A-8 fadeOutSeconds=0 → 立即到位（目标 0.4 时返回 0.4）",
+                eq(GlowIntensity.advanceGlow(true, 1f, 0.4f, 0.008, 0.0, false), 0.4f),
+                "got=" + GlowIntensity.advanceGlow(true, 1f, 0.4f, 0.008, 0.0, false));
 
-        // ==================== 渲染：逐组 glowForGroup ====================
+        // ---------- A-9：NaN 守卫（不能静默画出「没有辉光」） ----------
+        check("A-9a current=NaN → 0",
+                eq(GlowIntensity.advanceGlow(true, Float.NaN, 0f, 0.008, 0.075, false), 0f), "");
+        check("A-9b target=NaN → 0",
+                eq(GlowIntensity.advanceGlow(true, 1f, Float.NaN, 0.008, 0.075, false), 0f), "");
 
-        // ---------- T-7：本组未活动 → 不得用保持亮度（多光标不串扰） ----------
-        //
-        // 这是 2026-11-01 审查 H-1 的守门：运动期间 fade 恒为 1，
-        // 若把「续帧判据」当渲染判据，这里会返回 true → 静止光标也发光。
-        check("T-7 本组未活动（groupRecentlyActive=false）→ 不用保持亮度",
-                !GlowIntensity.useLastGlowForGroup(true, false, 1f), "");
+        // ---------- A-10：非法时长不能冻结亮度（会永久空转） ----------
+        check("A-10a fadeOutSeconds=NaN → 立即到目标（不能冻结亮度）",
+                eq(GlowIntensity.advanceGlow(true, 0.6f, 0f, 0.008, Double.NaN, false), 0f), "");
+        check("A-10b fadeOutSeconds=+Infinity → 立即到目标",
+                eq(GlowIntensity.advanceGlow(true, 0.6f, 0f, 0.008,
+                        Double.POSITIVE_INFINITY, false), 0f), "");
+        check("A-10c dt=0 → 保持 current（零步长不动）",
+                eq(GlowIntensity.advanceGlow(true, 0.6f, 0f, 0.0, 0.075, false), 0.6f), "");
+        check("A-10d 非法淡出时长不会让调度永久空转",
+                !GlowIntensity.needsMoreFrames(true, 0f, 0f, false, 0, IDLE_MS), "");
 
-        // ---------- T-8：本组刚活动、淡出中 → 用保持亮度 ----------
-        check("T-8 本组刚活动 + 淡出中（fade=0.5）→ 用保持亮度",
-                GlowIntensity.useLastGlowForGroup(true, true, 0.5f), "");
+        // ---------- A-11：20 帧单调不增、始终不低于目标 ----------
+        float b75 = 1f;
+        boolean monotonic = true;
+        for (int i = 0; i < 20; i++) {
+            float next = GlowIntensity.advanceGlow(true, b75, 0f, 0.008, 0.075, false);
+            if (next > b75 + 1e-6f || next < 0f) {
+                monotonic = false;
+            }
+            b75 = next;
+        }
+        check("A-11 20 帧单调下降、不反弹、不越界", monotonic, "b75=" + b75);
 
-        // ---------- T-9：本组刚活动、保持期 → 用保持亮度（满强度） ----------
-        check("T-9 本组刚活动 + 保持期（fade=1）→ 用保持亮度",
-                GlowIntensity.useLastGlowForGroup(true, true, 1f), "");
+        // ---------- A-12：75 / 300 / 500 在 20 帧后必须可区分 ----------
+        float a = 1f, b = 1f, c = 1f;
+        for (int i = 0; i < 20; i++) {
+            a = GlowIntensity.advanceGlow(true, a, 0f, 0.008, 0.075, false);
+            b = GlowIntensity.advanceGlow(true, b, 0f, 0.008, 0.300, false);
+            c = GlowIntensity.advanceGlow(true, c, 0f, 0.008, 0.500, false);
+        }
+        check("A-12 20 帧后 75 < 300 < 500（参数真实有效）",
+                a < b && b < c, "75=" + a + " 300=" + b + " 500=" + c);
 
-        // ---------- T-10：开关关闭 / 淡出结束 → 不画 ----------
-        check("T-10a 淡出开关关闭 → 不用保持亮度（静止即熄灭）",
-                !GlowIntensity.useLastGlowForGroup(false, true, 1f), "");
-        check("T-10b 淡出结束 fade=0 → 不用保持亮度",
-                !GlowIntensity.useLastGlowForGroup(true, true, 0f), "");
+        // ---------- A-13~A-15：单 trail 入口（生产/预览共用） ----------
+        long now = 2_000_000_000L;
+        check("A-13 从未移动的 trail（lastMove=0, offset=0）→ 0（拆组不继承）",
+                eq(GlowIntensity.advanceTrailGlow(true, 0f, 0.0, 0L, now,
+                        0.008, 50, 0.075), 0f), "");
+        check("A-14 正在移动的 trail（offset=8, lastMove=now）→ 立即满强度",
+                eq(GlowIntensity.advanceTrailGlow(true, 0f, 8.0, now, now,
+                        0.008, 50, 0.075), 1f), "");
+        check("A-15 保持期内不降、随后按 fade 下降",
+                eq(GlowIntensity.advanceTrailGlow(true, 1f, 0.0, now,
+                        now + 40_000_000L, 0.008, 50, 0.075), 1f)
+                        && GlowIntensity.advanceTrailGlow(true, 1f, 0.0, now,
+                        now + 100_000_000L, 0.008, 50, 0.075) < 1f,
+                "");
 
-        // ---------- T-16：最终取值（2026-11-01 发版前审查 HIGH 的守门） ----------
-        //
-        // 全局 moved 在弹簧收敛期间为 false，旧实现让所有分组都读保持亮度。
-        // T-16b 断言「从未活动的组必须是 0」—— 去掉逐组判据它必红。
-        check("T-16a 已停下且本组刚活动过 → 用保持亮度",
-                GlowIntensity.glowForGroup(0.0, 0.8f, true, true, 1f) == 0.8f, "");
-        check("T-16b 静止分组（从未活动）→ 0，不得被全局保持亮度点亮",
-                GlowIntensity.glowForGroup(0.0, 0.8f, true, false, 1f) == 0f, "");
-        check("T-16c 本组最近活动过（即使仍有残余偏移）→ 保持亮度（与曲线连续）",
-                GlowIntensity.glowForGroup(2.5, 0.8f, true, true, 1f) == 0.8f, "");
+        // ==================== B. holdRemainingMs ====================
 
-        // ==================== 源码守卫 ====================
+        long t0 = 1_000_000_000L;
+        check("B-1 从未移动（lastMove=0）→ 0",
+                GlowIntensity.holdRemainingMs(0L, t0, 50) == 0L, "");
+        check("B-2 刚移动 → 剩余 = delay",
+                GlowIntensity.holdRemainingMs(t0, t0, 50) == 50L, "");
+        check("B-3 已过 30ms（delay=50）→ 剩 20ms",
+                GlowIntensity.holdRemainingMs(t0, t0 + 30_000_000L, 50) == 20L, "");
+        check("B-4 已过 50ms → 0",
+                GlowIntensity.holdRemainingMs(t0, t0 + 50_000_000L, 50) == 0L, "");
+        check("B-5 now < lastMove（时钟回拨）→ 按满保持处理",
+                GlowIntensity.holdRemainingMs(t0, t0 - 1_000_000L, 50) == 50L, "");
 
-        String animator = readSource("src/main/java/com/github/yyyolo7a79/neovidecursor/ui/CaretAnimator.java");
+        // ==================== C. needsMoreFrames ====================
+
+        check("C-1 开关关闭 → 不续帧",
+                !GlowIntensity.needsMoreFrames(false, 1f, 1f, false, 0, IDLE_MS), "");
+        check("C-2 亮度为 0 → 不续帧",
+                !GlowIntensity.needsMoreFrames(true, 0f, 0f, false, 0, IDLE_MS), "");
+        check("C-3 目标 > 0（拖尾还在）→ 续帧",
+                GlowIntensity.needsMoreFrames(true, 0.8f, 1f, false, 0, IDLE_MS), "");
+        check("C-4 保持期还剩 400ms → 不空转",
+                !GlowIntensity.needsMoreFrames(true, 1f, 0f, true, 400, IDLE_MS), "");
+        check("C-5 保持期只剩 100ms（≤ 空闲帧）→ 必须续帧",
+                GlowIntensity.needsMoreFrames(true, 1f, 0f, true, 100, IDLE_MS), "");
+        check("C-6 正在下降（hold=false，target=0）→ 必须续帧",
+                GlowIntensity.needsMoreFrames(true, 0.5f, 0f, false, 0, IDLE_MS), "");
+        check("C-7 target=NaN → 不续帧（不能永久空转）",
+                !GlowIntensity.needsMoreFrames(true, 0.5f, Float.NaN, false, 0, IDLE_MS), "");
+
+        // ==================== D. 源码守卫 ====================
+
+        String animator = readSource(
+                "src/main/java/com/github/yyyolo7a79/neovidecursor/ui/CaretAnimator.java");
         if (animator == null) {
-            // 【H-3 修复】读不到源码时必须 FAIL，不能因为「扫描结果为空」而假绿。
-            check("T-11 能读到 CaretAnimator 源码", false, "读不到源码");
+            check("D-0 能读到 CaretAnimator 源码", false, "读不到源码");
         } else {
-            check("T-11 能读到 CaretAnimator 源码", true, "");
+            check("D-0 能读到 CaretAnimator 源码", true, "");
             String code = stripComments(animator);
-            check("T-12 CaretAnimator 调用 GlowIntensity.needsMoreFrames（不是自己写调度判据）",
-                    code.contains("GlowIntensity.needsMoreFrames("), "未找到调用");
-            check("T-13 CaretAnimator 调用 GlowIntensity.glowForGroup（逐组渲染判据）",
-                    code.contains("GlowIntensity.glowForGroup("), "未找到调用");
-            check("T-14 CaretAnimator 代码里不再出现旧的 `fade > 0f && fade < 1f` 判据",
-                    !code.contains("fade > 0f && fade < 1f"), "旧判据仍在代码里");
-            check("T-17 CaretAnimator 用逐组 glowForGroup，且不再调用全局 useLastGlow",
-                    code.contains("GlowIntensity.glowForGroup(")
-                            && !code.contains("GlowIntensity.useLastGlow("),
-                    "渲染判据未改为逐组");
+            check("D-1 CaretAnimator 调用 GlowIntensity.advanceTrailGlow（生产真的用了新模型）",
+                    code.contains("GlowIntensity.advanceTrailGlow("), "未找到调用");
+            check("D-2 CaretAnimator 不再调用旧的 glowForGroup",
+                    !code.contains("GlowIntensity.glowForGroup("), "旧调用仍在");
+            check("D-3 CaretAnimator 不再保留 lastGlowStrength 保持路径",
+                    !code.contains("lastGlowStrength"), "旧字段仍在");
+            check("D-4 CaretAnimator 不再保留 lastAnimatingNanos 计时",
+                    !code.contains("lastAnimatingNanos"), "旧字段仍在");
+            check("D-5 CaretAnimator 不再出现旧的 `fade > 0f && fade < 1f` 判据",
+                    !code.contains("fade > 0f && fade < 1f"), "旧判据仍在");
+            check("D-6 CaretAnimator 使用逐 trail 的亮度状态（glowStates）",
+                    code.contains("glowStates"), "未找到状态容器");
+            // 0.9.126 的关键契约：保持期必须从「最后一次移动」起算。
+            // 若改回收拢时刻，观感就退回 0.9.125「停下才暗」。
+            int iSetTarget = code.indexOf("if (trail.setTarget(cx, cy, w, h)) {");
+            int iSetTargetEnd = iSetTarget < 0 ? -1 : code.indexOf("}", iSetTarget);
+            int iLastMove = iSetTarget < 0 ? -1
+                    : code.indexOf("lastMoveNanos = now;", iSetTarget);
+            check("D-9 lastMoveNanos 在 setTarget 分支内更新（保持期从移动起算）",
+                    iSetTarget >= 0 && iLastMove > iSetTarget
+                            && (iSetTargetEnd < 0 || iLastMove < iSetTargetEnd),
+                    "setTarget=" + iSetTarget + " end=" + iSetTargetEnd
+                            + " lastMove=" + iLastMove);
+            check("D-10 组亮度只用于本帧显示，不写回 trail 状态（拆组不继承）",
+                    !java.util.regex.Pattern.compile("brightness\\s*=\\s*groupBrightness")
+                            .matcher(code).find(),
+                    "发现把组亮度写回 trail");
+            check("D-11 渲染使用组内最大亮度（不是重新算曲线）",
+                    code.contains("float trailGlow = groupBrightness[trail.groupId];"),
+                    "未找到 trailGlow = groupBrightness");
+            check("D-12 每个 trail 用 advanceTrailGlow 推进",
+                    code.contains("st.brightness = GlowIntensity.advanceTrailGlow("),
+                    "未找到 per-trail 推进");
         }
 
-        // ==================== 曲线回归（与 VPreviewParity 同一边界） ====================
-        double f = 0.1;    // 100ms 淡出
-        long t0 = 1_000_000_000L;
-        check("T-15a 保持期内 fade=1",
-                GlowIntensity.fade(true, t0, t0 + 30_000_000L, 50, f) == 1f, "");
-        check("T-15b 淡出中 fade=0.5",
-                Math.abs(GlowIntensity.fade(true, t0, t0 + 100_000_000L, 50, f) - 0.5f) < 1e-6f, "");
-        check("T-15c 到点 fade=0",
-                GlowIntensity.fade(true, t0, t0 + 200_000_000L, 50, f) == 0f, "");
+        String glowSrc = readSource(
+                "src/main/java/com/github/yyyolo7a79/neovidecursor/core/GlowIntensity.java");
+        String glowCode = glowSrc == null ? "" : stripComments(glowSrc);
+        check("D-7 GlowIntensity 提供 advanceGlow",
+                glowCode.contains("public static float advanceGlow("), "");
+        check("D-8 GlowIntensity 不再保留旧的 glowForGroup",
+                !glowCode.contains("public static float glowForGroup("), "");
 
         System.out.println();
         System.out.printf("=== V-FADE-TICK 结果：PASS %d，FAIL %d ===%n", pass, fail);
@@ -153,14 +231,18 @@ public final class VFadeTick {
         System.exit(0);
     }
 
+    private static boolean eq(float got, float exp) {
+        return Math.abs(got - exp) <= 1e-5f;
+    }
+
     /**
      * 剥掉 Java 的行注释与块注释。
      *
      * <p>源码扫描必须只看代码：本项目的注释习惯大量引用「旧实现长什么样」，
      * 连注释一起扫会让「记录历史」变成「触发假红」。
      *
-     * <p>已知限制：不识别文本块（{@code """}）。当前 {@code CaretAnimator} 没有文本块；
-     * 若将来加入，需要扩展本状态机。
+     * <p>已知限制：不识别文本块（{@code """}）。当前 {@code CaretAnimator} 没有
+     * 文本块；若将来加入，需要扩展本状态机，否则 D 段源码守卫可能静默失准。
      */
     private static String stripComments(String src) {
         if (src == null) {
@@ -209,7 +291,6 @@ public final class VFadeTick {
             Path p = Paths.get(repo).resolve(rel);
             return new String(Files.readAllBytes(p), StandardCharsets.UTF_8);
         } catch (Exception e) {
-            // 【H-3】不静默吞：扫描类探针读不到源码就是「没测」，必须留下痕迹。
             System.out.println("  读取源码失败：" + rel + " —— " + e);
             return null;
         }
