@@ -12,6 +12,8 @@
 > The original only lets you tweak parameters by editing code — this one lets you adjust, save and switch directly inside the IDE.
 
 > **Current release: v0.9.126** — see [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md) for the full release notes.
+>
+> **Maintainer:** [pawamamama](https://github.com/pawamamama) — since v0.9.83: **106 commits, 239 files, +42,323 / −3,464 lines**.
 
 
 **Language** — [**English**](README.md) | [简体中文](README.zh-CN.md)
@@ -378,7 +380,7 @@ Per-layer alpha is solved from the layer count: `A = 1 - (1 - peak)^(1/N)`
 
 ## Contributors
 
-- **pawamamama (帕瓦马马马)** ([@pawamamama](https://github.com/pawamamama)) — fork maintainer and
+- **pawamamama** ([@pawamamama](https://github.com/pawamamama)) — fork maintainer and
   commit author. Since v0.9.83: **106 commits**, **239 files changed**,
   **+42,323 / −3,464 lines** (code, tests and docs; as of 2026-11-02). Current tree:
   **37 production files / 21,342 lines** and **131 probe files / 33,487 lines**

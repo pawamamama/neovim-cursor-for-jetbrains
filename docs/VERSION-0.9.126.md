@@ -511,7 +511,7 @@ git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/N
 
 ## 十、贡献者与代码量
 
-- **维护者 / 提交作者：帕瓦马马马（pawamamama）**（[@pawamamama](https://github.com/pawamamama)）。
+- **维护者 / 提交作者：pawamamama**（[@pawamamama](https://github.com/pawamamama)）。
   自 v0.9.83 以来：**106 个提交 / 239 个文件 / +42,323 −3,464 行**（代码 + 测试 + 文档，2026-11-02 实测）。
   当前仓库：**生产 37 文件 / 21,342 行**；**探针 131 文件 / 33,487 行**（116 个 `V*.java`，113 个注册）。
 - **上游：yyyyolo7a79-sketch/neovim-cursor-for-jetbrains** —— 原项目与核心拖尾物理。

@@ -12,6 +12,8 @@
 > 原版只能改代码调参数，本版可以在 IDE 里直接调、存、切换。
 
 > **当前版本：v0.9.126** — 见 [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md)（完整版本说明）。
+>
+> **维护者：** [pawamamama](https://github.com/pawamamama) — 自 v0.9.83 以来 **106 个提交、239 个文件、+42,323 / −3,464 行**。
 
 **语言 / Language** — [English](README.md) | [**简体中文**](README.zh-CN.md)
 
@@ -401,7 +403,7 @@ Swing/AWT 的 `invokeLater` 优先级低于原生输入事件，编辑器繁忙�
 
 ## 贡献者
 
-- **帕瓦马马马（pawamamama）**（[@pawamamama](https://github.com/pawamamama)）—— 本 fork 维护者与提交作者。
+- **pawamamama**（[@pawamamama](https://github.com/pawamamama)）—— 本 fork 维护者与提交作者。
   自 v0.9.83 以来：**106 个提交、239 个文件、+42,323 / −3,464 行**（代码 + 测试 + 文档，2026-11-02 实测）。
   当前代码：**生产 37 文件 / 21,342 行**，**探针 131 文件 / 33,487 行**（116 个 `V*.java`，113 个注册）。
   维护了设置 / 预设层、i18n、平台 252 read action 修复和 0.9.126 辉光淡出模型。
