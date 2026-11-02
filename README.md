@@ -11,6 +11,8 @@
 > **What this edition adds**: on top of the original effect, a **full settings panel + persistence + preset system**.
 > The original only lets you tweak parameters by editing code — this one lets you adjust, save and switch directly inside the IDE.
 
+> **Current release: v0.9.126** — see [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md) for the full release notes.
+
 
 **Language** — [**English**](README.md) | [简体中文](README.zh-CN.md)
 
@@ -49,7 +51,7 @@ Video files live in [`docs/media/`](docs/media/) in this repo.
 
 [📹 docs/media/04-settings-panel.mp4](docs/media/04-settings-panel.mp4) · 39s · 1722×1074 · 60fps
 
-> **This is the biggest difference from the original** — 14 sliders + 9 checkboxes + 4 dropdowns, all live and persisted.
+> **This is the biggest difference from the original** — 14 sliders + 10 checkboxes + 4 dropdowns, all live and persisted.
 
 ---
 
@@ -62,7 +64,7 @@ Built on [yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyy
 | Trail / glow / afterimage | ✅ | ✅ |
 | Multi-cursor | ✅ | ✅ **supported since 0.9.32** |
 | Keep native caret | ✅ | ⚠️ off by default (issue 2) |
-| **Settings panel** | ❌ edit code | ✅ **14 sliders + 9 checkboxes** |
+| **Settings panel** | ❌ edit code | ✅ **14 sliders + 10 checkboxes** |
 | **Persistence** | ❌ | ✅ saved into IDE config |
 | **Animation presets** | ❌ | ✅ 3 |
 | **Color presets** | ❌ | ✅ 6 (incl. animated rainbow) |
@@ -181,8 +183,8 @@ Result matches upstream bit-for-bit: typing `0 2 3 1`, deleting `2 0 1 3`.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 `
-  -Version 0.9.83 `
-  -OutName neovide-cursor-0.9.83.jar `
+  -Version 0.9.126 `
+  -OutName neovide-cursor-0.9.126.jar `
   -BaseJar "<path-to-any-idea-plugin-jar>"
 ```
 
@@ -221,7 +223,7 @@ and a "<name> copy" custom preset is derived and selected automatically — **th
 
 Want to keep a configuration? Click "New preset" and give it a name.
 
-> A custom preset stores a **snapshot of all 19 parameters**, not a diff.
+> A custom preset stores a **snapshot of all 13 parameters**, not a diff.
 
 ---
 
