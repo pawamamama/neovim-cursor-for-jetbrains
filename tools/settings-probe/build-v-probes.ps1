@@ -258,7 +258,14 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 【2026-11-01 第二次修】淡出的「真实驱动」守门：驱动预览窗逐帧采样亮度。
         # 纯函数探针抓不到「保持亮度取自最后可见帧（≈0.015）」这一类状态错误 ——
         # 那正是用户「改到最大 500 观感没有变化」的直接原因。
-        'VFadePreview')
+        'VFadePreview',
+        # 【2026-11-02】多光标三异常（A 光标消失 / B 卡住+辉光常亮 / C 孤立串亮）。
+        # 根因：261 平台 getBlockSelectionStarts() 是 per-caret，virtual space 关闭时
+        # 行尾 → 会回绕到下一行行首，于是同一行出现两个 caret；生产用「行号」当 trail key
+        # 会塌成一个，两个槽位共用一条 SpringTrail。
+        # T-1 key 稳定 / T-2 maxOffset 收敛 / T-3 辉光隔离 / T-4 数量守恒 / T-5 单光标回归。
+        # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
+        'VMultiCursorFix')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

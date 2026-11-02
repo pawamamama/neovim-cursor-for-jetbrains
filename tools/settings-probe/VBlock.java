@@ -21,13 +21,16 @@ import com.github.yyyolo7a79.neovidecursor.ui.CaretAnimator;
  *
  * <p>现在改成断言<b>生产路径真正在用的两个判据</b>：
  * <ul>
- *   <li>{@code trailSlotCount(useBlock, blockStarts.length, carets.size())}
- *       —— refreshTarget 用它决定本帧建几条拖尾</li>
+ *   <li>{@code trailSlotCount(perLineStarts, blockStarts.length, carets.size())}
+ *       —— refreshTarget 用它决定本帧建几条拖尾（261 上 perLineStarts 恒 false，
+ *       条数 = caret 数；只有旧平台「starts 比 caret 多」时按行数）</li>
  *   <li>{@code blockTrailKey(lineNo, blockStart)}
- *       —— refreshTarget 用它的返回值当 trails 的 key</li>
+ *       —— 2026-11-02 起它只是<b>旧平台兜底</b>；261 平台的生产 key 是 caret 对象
+ *       身份（见 {@code VMultiCursorFix} 的 T-1/T-4）。本探针继续锁它的纯函数行为，
+ *       防止兜底路径退化。</li>
  * </ul>
- * 两个方法都是被 refreshTarget 直接调用的（不是为探针新写的复刻），
- * 把它们的实现改坏，产品行为就变，本探针必红。
+ * 两个方法都是生产代码里的真实实现（不是探针复刻），把它们的实现改坏，
+ * 兜底路径的行为就变，本探针必红。
  *
  * <p>断言条数一条没减：原来 7 条，现在仍然是 7 条（K-3/K-4/K-6 换了验证对象）。
  */
@@ -54,7 +57,8 @@ public final class VBlock {
         //
         // 用户报的核心缺陷：块选区时 getAllCarets() 只返回 1 个，
         // 但视觉上应该「拖了几行就有几条线」。
-        // 生产里 useBlock=true 时 count 走 blockStarts.length，caretCount 被忽略。
+        // 生产里 perLineStarts=true（旧平台：starts 比 caret 多）时 count 走
+        // blockStarts.length，caretCount 被忽略；261 上恒走 caretCount。
         int block = CaretAnimator.trailSlotCount(true, 4, 1);
         check("K-3 块选区 4 行（caret 只有 1 个）→ 4 条拖尾",
                 block == 4, "实际 " + block + "（若为 1 说明块选区未展开）");

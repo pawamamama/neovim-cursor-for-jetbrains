@@ -270,16 +270,18 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 挂着两块<b>互相矛盾</b>的 javadoc —— 一块说必须 IdentityHashMap、一块说必须 HashMap，
      * 现实是 HashMap。读第一块的人会把它「改回去」，并把 U-M-8 那个 bug 重新引入）：
      * <ul>
-     *   <li>普通多光标 → {@code Caret} 对象。{@code Caret} 没有重写
+     *   <li><b>主路径（261 平台）→ {@code Caret} 对象</b>。{@code Caret} 没有重写
      *       {@code equals/hashCode}，因此 HashMap 下天然是<b>引用判等</b>，
-     *       与 IdentityHashMap 行为一致。</li>
-     *   <li>块选区 → {@code Integer}（该行选区起点的 offset）。
-     *       <b>这里曾用 IdentityHashMap 出过 bug</b>：块选区每帧都要
-     *       按 offset 查同一个 key，而 {@code Integer.valueOf()} 只在
-     *       -128~127 有缓存，offset 超过就每次装成新对象 ——
-     *       IdentityHashMap 按引用判等会认为"新 key"，于是每帧新建
+     *       与 IdentityHashMap 行为一致。2026-11-02 起多光标/块选区的每个槽位都走这条，
+     *       不再用行号 —— 两个 caret 同行时行号 key 会塌成一个（现象 A/B/C，见
+     *       {@link #blockTrailKey} 的说明）。</li>
+     *   <li><b>旧平台兜底 → {@code Integer}</b>：只有当 {@code getBlockSelectionStarts()}
+     *       返回的数组比 caret 多（真的「1 caret + N 行」）时才会出现。
+     *       <b>这里曾用 IdentityHashMap 出过 bug</b>：旧实现按 offset 当 key，
+     *       而 {@code Integer.valueOf()} 只在 -128~127 有缓存，offset 超过就每次装成
+     *       新对象 —— IdentityHashMap 按引用判等会认为"新 key"，于是每帧新建
      *       SpringTrail，旧条目永远清不掉（内存泄漏 + 拖尾重复）。
-     *       <b>这就是必须 HashMap 的唯一原因，别改回去。</b></li>
+     *       <b>这就是必须 HashMap 的原因，别改回去。</b></li>
      * </ul>
      *
      * <p><b>为什么还需要帧号清理</b>：官方文档明确「两个 caret 落到同一视觉位置时
@@ -318,7 +320,7 @@ public class CaretAnimator implements Disposable, CaretListener {
     //     private int lastBlockOffset = -1;
     //
     // BLOCK_SELECTION_KEY 是「块选区整块共用一个拖尾」时代的常量 key。
-    // 后来块选区改成【每行一条线 + 行号 key】（见 refreshTarget 里与 useBlock 相关的
+    // 后来块选区改成【每行一条线 + 行号 key】（见 refreshTarget 里与 multiCaret 相关的
     // 循环），key 变成 Integer.valueOf(-1000000 - lineNo)，这个常量再没有读者。
     //
     // lastBlockOffset 只在 updateBlockCharsMoved 里被写一次，注释写着「只为诊断保留」，
@@ -327,13 +329,14 @@ public class CaretAnimator implements Disposable, CaretListener {
     // 核实方法（全仓 src + tools 逐个符号计数，见提交说明）。
 
     /**
-     * 块选区的字符移动量 —— 所有行共享同一个值。
+     * 多光标槽位共享的字符移动量 —— 恒为 {@code -1}（让 jump 走归一化判据）。
      *
      * <p><b>为什么必须共享</b>：{@code TrailCorner.jump()} 会按 charsMoved 分成
-     * 「短跳」与「跨行」两个分支，两者时长差 2 倍以上。若各行独立计算，
-     * 会出现「有的行短跳、有的行跨行」→ 加速度不均匀。
+     * 「短跳」与「跨行」两个分支，两者时长差 2 倍以上。若各槽位独立计算，
+     * 会出现「有的槽位短跳、有的跨行」→ 加速度不均匀。
      *
-     * <p>块选区在语义上是一次整体移动，所有行移动的字符数必然相同。
+     * <p>历史：这个方法是为「块选区」写的（那时一次列选在语义上是一次整体移动）；
+     * 261 契约下 {@code multiCaret} 覆盖所有多光标，所以它现在服务的是全部多光标槽位。
      */
     private int updateBlockCharsMoved() {
         // 【0.9.56 修复：多光标横向拉伸比单行长得多的根因】
@@ -399,30 +402,38 @@ public class CaretAnimator implements Disposable, CaretListener {
     /**
      * 本帧该建几条拖尾 —— <b>生产路径真正在用的判据</b>。
      *
-     * <p>块选区（Alt+鼠标拖拽列选）在平台层只产生 1 个 Caret，
-     * 行信息全在 {@code SelectionModel.getBlockSelectionStarts()} 里；
-     * 普通多光标（Alt+点击）则相反，{@code getAllCarets()} 直接返回 N 个。
-     * 两者都折算成「条数」，截断到 {@link #MAX_TRAILS}。
+     * <p><b>平台契约（261 字节码核实，2026-11-02）</b>：
+     * {@code SelectionModel.getBlockSelectionStarts()} 的数组长度 = {@code getAllCarets().size()}，
+     * 每项是该 caret 的 selectionStart（官方 javadoc 原文：array size is equal to the number of
+     * carets existing in the editor currently）。所以在本平台 {@code blockStartCount} 与
+     * {@code caretCount} 恒等，条数就是 caret 数。
      *
-     * <p>块选区优先：它有 N 行就必须画 N 条线，即使 carets 只有 1 个。
-     * 两者不会同时存在（平台互斥）。
+     * <p>保留 {@code perLineStarts} 分支是为了兼容「1 个 caret + N 行 starts」的旧平台：
+     * 只有那里 starts 会比 caret 多，必须按行数画。生产调用点传入的正是
+     * {@code blockStartCount > caretCount}（见 {@code refreshTarget} 的 blockCount）。
+     * 两者都截断到 {@link #MAX_TRAILS}。
      */
-    public static int trailSlotCount(boolean useBlock, int blockStartCount, int caretCount) {
-        return useBlock
+    public static int trailSlotCount(boolean perLineStarts, int blockStartCount, int caretCount) {
+        return perLineStarts
                 ? Math.min(blockStartCount, MAX_TRAILS)
                 : Math.min(caretCount, MAX_TRAILS);
     }
 
     /**
-     * 块选区每一行的拖尾 key —— <b>生产路径真正在用的 key 规则</b>。
+     * 【旧平台兜底】按行号生成 trail key —— <b>生产在 caret 可用时不再调它</b>。
      *
-     * <p>为什么必须用「行号」而不是 offset：输入中文后每行的 offset 都会变，
-     * key 一变就被当成新光标、每帧重建 SpringTrail ——
-     * 用户报的「多光标不支持中文，最后一行输出、其他不动，按 tab 像重定位」
-     * 就是它造成的（2026-10-24 实测）。
+     * <p>生产路径现在按 caret 对象身份做 key（见 {@code refreshTargetInReadAction} 的
+     * 「2026-11-02 根因修复」段落）。只有该平台真的按「行」返回 block selection starts
+     * （数组比 caret 多）时才走到这里。
      *
-     * <p>为什么不能用固定 key：块选区现在是「每行一条线」，
-     * 固定 key 会让所有行挤在同一个拖尾上。
+     * <p><b>为什么当时用行号</b>：输入中文后每行 offset 都会变，offset key 会被当成新光标、
+     * 每帧重建 SpringTrail（用户报的「多光标不支持中文，最后一行输出、其他不动」）。
+     * 行号在行内编辑时不变，所以是那版实现的正确选择。
+     *
+     * <p><b>为什么它不能当唯一规则</b>（2026-11-02 用户现象 A/B/C 的根因）：
+     * 两个 caret 落在同一行时（virtual space 关闭时行尾按 → 会回绕到下一行行首），
+     * 行号 key 会塌成一个，两个槽位共用同一条 trail —— 一行光标消失、
+     * 另一行卡住且辉光常亮。
      *
      * @param lineNo      该行行号；{@code < 0} 表示文档查询失败
      * @param blockStart  该行的块选区起点 offset（行号取不到时的退路）
@@ -434,8 +445,10 @@ public class CaretAnimator implements Disposable, CaretListener {
     }
 
     /**
-     * 本帧该槽位的块选区 key（U-M-8）：行号可用 → 行号 key；
+     * 【旧平台兜底】本帧该槽位的块选区 key（U-M-8）：行号可用 → 行号 key；
      * 行号查询失败 → 沿用上一帧该槽位的 key；首见 → offset 兜底。
+     *
+     * <p>生产在 caret 可用的路径上不调用它；理由与风险见 {@link #blockTrailKey}。
      *
      * <p><b>为什么需要 prevKey</b>：{@link #blockTrailKey} 在 {@code lineNo < 0} 时会退化成
      * offset key，而下一帧行号恢复后 key 又变回行号 key —— 两帧的 key 不同，
@@ -2147,15 +2160,21 @@ public class CaretAnimator implements Disposable, CaretListener {
             List<Caret> carets = caretModel.getAllCarets();
             Caret primaryCaret = caretModel.getPrimaryCaret();
 
-            // 【块选区（Alt+拖拽列选）】它不产生多个 Caret，只有 1 个 + 矩形选区。
-            // 详见 collectTrailTargets 的类注释。这里把块选区展开成 N 个目标点，
-            // 用「offset」当稳定 key（Caret 对象此时只有 1 个，不能当 key）。
+            // 【多光标 / 块选区的识别 —— 261 平台契约（2026-11-02 核实）】
+            //
+            // 旧注释写的是「块选区只产生 1 个 Caret」——那是更早的平台模型。
+            // 261 的 {@code SelectionModelImpl.getBlockSelectionStarts()} 直接遍历
+            // {@code getAllCarets()}，返回数组长度 = caret 数，每项是该 caret 的
+            // selectionStart。因此：
+            //   · {@code bs.length > 1} 的真实含义是「<b>光标数 &gt; 1</b>」，
+            //     普通多光标（Alt+点击）也会命中；
+            //   · {@code blockStarts[i]} 与 {@code carets.get(i)} 是同一个光标。
+            // key 的选择见下方循环里的「2026-11-02 根因修复」。
             int[] blockStarts = null;
             int[] blockEnds = null;
             try {
                 // SelectionModel 没有 hasBlockSelection()；
-                // 块选区存在时 getBlockSelectionStarts() 返回非空数组，
-                // 否则返回空数组（不是 null）。直接取即可。
+                // 无选区/单光标时返回空数组（不是 null）。直接取即可。
                 SelectionModel sel = editor.getSelectionModel();
                 int[] bs = sel.getBlockSelectionStarts();
                 if (bs != null && bs.length > 1) {
@@ -2163,10 +2182,24 @@ public class CaretAnimator implements Disposable, CaretListener {
                     blockEnds = sel.getBlockSelectionEnds();
                 }
             } catch (Throwable ignored) {
-                // 取不到就当没有块选区
+                // 取不到就当单光标
             }
 
-            boolean useBlock = blockStarts != null && blockStarts.length > 1;
+            // 【槽位数与「多光标」判据 —— 2026-11-02 审查 M-1】
+            //
+            // 不能用「blockStarts 是否取到」当多光标判据：getSelectionModel() 或
+            // getBlockSelectionStarts() 抛异常时 blockStarts 为 null，而 getAllCarets()
+            // 仍可能返回 N>1 —— 旧写法会把 N 个光标当单光标处理（startFrom 打开、
+            // charsMoved 改逐光标、动画档位变化），手感静默变化且零日志。
+            //
+            // 平台契约：261 的 starts 数组长度 == caret 数；只有旧平台会出现
+            // 「starts 比 caret 多」（1 caret + N 行）。因此：
+            //   count = max(caret 数, starts 数)，截断到 MAX_TRAILS
+            //   perLineStarts = starts 比 caret 多（决定是否走行号 key 的旧模型）
+            int blockCount = (blockStarts == null) ? 0 : blockStarts.length;
+            boolean perLineStarts = blockCount > carets.size();
+            int count = trailSlotCount(perLineStarts, blockCount, carets.size());
+            boolean multiCaret = count > 1;
 
             // 【块选区 = 每行一条独立的线，不是整块矩形】
             //
@@ -2186,20 +2219,15 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 已恢复为「每行一条线」。
             //
             // 第二轮的「前三个慢后三个快」是 startFrom 造成的（已修：块选区不 startFrom）。
-            // 【NPE 防守】useBlock 为 false 时 blockStarts 可能仍是 null ——
-            // 上面那个 try/catch 在 getBlockSelectionStarts() 抛异常（或
-            // getSelectionModel() 返回 null）时会让它停在初值 null，
-            // 而 useBlock 的判据正是「不为 null 且长度 > 1」。
-            // 直传 blockStarts.length 就是空指针（探针 VFontScale 实测复现）。
-            // 真实 IDEA 里 getBlockSelectionStarts() 承诺返回空数组而非 null，
-            // 所以线上没炸过；但这条路径没有契约保护，不该靠运气。
-            int count = trailSlotCount(useBlock,
-                    useBlock ? blockStarts.length : 0, carets.size());
+            //
+            // 【NPE 防守】blockStarts 在 try/catch 里可能停在 null（getSelectionModel()
+            // 返回 null 或 getBlockSelectionStarts() 抛异常）。上面的 blockCount 已统一
+            // 折算成 0，任何地方都不再直接解引用它。
             boolean changed = count != activeTrails.size();
 
             // 【U-M-8】块选区槽位缓存：退出块选区、或行数变化时清空
             // （槽位↔行的对应关系已变，沿用旧 key 会错位）。
-            if (!useBlock) {
+            if (!multiCaret) {
                 prevBlockCount = -1;
             } else if (count != prevBlockCount) {
                 java.util.Arrays.fill(prevBlockKeys, null);
@@ -2208,7 +2236,7 @@ public class CaretAnimator implements Disposable, CaretListener {
 
             activeTrails.clear();
             for (int i = 0; i < count; i++) {
-                // 【块选区的 key 必须用「行号」，不能用 offset】
+                // 【历史：2026-10-24 用 offset 当 key 会随中文输入抖动】
                 //
                 // 用户实测（2026-10-24）：「多光标不支持中文，表现为最后一行输出、
                 // 其他不动，按 tab 时候感觉光标要重定位」。
@@ -2220,19 +2248,51 @@ public class CaretAnimator implements Disposable, CaretListener {
                 //   · 新拖尾走 startFrom（"重定位"的观感）
                 //   · 只有最后一行（offset 恰好没变或重建后位置对）看起来正常
                 //
-                // 正确做法：用「行号」当 key —— 行号在行内编辑时不变，
-                // 只在真正增删行时才变，那才是「光标换了位置」。
-                // 【块选区的 key 用「行号」】
+                // 当时改成了「行号」key —— 行内编辑不变，确实治好了 offset 抖动；
+                // 但它引入了「两个 caret 同行就塌成一个 key」的新问题，
+                // 所以 2026-11-02 又改成 caret 身份（见下一段）。
+                // ==================== 【2026-11-02 根因修复：key 必须按 caret 身份】====================
                 //
-                // 为什么不用 offset：输入中文后每行 offset 都变 → key 变 →
-                // 被当成新光标重建（用户报的「最后一行输出其他不动」）。
+                // 平台契约：{@code SelectionModel.getBlockSelectionStarts()} 的数组长度
+                // = **caret 数**，每项是该 caret 的 selectionStart（261 的
+                // {@code SelectionModelImpl} 字节码就是遍历 {@code getAllCarets()}）。
+                // 所以槽位 i 就是 {@code carets.get(i)}，与块选区「第几行」无关。
                 //
-                // 为什么不用固定 key：块选区现在是【每行一条线】，
-                // 固定 key 会让所有行挤在同一个拖尾上。
+                // 旧实现把「行号」当 key（{@link #blockTrailKey}）。只要**两个 caret
+                // 落在同一行**，key 就塌成一个：
+                //   · 两个槽位共用同一条 SpringTrail → 先处理的槽位抢走它，
+                //     另一行没有 trail → 该行光标消失（用户现象 A）；
+                //   · 共享 trail 每帧被两个槽位先后 setTarget 到两个不同位置 →
+                //     maxOffset 永不收敛、lastMoveNanos 每帧刷新 → 卡住 + 辉光常亮（现象 B/C）。
                 //
-                // 行号是最稳定的：行内编辑不变，只有真正增删行时才变。
+                // 同一行出现两个 caret 不是异常，而是平台正常行为：
+                // virtual space 关闭时（本机默认），行尾按 → 会把 caret 移到**下一行行首**
+                // （{@code CaretImpl.moveCaretRelatively}），于是最短的行先回绕、
+                // 与下一行原光标同行。
+                //
+                // 修法：用 caret 对象本身当 key —— 唯一、跨帧稳定（Caret 不重写
+                // equals/hashCode，HashMap 天然按引用判等），且中文编辑导致 offset 变化
+                // 时 key 也不变（这正是当年行号 key 想解决的问题，对象身份同样解决）。
+                //
+                // 【平台假设，换实现要复核】① 261 的 CaretImpl（及父类 UserDataHolderBase）
+                // 未重写 equals/hashCode；② 平台按 myCarets 列表顺序复用 Caret 对象
+                // （setCaretsAndSelections 逐项复用），所以「对象身份 ↔ 槽位」在同一次
+                // 拖拽内稳定。若将来某动作以不同顺序重设 carets，trail 会跟着对象迁移
+                // （表现为一次跨行扫动）——当前 261 没有这种路径。
                 Object key;
-                if (useBlock) {
+                Caret slotCaret = (i < carets.size()) ? carets.get(i) : null;
+                if (slotCaret != null) {
+                    key = slotCaret;
+                    // 旧平台兜底（1 caret + N 行 starts）留下的槽位 key 一并清掉，
+                    // 防止它在将来某帧行号查询失败时复活。
+                    if (i < prevBlockKeys.length) {
+                        prevBlockKeys[i] = null;
+                    }
+                } else {
+                    // 【仅旧平台兜底】走到这里必然满足「starts 数组比 caret 多」
+                    // （slotCaret == null ⇒ i ≥ carets.size()，而 count 取的是
+                    // max(caret 数, starts 数)）。也就是说该平台真的按「行」返回
+                    // block selection starts。保留原来的行号 key 逻辑，行为与修复前一致。
                     int lineNo = -1;
                     try {
                         lineNo = editor.getDocument().getLineNumber(blockStarts[i]);
@@ -2247,8 +2307,6 @@ public class CaretAnimator implements Disposable, CaretListener {
                     if (i < prevBlockKeys.length) {
                         prevBlockKeys[i] = key;
                     }
-                } else {
-                    key = carets.get(i);
                 }
                 SpringTrail trail = trails.get(key);
                 if (trail == null) {
@@ -2266,9 +2324,11 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 正确做法：块选区的每行光标是【同时出现】的，
                     // 不该有先来后到。让它们各自吸附到目标位置即可。
                     //
-                    // 普通多光标（Alt+点击新增）仍保留 startFrom ——
-                    // 那种场景用户是"逐个添加"的，从邻居滑出符合直觉。
-                    if (!useBlock) {
+                    // 【2026-11-02 注释修正】261 契约下 multiCaret 就是「光标数 > 1」，
+                    // 所以列选与 Alt+点击的多光标新光标**都不走** startFrom（各自吸附）。
+                    // 只有「单槽位且它还没有自己的 trail」（例如块选区塌缩回 1 个光标）
+                    // 才复制最近一条已初始化 trail 的形状，避免新 trail 从 (0,0) 飞入。
+                    if (!multiCaret) {
                         SpringTrail source = nearestInitializedTrail(trails);
                         if (source != null) {
                             trail.startFrom(source);
@@ -2280,38 +2340,48 @@ public class CaretAnimator implements Disposable, CaretListener {
                 trail.lastSeenFrame = frameSeq;
                 activeTrails.add(trail);
 
-                // 块选区：用【整个选区的包围盒】定位（1 个矩形）
-                // 普通光标：用 Caret
+                // 定位：每个槽位都用自己的 caret 的活动端（单光标也走这一支）。
                 int caretOff;
                 VisualPosition cvp;
-                double targetW = width;
-                double targetH = height;
-                double targetCx;
-                double targetCy;
                 int blockLine = -1;
 
-                if (useBlock) {
-                    // 【块选区：每行一条独立的线】
+                if (slotCaret != null) {
+                    // 【2026-11-02】多光标 / 块选区的每个槽位都对应一个真实 caret：
+                    // 目标点就取该 caret 自己的活动端。
+                    //
+                    // 不再用 blockStarts/blockEnds +「主光标方向」猜整组位置，原因有二：
+                    //   ① 同一行有多个 caret 时，这个启发式无法区分槽位（旧版直接共享 key）；
+                    //   ② 向左扩选时 selectionEnd 是锚点、不是活动端，光标会落在错的一侧。
+                    // caret.getVisualPosition() / getOffset() 本身就是活动端 ——
+                    // 与修复前单光标 `else` 分支的语义逐字段相同（2026-10-24 日志已证实）。
+                    cvp = slotCaret.getVisualPosition();
+                    caretOff = slotCaret.getOffset();
+                    blockLine = cvp.line;
+                    if (CursorDiag.shouldSample(frameSeq)) {
+                        VisualPosition dLead = null;
+                        try {
+                            dLead = slotCaret.getLeadSelectionPosition();
+                        } catch (Throwable ignored) { }
+                        CursorDiag.caretFollow(multiCaret ? "multi" : "single",
+                                slotCaret.hasSelection(), fmtVp(cvp), fmtVp(dLead), "VP");
+                        // 【L-3，审查】保留块选区的数组原值诊断：261 的块选区也走这一支，
+                        // 否则现场只剩 [caret] multi，少了一组 offset 对照。
+                        if (multiCaret && i == 0) {
+                            CursorDiag.blockArrays(blockCount,
+                                    head(blockStarts), head(blockEnds));
+                        }
+                    }
+                } else {
+                    // 【仅旧平台兜底】block selection starts 比 caret 多（1 caret + N 行）。
+                    // 保留修复前的行号/方向启发式，行为与当时一致。
                     //
                     // 与 VS Code 一致（查过源码：每个 DOM .cursor 一个实例，
                     // 尺寸是单个光标）。这里取该行选区起点的像素坐标，
                     // 尺寸用单字符 (width, height) —— 不合并成整块。
                     //
-                    // 【块选区：按扩展方向选 blockStarts / blockEnds】
-                    //
-                    // 2026-10-24 日志实测（5 行块选区，按 Ctrl+Shift+→）：
-                    //   corner0X=368.0 目标cx=369.0  ← 恒定不变，说明用的那个数组没动
-                    //
-                    // 块选区是个矩形：
-                    //   blockStarts[] = 固定左边界（向右扩时不动）
-                    //   blockEnds[]   = 活动右边界（向右扩时增长）
-                    //
-                    // 而【向左扩】时，活动的变成左边界 ——
-                    // 这解释了之前「向左正常、向右失效」的现象。
-                    //
-                    // 所以必须【按方向选】：
-                    //   caret 在 lead 右边（向右扩）→ 用 blockEnds
-                    //   caret 在 lead 左边（向左扩）→ 用 blockStarts
+                    // 块选区是个矩形：blockStarts[] = 固定左边界，
+                    // blockEnds[] = 活动右边界。向左扩时活动的变成左边界，
+                    // 所以必须按方向选。
                     int blockChosenOffset;
                     boolean useEnd = true;
                     try {
@@ -2343,27 +2413,8 @@ public class CaretAnimator implements Disposable, CaretListener {
                                     useEnd ? "ENDS" : "STARTS", blockChosenOffset);
                         }
                     }
-                    targetW = width;
-                    targetH = height;
-                    targetCx = 0;    // 实际用 cp 算，见下方 setTarget
-                    targetCy = 0;
-                } else {
-                    Caret caret = carets.get(i);
-                    // 【实测修正】getVisualPosition() 就是活动端（见上方说明）
-                    cvp = caret.getVisualPosition();
-                    caretOff = caret.getOffset();
-                    if (CursorDiag.shouldSample(frameSeq)) {
-                        VisualPosition dLead = null;
-                        try {
-                            dLead = caret.getLeadSelectionPosition();
-                        } catch (Throwable ignored) { }
-                        CursorDiag.caretFollow("single", caret.hasSelection(),
-                                fmtVp(cvp), fmtVp(dLead), "VP");
-                    }
-                    targetCx = 0;               // 普通光标分支不用这两个值
-                    targetCy = 0;
                 }
-                trail.currentLine = (useBlock && blockLine >= 0) ? blockLine : cvp.line;
+                trail.currentLine = (multiCaret && blockLine >= 0) ? blockLine : cvp.line;
 
                 // 快速路径：视觉位置 + 文档修改戳都没变就跳过坐标换算。
                 // resync / forceResync 时强制重算全部光标。
@@ -2404,7 +2455,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                     // 块选区在语义上是【一次整体移动】，所有行移动的字符数必然相同。
                     // 因此统一用主行（第 0 行）的移动量。
                     int charsMoved;
-                    if (useBlock) {
+                    if (multiCaret) {
                         charsMoved = updateBlockCharsMoved();
                     } else {
                         charsMoved = trail.updateCharsMoved(caretOff);
@@ -2456,10 +2507,16 @@ public class CaretAnimator implements Disposable, CaretListener {
                     trail.applyCharsMoved(-1);
                 }
 
-                // 主光标的那份用于残影 / 日志 / 探针（保持旧语义）
-                // 块选区没有「主光标」概念，取第 0 个当代表
-                if (useBlock ? i == 0
-                        : (primaryCaret == null || key == primaryCaret)) {
+                // 主光标的那份用于残影 / 日志 / 探针（保持旧语义）。
+                //
+                // 【2026-11-02】key 变成 caret 身份后，直接按「是不是主光标的 key」判定；
+                // 旧平台兜底（slotCaret == null）仍沿用原来的「块选区取第 0 个」规则。
+                if (slotCaret != null) {
+                    if (primaryCaret == null || key == primaryCaret) {
+                        cameraTrail = trail;
+                    }
+                } else if (i == 0) {
+                    // 旧平台兜底没有 caret 身份可比：沿用「取第 0 个当代表」。
                     cameraTrail = trail;
                 }
             }
@@ -2475,6 +2532,18 @@ public class CaretAnimator implements Disposable, CaretListener {
             trails.entrySet().removeIf(e -> e.getValue().lastSeenFrame != frameSeq);
             if (trails.size() != beforeSize) {
                 changed = true;
+            }
+
+            // 【M-4，2026-11-02 审查】cameraTrail 必须指向本帧真实存在的 trail。
+            //
+            // 触发场景：Alt+拖拽列选超过 MAX_TRAILS(64) 行时，平台会把主光标设为
+            // 新建的那个 caret（排序列表的最后一项），它的下标 ≥ 64、不在本帧槽位内。
+            // 于是 `key == primaryCaret` 永不成立，cameraTrail 停在上一个 lead 的
+            // 旧 trail 上：残影锚点偏一行，且顶层快速路径永远不命中（每帧全量慢路径）。
+            // 旧实现用 `i == 0` 无条件赋值，至少保证它有效 —— 这里把这条保证补回来。
+            if (!activeTrails.isEmpty()
+                    && (cameraTrail == null || !activeTrails.contains(cameraTrail))) {
+                cameraTrail = activeTrails.get(0);
             }
 
             if (activeTrails.isEmpty()) {
@@ -3321,8 +3390,9 @@ public class CaretAnimator implements Disposable, CaretListener {
     // 【0.9.88 删除 collectTrailTargets】
     //
     // 它是「本帧该画几个光标、各自在哪」的纯函数抽象，但**生产路径从来没调过它** ——
-    // 真正的实现在 refreshTarget() 里内联展开（见该方法中 useBlock 相关的整段：
-    // 块选区按行号 key 建 trail、普通多光标按 Caret 对象建 trail，两者共用一个循环）。
+    // 真正的实现在 refreshTarget() 里内联展开（见该方法中 multiCaret 相关的整段：
+    // 2026-11-02 起每个槽位都按 caret 对象身份建 trail；只有旧平台
+    // （starts 数组比 caret 多）才退回行号 key）。
     //
     // 为什么必须删掉而不是留着：探针 VBlock 当时调的就是这个并行实现，
     // 于是 7 条断言全绿，却证明不了生产路径任何事 —— 这正是

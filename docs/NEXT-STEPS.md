@@ -1,6 +1,6 @@
 # 下一步做什么
 
-> 状态：**v0.9.126 已装（IDEA + PyCharm）并推送 fork，tag v0.9.126** · fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· 0.9.84~0.9.125 仍未打 tag
+> 状态：**v0.9.127 已装 IDEA（PyCharm 仍为 0.9.126）并推送 fork，tag v0.9.127** · fork/main 与本地是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· 0.9.84~0.9.125 仍未打 tag
 > 本文最后更新：2026-11-02
 
 > ⚠️ **本文的数字曾长期失真，请勿直接采信或转抄。**
@@ -16,15 +16,15 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v0.9.126**（IDEA 2026.1 与 PyCharm 2025.2 均已装；读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
-| dist 最新 jar | `dist/neovide-cursor-0.9.126.jar`（2026-11-02） |
-| git tag | **v0.9.126**（0.9.84~0.9.125 缺 42 个；0.9.126 已打并推送 fork） |
-| 探针文件 | **116 个 `V*.java`**（全部 .java 131 个，2026-11-02 实测；其中 113 个注册进门禁） |
-| 探针基线 | **113 个注册探针 ALL PASS（0 红；VFadeTick 45 / VFadePreview 8）**；VRegr2 R-5/R-6 仍是 informational |
+| 版本 | **v0.9.127**（IDEA 2026.1 已装 0.9.127；PyCharm 2025.2 仍为 0.9.126。读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
+| dist 最新 jar | `dist/neovide-cursor-0.9.127.jar`（2026-11-02） |
+| git tag | **v0.9.127**（0.9.84~0.9.125 缺 42 个；0.9.126 / 0.9.127 已打并推送 fork） |
+| 探针文件 | **117 个 `V*.java`**（全部 .java 132 个，2026-11-02 实测；其中 114 个注册进门禁） |
+| 探针基线 | **114 个注册探针 ALL PASS（0 红；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9）**；VRegr2 R-5/R-6 仍是 informational |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
 | PhysicsParity | PASS |
-| 生产代码 | **21,342 行 / 37 文件**（2026-11-02 实测，`find … -exec cat {} + \| wc -l`） |
-| 探针代码 | **33,487 行 / 131 文件**（同上口径，2026-11-02 实测；本行与上一行的数字必须同时更新） |
+| 生产代码 | **21,412 行 / 37 文件**（2026-11-02 实测，`find … -exec cat {} + \| wc -l`） |
+| 探针代码 | **34,440 行 / 132 文件**（同上口径，2026-11-02 实测；本行与上一行的数字必须同时更新） |
 | 构建 | javac + 手写 plugin.xml；Gradle 也完整入库（两条路径并存） |
 
 ---
@@ -354,5 +354,5 @@ TR（前缘单角）   2.11     7.43    11.58
 | 项 | 现状 |
 |---|---|
 | `git tag` | 停在 `v0.9.83`；实际已装到 **0.9.120**，中间三十七个版本无 tag |
-| 探针总数 | **116 个** `V*.java`（新增 `VInputCommit` / `VFadeTick` / `VFadePreview`），文档数字已由 `VDocCheck` 纳入门禁 |
-| `CLAUDE.md` 状态数字 | 已同步为 0.9.120 / 116 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |
+| 探针总数 | **117 个** `V*.java`（新增 `VInputCommit` / `VFadeTick` / `VFadePreview` / `VMultiCursorFix`），文档数字已由 `VDocCheck` 纳入门禁 |
+| `CLAUDE.md` 状态数字 | 已同步为 0.9.127 / 117 个探针；**提交号一律写「见 `git log -1`」**，不写死 hash |

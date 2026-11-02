@@ -1,6 +1,6 @@
 # 开发档案 —— 从这里开始
 
-> **版本：v0.9.126** · 最后更新：2026-11-02
+> **版本：v0.9.127** · 最后更新：2026-11-02
 >
 > 这是本项目唯一的状态入口。如果你是新会话，读完这一页就知道该干什么。
 
@@ -17,8 +17,8 @@ Gradle 也完整入库（`build.gradle.kts` / `gradlew` / `gradle/wrapper/`）�
 
 **规模**（2026-11-02 实测，`wc -l` 口径）：
 ```
-生产代码   src/main/java/.../neovidecursor/   37 文件 / 21,342 行
-探针       tools/settings-probe/*.java        131 文件 / 33,487 行（116 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/   37 文件 / 21,412 行
+探针       tools/settings-probe/*.java        132 文件 / 34,440 行（117 个 V*.java）
 基准程序   tools/bench/Bench*.java            16 个
 ```
 
