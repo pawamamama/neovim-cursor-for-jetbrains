@@ -1137,3 +1137,63 @@ glowWidth = 0.6 × 33.6 = 20.16 px          ← 半径
 届时本条要给新的基线，不能沿用旧数字。
 
 **优先级**：待核实（未排期）。
+
+---
+
+## BUG-016 补全候选弹窗打开时拖尾闪烁、短跳变短、辉光瞬灭（**待定位，2026-11-03 用户报**）
+
+**用户报（原话）**：
+
+> 有候选词输入时候（触发条件为 tab 补全或者 private 那种上边有框框的候选），
+> 打字手感变得很闪一闪一闪的动画帧不流畅，辉光最明显了（淡入淡出类似消失），
+> 其次是纯平滑输入（影响小），短跳动画变短，退化成了我们上游 fork 之前的手感。
+
+**环境**：Windows 11 · IDEA 2026.1（build 261）· 插件 0.9.127（读 jar 内
+`META-INF/plugin.xml` 实测，不认文件名）。
+
+**触发条件**：
+
+- 代码补全 lookup 弹窗打开时（自动弹出 `private` 候选，或 Tab 补全）；
+- 在弹窗打开期间继续输入 / 删除 / 接受候选；
+- 关闭弹窗后手感恢复。
+
+**已知代码事实（不是根因，只是排查起点）**：
+
+- 每帧 `dt = min(rawDt, MAX_DT = 50ms)`；`recovery = rawDt > 100ms`。
+  见 `CaretAnimator.tick()`。
+- `MAX_DT` 的注释要求它 ≥ `MAX_ADAPTIVE_DELAY_MS = 40ms`，否则调度器交付的
+  33~40ms 间隔会被物理步长丢掉，累计成慢放。
+- `recovery` 分支：`rawDt ≤ RECOVERY_STEP_CAP_SECONDS` 时按 8ms 一帧推进；
+  更长则一次性归位。
+- `DampedSpring.update(dt)` 首句 `animationLength <= dt` 直接归零 —— 一帧到位。
+- 辉光 `GlowIntensity.advanceTrailGlow(...)` 每帧最多下降
+  `dt / fadeOutSeconds`；`dt` 变大会让单帧降幅成倍增加。
+- 诊断：`diagLogging` 打开后 `[tick]` 行含
+  `rawDt / dt / recovery / dispatchLag / cost / note`，落点
+  `<log>/neovide-cursor-diag-<pid>.log`。取证链路见 `docs/BUG-LOG.md §BUG-007`。
+
+**待验证假设（按优先级；先取证再改代码）**：
+
+- **H1（最可能）**：弹窗期间 EDT 交付间隔变大，落在 20~100ms 的「中间地带」——
+  `recovery` 不触发，`dt` 被放大到 2~6 倍；短跳弹簧一帧走完，辉光一帧掉一大截。
+  证据：`[tick]` 的 `rawDt` / `dispatchLag` 在弹窗打开时显著大于关闭时。
+- **H2**：弹窗触发额外 caret 事件 / `forceResync` / `lastMoveNanos` 重置，
+  拖尾反复从零开始。证据：`[evt]` 事件在弹窗打开时激增；caret offset 未变但事件频繁。
+- **H3**：弹窗/重绘导致覆盖层被清空或降频（`isShowing` / hidden tier / adaptive delay）。
+  证据：`[tick]` 的 `note=not-showing`、`[clear]` 原因、`delayMs` / `measuredFps`。
+- **H4**：弹窗绘制与覆盖层重绘冲突（Swing 子组件层级 / 裁剪）。
+  证据：`[paint]`、脏区、闪烁位置与弹窗位置相关。
+
+**取证步骤**：
+
+1. 设置 → 调试 → 勾选「诊断日志」。
+2. 输入 `priv` 触发 `private` 候选；保持弹窗，继续输入/删除 20 次；
+   按 Tab 接受候选；关闭弹窗，重复同样序列作为对照。
+3. 对比日志：`rawDt` / `dt` / `recovery` / `dispatchLag` 的 P50、P95、max；
+   `note` / `delayMs` / `measuredFps`。
+4. 把对比表回填到本节；结论未出之前不要改生产代码。
+
+**优先级**：高（用户可见的打字手感回归）。**状态**：待定位。
+
+**修复提示词**：[PROMPT-BUG-016-2026-11-03.md](PROMPT-BUG-016-2026-11-03.md)
+（自包含，可整段粘贴给执行会话）。
