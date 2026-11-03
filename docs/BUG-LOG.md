@@ -1193,7 +1193,71 @@ glowWidth = 0.6 × 33.6 = 20.16 px          ← 半径
    `note` / `delayMs` / `measuredFps`。
 4. 把对比表回填到本节；结论未出之前不要改生产代码。
 
-**优先级**：高（用户可见的打字手感回归）。**状态**：待定位。
+**优先级**：高（用户可见的打字手感回归）。**状态**：根因已确认（**关闭常驻刷新**后的空闲/自适应档），两个伴生缺陷已修。
+
+### 2026-11-03 实机确认：关闭「常驻刷新」才会出现删除延迟
+
+用户最终确认（同一 jar、同一预设，只切 Tools →「Neovide 光标：常驻刷新」）：
+
+```
+常驻刷新 开  → 删除 / 打字 丝滑
+常驻刷新 关  → 删除出现「文字先消失、光标随后才跟上」
+```
+
+即：延迟是 **非常驻（空闲 / 自适应档）路径**的代价，不是预设参数，也不是
+「144fps 占满 EDT」。**此前把方向记反了，这里更正。**
+
+**为什么关掉会延迟（代码事实）**：
+
+1. `alwaysHighFps=false` 时 `computeNextDelayNs(active=false)` 把调度间隔设成
+   空闲档：聚焦 120ms / 失焦 600ms（`CaretAnimator` 的 `IDLE_DELAY_MS` /
+   `IDLE_UNFOCUSED_DELAY_MS`）。
+2. 击键后 `wakeUp()` 会置 `nextDueNanos=now` 并打断调度线程，理论上应立刻投递；
+   但恢复后的间隔走自适应 `smoothedIntervalMs × 0.85`，上限 40ms
+   （`MAX_ADAPTIVE_DELAY_MS`）。空闲帧（120/600ms）会把平滑值喂大；若复位
+   时机没覆盖到，打字期间会以 20~40ms/帧推进 —— 100ms 的短跳只剩 3~5 帧，
+   观感就是「光标落后、随后追上」。
+3. 空闲超过 100ms 后的第一帧还会进 `recovery`：dt 被强制成 8ms，动画时钟慢于
+   墙钟，进一步放大「落后」。
+
+**给「常驻刷新」那个会话的落点（方向已更正）**：
+- 目标路径是 `alwaysHighFps=false`：`wakeUp()` 的 `fromIdleTier` 复位是否覆盖
+  「空闲档 → 活跃档」的所有入口（隐藏切回、失焦切回、首次击键）；
+  `computeNextDelayNs` 的自适应是否应在击键后强制回到 `ACTIVE_DELAY` 若干帧。
+- 观感目标：关掉常驻刷新时，按键后的第一帧仍在 ~8ms 内交付，且接下来十几帧
+  保持活跃档，而不是立刻被 40ms 上限拖慢。
+- 不要动的：`alwaysHighFps=true` 路径（用户确认丝滑）。
+- 相关日志：`[tick]` 的 `delayMs`（空闲档是 120）/ `rawDt` / `recovery`；
+  `[boot]` 行的 `alwaysHighFps`。
+
+**附带更正的旧结论**：
+- 0.9.128 期间的「更差」主要是 attempt-1 的「目标变化帧限速」（已整体回退），
+  不是常驻刷新；
+- `install.ps1` 备份时机修复仍然有效（避免退出前的旧快照覆盖），但它不是
+  本次删除延迟的原因。
+
+### 两个伴生缺陷（2026-11-03 已修，分支 `fix/bug-016-completion-flicker`）
+
+1. **跨行分支前缘时长没有下限**（`TrailCorner.jump()`）：
+   `trailSize=1.0` 时 `leading = animationLength × (1 - trailSize)` 精确为 0，
+   `DampedSpring.update()` 首句 `animationLength <= dt` 命中 → 前缘每帧瞬移。
+   而 `charsMoved` 是帧间累计量（`SpringTrail.updateCharsMoved`），一帧落进 4+
+   次击键（连打、删词、帧稀疏合并）就越过 `typingMaxChars(3)` → 误切跨行分支
+   → 「同一个按键，这次有拖尾、下次没有」。
+   修法：`leading = max(leading, shortAnimationLength × 0.5)`（移植自
+   `claude/typing-jitter-fix-6c8c96`，commit c13f517），面板文案同步注明「已触底」。
+   守门探针 `VTypingSpan`（5 条）。
+
+2. **旧像素被缓存固化**（`CaretAnimator.refreshTargetInReadAction`）：
+   同一帧里先 `visualPositionToXY(cvp)` 读像素、再 `markAt(line, col, stamp)`。
+   若平台在文档修改后的第一帧仍返回旧像素，缓存会记住「新位置 + 旧像素」，
+   下一帧走快速路径早退 → 覆盖层停在旧位置，直到下一次编辑。
+   修法：文档戳本帧变过 → 记入 `recheckNextFrame`，下一帧强制再走一次慢路径
+   （`recheckThisFrame.contains(trail)`）。守门探针 `VMultiCursorFix` S6：
+   S6-1 断言「戳变化的帧必须登记复查」；S6-2 断言复查后目标点纠正。
+   **覆盖边界（如实记录）**：离线假编辑器里 `cameraTrail` 的缓存标记与实际
+   活动 trail 不同步，S6-2 在「去掉 contains」的变异下仍会因顶层慢路径而通过；
+   它守的是最终位置，不是「快速路径分支」本身。快速路径分支目前只有代码审查证据。
 
 **修复提示词**：[PROMPT-BUG-016-2026-11-03.md](PROMPT-BUG-016-2026-11-03.md)
 （自包含，可整段粘贴给执行会话）。

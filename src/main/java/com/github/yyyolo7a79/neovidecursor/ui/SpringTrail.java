@@ -120,6 +120,17 @@ final class SpringTrail {
     }
 
     /**
+     * 上一次 {@link #markAt} 记下的文档修改戳（{@link Long#MIN_VALUE} = 从未记录）。
+     *
+     * <p>【BUG-016-2】{@code CaretAnimator} 用它判断「这一帧的像素坐标是不是在
+     * 文档刚改过之后读的」—— 平台布局可能晚一帧，此时读到的 x/y 还是旧值。
+     * 只看 {@link #isAt} 不够：行/列/戳三者相等并不能证明像素已经更新。
+     */
+    long lastStamp() {
+        return lastStamp;
+    }
+
+    /**
      * 更新「上一个字符偏移」，返回本次移动了几个字符。
      *
      * @param caretOffset 当前 caret 的文档偏移；负值表示不可用

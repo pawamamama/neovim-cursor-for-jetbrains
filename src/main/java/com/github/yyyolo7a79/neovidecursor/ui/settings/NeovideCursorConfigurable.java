@@ -266,12 +266,16 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p><b>为什么必须解释</b>：这个参数的效果极强但完全没有文案。
      * 它在跨行分支里决定 {@code leading = animationLength × (1 - trailSize)}：
      * <pre>
-     *   trailSize = 1.0 → leading = 0 → 前缘两角【瞬时吸附】，只有后缘拖出缎带
+     *   trailSize = 1.0 → 公式算出 0 → 前缘两角【几乎瞬时吸附】，只有后缘拖出缎带
      *   trailSize = 0.5 → leading = 半个 animationLength → 前缘也开始拖
      *   trailSize = 0.0 → leading = 满 animationLength → 前后缘等速，缎带消失
      * </pre>
-     * 用户把滑块推到 1.0 会看到「前缘瞬间到位、后缘拉很长」这种不规则四边形 ——
+     * 用户把滑块推到 1.0 会看到「前缘几乎贴死、后缘拉很长」这种不规则四边形 ——
      * 那正是缎带效果的核心，但没有文案的话会被当成 bug（「怎么一边是硬的」）。
+     *
+     * <p><b>0.9.90 起有下限</b>：公式算出 0 时实际取 {@code 短动画时长 × 0.5}（默认 55ms）。
+     * 加下限是因为连打时 charsMoved 偶尔累积到 4 会误切跨行分支，
+     * 而那一刻前缘为 0 就变成每帧瞬移 → 拖尾长度忽有忽无。见 {@code TrailCorner.jump()}。
      */
     private static final String W_TRAIL_SIZE =
             NeovideCursorBundle.message("settings.comment.trailSize");
@@ -3414,7 +3418,14 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         }
         if (crossMoveHint != null) {
             long trailing = Math.round(pending.animationLength * 1000f);
-            long leading = Math.round(pending.animationLength * 1000f * (1f - pending.trailSize));
+            // 【0.9.90】与 TrailCorner.jump() 的跨行分支逐字同源：
+            // leading = animationLength × (1 - trailSize)，再取 shortAnimationLength × 0.5 为下限。
+            // 加了下限后 trailSize=1.0 时前缘不再是「第 1 帧即到位」，而是 55ms ——
+            // 面板必须如实报出来，否则又是一次「文案撒谎」（VTextFacts 守的就是这类）。
+            float rawLeading = pending.animationLength * (1f - pending.trailSize);
+            float floorLeading = pending.shortAnimationLength * 0.5f;
+            boolean floored = rawLeading < floorLeading;
+            long leading = Math.round(Math.max(rawLeading, floorLeading) * 1000f);
             // t6 / t10-(R-19)：这里报的是 DampedSpring 的【时间常数】（= 参数值本身），
             // 不是「运动做完」的墙钟时长。
             //
@@ -3425,15 +3436,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //
             // 【为什么不直接乘一个系数】那是新的写死数字，需要在多处同步维护，
             // 下一轮审查必然再抓一次。改成「说明它是时间常数」既准确又零新常量。
-            // 【0.9.72 修正：原文写「为 1.00 时前缘为 0」，不准确】
             //
-            // 实测（VTextFacts 的 T-2）：trailSize=1.0 时前缘是 **1 帧 = 8ms**，不是 0。
-            // 原因是 DampedSpring.update() 首句 if (animationLength <= dt) 归零 ——
-            // leading=0 时第一帧（dt=8ms）就命中短路，但那已经消耗了一帧。
-            // 任何角点至少要跑一帧才会被判为「静止」，所以 0ms 在物理上不存在。
-            String leadText = (leading <= 0)
-                    ? NeovideCursorBundle.message("settings.hint.leadFirstFrame")
-                    : leading + " ms";
+            // 【0.9.90】前缘已加下限（shortAnimationLength × 0.5），
+            // 所以 trailSize=1.0 时前缘是 55ms 而不是 0/8ms —— 见 TrailCorner.jump()。
+            // 命中下限时文案要点明「这是下限，不是 trailSize 算出来的值」，
+            // 否则用户拖着拖尾密度发现前缘纹丝不动，会以为滑块坏了。
+            String leadText = leading + " ms";
+            String floorNote = floored
+                    ? NeovideCursorBundle.message("settings.hint.crossMoveFloor")
+                    : "";
             // 【P11 面板重构 2026-10-31】这里的两个 hint 是**普通 JLabel**，
             // 不是 DslLabel：
             //   · 普通 JLabel 只有在字符串以 <html> 开头时才走 HTML 渲染，
@@ -3444,7 +3455,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             crossMoveHint.setText("<html>" + NeovideCursorBundle.message(
                     "settings.hint.crossMove",
                     Long.toString(trailing), leadText,
-                    String.format(Locale.ROOT, "%.2f", pending.trailSize)) + "</html>");
+                    String.format(Locale.ROOT, "%.2f", pending.trailSize),
+                    floorNote) + "</html>");
         }
         // 拉伸强度那一行的数值标签里也带派生时长 → 一并刷新
         for (SliderBinding b : bindings) {

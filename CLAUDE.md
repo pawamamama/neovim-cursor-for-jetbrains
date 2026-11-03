@@ -64,7 +64,7 @@ do not hold back on token usage.
 
 ```
 生产代码   src/main/java/.../neovidecursor/    37 文件 / 21,412 行
-探针       tools/settings-probe/*.java        132 文件 / 34,440 行（117 个 V*.java）
+探针       tools/settings-probe/*.java        133 文件 / 34,669 行（118 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
 
@@ -103,7 +103,7 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
 工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
 D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         117 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap / VI18n / VInputCommit / VFadeTick / VFadePreview / VMultiCursorFix）/ **114 个注册探针 ALL PASS（0 失败；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9）**
+探针         118 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap / VI18n / VInputCommit / VFadeTick / VFadePreview / VMultiCursorFix / VTypingSpan）/ **115 个注册探针 ALL PASS（0 失败；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9 / VTypingSpan 5）**
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）

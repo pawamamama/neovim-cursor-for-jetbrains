@@ -31,8 +31,11 @@ import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -521,6 +524,27 @@ public class CaretAnimator implements Disposable, CaretListener {
      */
     private final java.util.IdentityHashMap<SpringTrail, GlowState> glowStates =
             new java.util.IdentityHashMap<>();
+
+    /**
+     * 【BUG-016-2】本帧强制走一次慢路径的 trail —— 用来纠正「文档刚改过、
+     * 平台像素坐标还没更新」的那一帧。
+     *
+     * <p>问题：{@code refreshTarget} 在同一个慢路径里先 {@code visualPositionToXY(cvp)}
+     * 读像素、再 {@code markAt(line, column, stamp)} 记账。若平台在文档修改后的
+     * 第一帧仍返回**旧像素**，缓存就会记住「新行列 + 新戳」，下一帧走快速路径
+     * 直接早退 —— 覆盖层停在旧位置，直到下一次编辑（删除时表现为
+     * 「字先消失，光标随后才跟上，甚至要等下一个按键」）。
+     *
+     * <p>修法：文档戳在本帧变过 → 记进 {@link #recheckNextFrame}，下一帧无条件
+     * 再走一次慢路径。第二帧戳已相等，不会重复登记，最多多算一帧。
+     *
+     * <p>{@code recheckThisFrame} 是「本帧生效」的那一份：tick 开头把上一帧的
+     * pending 集合搬过来再清空；只在 EDT 上访问，无需并发容器。
+     */
+    private final Set<SpringTrail> recheckThisFrame =
+            Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Set<SpringTrail> recheckNextFrame =
+            Collections.newSetFromMap(new IdentityHashMap<>());
 
     /** 一个拖尾的辉光状态：当前亮度 + 最后一次移动的时刻。 */
     private static final class GlowState {
@@ -1481,6 +1505,11 @@ public class CaretAnimator implements Disposable, CaretListener {
         }
         lastTickNanos = now;
 
+        // 【BUG-016-2】把上一帧登记的「需要复查」搬进本帧生效集合，再清空 pending。
+        // 必须在 refreshTarget 之前做。
+        recheckThisFrame.clear();
+        recheckThisFrame.addAll(recheckNextFrame);
+        recheckNextFrame.clear();
         boolean moved = refreshTarget(now);
 
         // 多光标：只要没有任何活跃拖尾就退出（等价于旧的 !initialized）
@@ -2428,9 +2457,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                         || fontScaleChanged
                         || inlayChanged
                         || !trail.isInitialized()
-                        || !trail.isAt(cvp.line, cvp.column, stamp);
+                        || !trail.isAt(cvp.line, cvp.column, stamp)
+                        // 【BUG-016-2】上一帧文档刚改过：像素可能是旧的，强制复查一次
+                        || recheckThisFrame.contains(trail);
 
                 if (needsUpdate) {
+                    long stampBefore = trail.lastStamp();
                     Point cp = editor.visualPositionToXY(cvp);
                     trail.markAt(cvp.line, cvp.column, stamp);
                     // 【U-M-7 守门】探针在「戳已标、目标几何还没算」的这一刻注入一次异常。
@@ -2501,6 +2533,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                         // 而不是从「拖尾收拢」起算（那是 0.9.125「停下才暗」的根因）。
                         glowStates.computeIfAbsent(trail, k -> new GlowState()).lastMoveNanos = now;
                         changed = true;
+                    }
+                    // 【BUG-016-2】本帧的像素是在文档刚改过之后读的：平台布局可能
+                    // 晚一帧，visualPositionToXY 仍返回旧坐标。本帧照常记账，
+                    // 下一帧强制再走一次慢路径把目标点纠正过来。
+                    if (stampBefore != stamp) {
+                        recheckNextFrame.add(trail);
                     }
                 } else {
                     // 目标没变，但仍要把字符移动量清零，避免上一帧的值残留

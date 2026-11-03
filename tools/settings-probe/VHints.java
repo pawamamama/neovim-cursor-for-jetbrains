@@ -72,10 +72,18 @@ public final class VHints {
                 single0.contains(leadMs + " ms"), single0);
         check("H-4 跨行提示含 animationLength 的毫秒数（100）",
                 cross0.contains("100 ms"), cross0);
-        check("H-5 trailSize=1.00 时前缘为 0 ms",
-                cross0.contains("0 ms"), cross0);
+        // 【0.9.90 改方向】trailSize=1.0 时前缘不再是 0 ms：
+        // TrailCorner.jump() 已加下限 max(leading, shortAnimationLength × 0.5) = 0.11 × 0.5 = 55 ms。
+        // 面板必须报出这个下限值并注明「触底」，否则用户拖滑块会觉得前缘没反应。
+        long floorMs0 = Math.round(0.11f * 1000f * 0.5f);
+        check("H-5 trailSize=1.00 时跨行提示的前缘 = 下限量 " + floorMs0 + " ms 且注明触底",
+                cross0.contains(floorMs0 + " ms") && cross0.contains("触底"), cross0);
 
         // 改 animationLength → 跨行提示必须变
+        //
+        // 【索引错误修正】原来用 idxAnim = 8 = cursorHeightRatio（见 VUi.KEYS），
+        // 所以这一 "改 animationLength" 实际什么都没改到，H-6 一直靠
+        // 面板状态差异蒙对/蒙错。按字段名取才是对的（VUi.sliderByKey）。
         conf.reset();
         ui = VUi.build(conf);
         // 【2026-10-28 修索引契约】原来写死 `int idxAnim = 8; ui.sliders.get(idxAnim)`。

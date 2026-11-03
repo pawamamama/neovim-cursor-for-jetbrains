@@ -265,7 +265,15 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 会塌成一个，两个槽位共用一条 SpringTrail。
         # T-1 key 稳定 / T-2 maxOffset 收敛 / T-3 辉光隔离 / T-4 数量守恒 / T-5 单光标回归。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
-        'VMultiCursorFix')
+        'VMultiCursorFix',
+        # ============ 0.9.90：连打时拖尾长度跳变 ============
+        # charsMoved 是帧间累计量，8ms 帧下偶尔一帧落进 4+ 次击键就越过
+        # typingMaxChars(3) → 误切跨行分支；而 trailSize=1.0 让 leading 精确为 0
+        # → DampedSpring 每帧瞬移 → 同一个按键「这次有拖尾、下次没有」。
+        # 修法：跨行分支的 leading 加下限 shortAnimationLength × 0.5。
+        # VTypingSpan 守五条：下限真的生效 / charsMoved=1..6 的极差 ≤3 倍 /
+        # 真跨行梯度还在 / 短跳分支逐位不变 / 下限不超过后缘。
+        'VTypingSpan')
         # ↑ 数组到此闭合（这个右括号 0.9.83 之后一直缺失，
         #   整份脚本从那时起就 ParseError，从未真正执行过 —— 详见审计报告）。
 # VSlopeMigration 锁 0.9.81 斜度默认值变更的迁移：

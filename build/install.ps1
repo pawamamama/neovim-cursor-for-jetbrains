@@ -13,10 +13,15 @@
     0) 读出当前个人配置，打印备份/丢弃清单（-DryRun 到此结束）
     1) 编译 + 打包（调 offline-build.ps1）
     2) 关闭 IDEA
+    2b) 【备份】IDEA 退出后重新读一遍设置 XML 并落盘备份
+        （退出时 IDEA 才把内存状态写回 XML；退出前读会拿到旧值）
     3) 【干净安装】清空插件 lib 目录 + 删除设置 XML + 删除诊断日志
     4) 拷贝新 jar
     5) 自检 jar 内版本号 → 把个人配置写回一份新 XML
     6) 启动 IDEA
+
+  注意「全量还原」的准确含义：XML 里出现的 `<option>` 全部还原。
+  等于默认值的字段本来就不会被 IntelliJ 写进文件，所以文件里没有 ≠ 脚本漏了。
 
   为什么还要「干净安装」（用户 2026-10-25 要求）：
     排障期间反复出现「设置文件只剩 3 个字段」「tailOpacity 停在 0.05」这类
@@ -221,24 +226,10 @@ if ($DryRun) {
     exit 0
 }
 
-if ($personal.Count -gt 0) {
-    New-Item -ItemType Directory -Force -Path $cfgBackupDir | Out-Null
-    $snapshot = [ordered]@{
-        savedAt = (Get-Date).ToString('s')
-        version = $Version
-        structureFingerprint = $fieldCount
-        dropped = $dropFields
-        options = $personal
-    }
-    $jsonFile = Join-Path $cfgBackupDir "personal-state-$stamp.json"
-    $snapshot | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonFile -Encoding UTF8
-    Write-Host "  备份已存：$jsonFile"
-    # 同时留一份原始 XML：万一上面「字段→值」的提取逻辑本身有问题，还能手工回滚
-    if (Test-Path -LiteralPath $settingsXml) {
-        Copy-Item -LiteralPath $settingsXml -Destination (Join-Path $cfgBackupDir "NeovideCursorSettings-$stamp.xml") -Force
-    }
-    Set-Content -LiteralPath $lastStampFile -Value ([string]$fieldCount) -Encoding UTF8
-}
+# 【2026-11-03 修复】真正的备份落在「关闭 IDEA 之后」（见步骤 2 末尾）。
+# 原来在这里（步骤 0，IDEA 还活着）就把 XML 抄下来，而 IDEA 退出时才把内存状态
+# 写回文件 —— 于是「刚改过、还没落盘」的设置会被装回上一次落盘的旧值。
+# 这里只展示计划，不落任何备份文件。
 
 # ==================== 1. 编译打包 ====================
 Write-Host "`n========== 1/6 编译打包 =========="
@@ -265,6 +256,39 @@ if ($ide) {
     Write-Host "  已关闭"
 } else {
     Write-Host "  IDEA 未运行"
+}
+
+# ==================== 2b. 备份个人配置（必须在 IDEA 退出之后） ====================
+#
+# 【2026-11-03 修复：备份时机】
+# IDEA 把设置写回 XML 的时机是「退出时」（PersistentStateComponent）。
+# 原实现在步骤 0（IDEA 还开着）读 XML，随后关闭 IDEA、删除 XML、再把旧快照写回，
+# 等于用「上一次落盘的旧值」覆盖「退出前刚改过的新值」。
+# 现在统一在这里读：此时文件已包含 IDEA 退出前的最终状态。
+# DryRun 在第 0 步就退出了，走不到这里。
+$beforeClose = $personal
+$personal = Read-PersonalOptions -XmlPath $settingsXml -Drop $dropFields
+if ($beforeClose.Count -ne $personal.Count) {
+    Write-Host "  IDEA 退出后配置字段数变化：$($beforeClose.Count) → $($personal.Count)，以退出后的文件为准"
+}
+
+if ($personal.Count -gt 0) {
+    New-Item -ItemType Directory -Force -Path $cfgBackupDir | Out-Null
+    $snapshot = [ordered]@{
+        savedAt = (Get-Date).ToString('s')
+        version = $Version
+        structureFingerprint = $fieldCount
+        dropped = $dropFields
+        options = $personal
+    }
+    $jsonFile = Join-Path $cfgBackupDir "personal-state-$stamp.json"
+    $snapshot | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $jsonFile -Encoding UTF8
+    Write-Host "  备份已存（IDEA 退出后）：$jsonFile（$($personal.Count) 个字段）"
+    # 同时留一份原始 XML：万一「字段→值」的提取逻辑本身有问题，还能手工回滚
+    if (Test-Path -LiteralPath $settingsXml) {
+        Copy-Item -LiteralPath $settingsXml -Destination (Join-Path $cfgBackupDir "NeovideCursorSettings-$stamp.xml") -Force
+    }
+    Set-Content -LiteralPath $lastStampFile -Value ([string]$fieldCount) -Encoding UTF8
 }
 
 # ==================== 3. 干净安装：清空旧状态 ====================

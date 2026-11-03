@@ -108,6 +108,7 @@ public final class VMultiCursorFix {
         scenarioS3();
         scenarioS4();
         scenarioS5();
+        scenarioS6();
 
         System.out.println();
         System.out.printf("=== V-MULTICURSOR-FIX 结果：PASS %d，FAIL %d ===%n", pass, fail);
@@ -391,6 +392,53 @@ public final class VMultiCursorFix {
         h.dispose();
     }
 
+    // ================================================================ S6
+
+    /**
+     * S6：【BUG-016-2】文档刚改过时，平台可能仍返回旧像素坐标。
+     *
+     * <p>{@code refreshTarget} 在同一帧里「读像素 → markAt(新行列/新戳)」。
+     * 若这一帧读到的是旧像素，缓存会把「新位置 + 旧像素」固化，下一帧走快速
+     * 路径早退 —— 覆盖层停在旧位置，直到下一次编辑（删除时就是「字先消失、
+     * 光标随后才跟上，甚至要等下一个按键」）。
+     *
+     * <p>守的契约：编辑后的**下一帧**必须自动纠正目标点，不依赖下一次按键。
+     * 修法见 {@code CaretAnimator.recheckNextFrame}。
+     */
+    private static void scenarioS6() throws Exception {
+        System.out.println();
+        System.out.println("--- S6：编辑首帧拿到旧像素时，下一帧必须自动纠正 ---");
+
+        Harness h = new Harness();
+        h.addCaret(0);
+        h.frame(true);                                  // 首次定位
+
+        List<Object> active = h.activeTrails();
+        double w = active.isEmpty() ? 0 : h.widthOf(active.get(0));
+        Object trail = active.isEmpty() ? null : active.get(0);
+
+        // 光标右移一列 + 文档戳变化；首帧像素读取返回旧的列 0
+        h.slots.get(0).offset = 1;
+        h.stampValue++;
+        h.staleVisualOnce = new Point(BASE_X, BASE_Y);
+        h.refreshOnly();                                // 慢路径：读旧像素 + 登记复查
+
+        check("S6-1 文档戳变化的帧必须登记「下一帧复查」",
+                trail != null && h.recheckNextContains(trail),
+                "recheckNext=" + h.recheckNextSize());
+
+        h.rotateRecheck();                              // 复刻 tick() 的两行
+        h.refreshOnly();                                // 被强制复查 → 纠正目标
+
+        double cx = trail == null ? Double.NaN : h.centerXOf(trail);
+        double expect = BASE_X + 1 * CHAR_W + w / 2.0;
+        check("S6-2 复查帧把目标点纠正到新列（不被旧像素固化）",
+                Math.abs(cx - expect) < 0.6,
+                String.format("cx=%.1f 期望 %.1f（停在 51.0 说明快速路径把旧像素固化了）",
+                        cx, expect));
+        h.dispose();
+    }
+
     // ================================================================ Harness
 
     /** 一个可变的假编辑器 + 真实 CaretAnimator。 */
@@ -413,6 +461,12 @@ public final class VMultiCursorFix {
          * 生产里墙钟与 dt 同步，探针必须自己让时钟同步推进。
          */
         long clockNanos = System.nanoTime();
+
+        /** 【BUG-016-2】可变的文档修改戳：模拟一次编辑。 */
+        long stampValue = 12345L;
+
+        /** 【BUG-016-2】下一次 {@code visualPositionToXY} 返回的旧像素；非 null 时消费一次。 */
+        Point staleVisualOnce = null;
 
         Harness() throws Exception {
             Document doc = fakeDocument();
@@ -549,6 +603,40 @@ public final class VMultiCursorFix {
             tickSpringMethod.invoke(animator, 0.008, clockNanos);
         }
 
+        /** 只跑 refreshTarget（不推进弹簧）—— S6 需要精确控制「上一帧/复查帧」。 */
+        void refreshOnly() throws Exception {
+            clockNanos += 8_000_000L;
+            refreshMethod.invoke(animator, clockNanos);
+        }
+
+        @SuppressWarnings("unchecked")
+        private java.util.Set<Object> recheckSet(String name) {
+            try {
+                Field f = CaretAnimator.class.getDeclaredField(name);
+                f.setAccessible(true);
+                return (java.util.Set<Object>) f.get(animator);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        boolean recheckNextContains(Object trail) {
+            return recheckSet("recheckNextFrame").contains(trail);
+        }
+
+        int recheckNextSize() {
+            return recheckSet("recheckNextFrame").size();
+        }
+
+        /** 复刻 tick() 开头那两行：pending → 本帧生效集合并清空 pending。 */
+        void rotateRecheck() {
+            java.util.Set<Object> next = recheckSet("recheckNextFrame");
+            java.util.Set<Object> cur = recheckSet("recheckThisFrame");
+            cur.clear();
+            cur.addAll(next);
+            next.clear();
+        }
+
         // ---- 读取生产状态 ----
 
         List<Caret> snapshotCarets() {
@@ -663,7 +751,7 @@ public final class VMultiCursorFix {
                             case "getTextLength":
                                 return textLength;
                             case "getModificationStamp":
-                                return 12345L;
+                                return stampValue;
                             case "toString":
                                 return "FakeDocument";
                             case "hashCode":
@@ -741,6 +829,11 @@ public final class VMultiCursorFix {
 
         private Editor fakeEditor(Document doc, CaretModel model, SelectionModel selection) {
             JComponent content = new JComponent() { };
+            // 【BUG-016-2 / S6】必须给一个稳定的尺寸：默认 0x0 时，
+            // tick() 里「panel 尺寸 != content 尺寸」每一帧都成立 → 每帧都置
+            // forceResync → 每帧都走慢路径，S6 就测不到「快速路径把旧像素固化」
+            // 这个真缺陷（假通过）。
+            content.setSize(2000, 500);
             content.setSize(900, 700);
             InlayModel inlayModel = (InlayModel) Proxy.newProxyInstance(
                     VMultiCursorFix.class.getClassLoader(),
@@ -783,6 +876,13 @@ public final class VMultiCursorFix {
                             case "isDisposed":
                                 return false;
                             case "visualPositionToXY": {
+                                // 【BUG-016-2】模拟「文档刚改过、平台布局晚一帧」：
+                                // 消费一次旧像素，下一帧起恢复正常。
+                                if (staleVisualOnce != null) {
+                                    Point old = staleVisualOnce;
+                                    staleVisualOnce = null;
+                                    return old;
+                                }
                                 VisualPosition vp = (VisualPosition) args[0];
                                 return new Point(BASE_X + vp.column * CHAR_W,
                                         BASE_Y + vp.line * LINE_H);
