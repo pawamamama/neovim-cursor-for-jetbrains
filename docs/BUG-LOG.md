@@ -1238,7 +1238,7 @@ glowWidth = 0.6 × 33.6 = 20.16 px          ← 半径
 
 ### 两个伴生缺陷（2026-11-03 已修，分支 `fix/bug-016-completion-flicker`）
 
-1. **跨行分支前缘时长没有下限**（`TrailCorner.jump()`）：
+1. **跨行分支前缘时长没有下限**（`TrailCorner.jump()`）——**2026-11-03 Step C 已撤回**（见本节「Step C 实施结果」）：
    `trailSize=1.0` 时 `leading = animationLength × (1 - trailSize)` 精确为 0，
    `DampedSpring.update()` 首句 `animationLength <= dt` 命中 → 前缘每帧瞬移。
    而 `charsMoved` 是帧间累计量（`SpringTrail.updateCharsMoved`），一帧落进 4+
@@ -1259,5 +1259,103 @@ glowWidth = 0.6 × 33.6 = 20.16 px          ← 半径
    活动 trail 不同步，S6-2 在「去掉 contains」的变异下仍会因顶层慢路径而通过；
    它守的是最终位置，不是「快速路径分支」本身。快速路径分支目前只有代码审查证据。
 
+### 2026-11-03 Step C 取证：55ms 下限本身就是手感回归源（修复前证据）
+
+**结论（先给）**：`aeff707` 的 `leading = max(leading, shortAnimationLength × 0.5)`
+加在**真跨行与「同行误判成跨行」共用**的那支画笔上。真跨行前缘本该是 0ms
+（`trailSize=1.0` 时公式精确为 0，`DampedSpring.update()` 首句使其第一帧到位），
+下限把它抬到 55ms，于是三个内置预设的跨行缎带都被压窄。
+
+**代码事实（HEAD = aeff707）**：
+
+| 位置 | 内容 |
+|---|---|
+| `core/TrailCorner.java:368` | 原公式 `leading = animationLength × clamp(1 - trailSize, 0, 1)` |
+| `core/TrailCorner.java:393` | `leading = Math.max(leading, config.shortAnimationLength * 0.5)` |
+| `core/TrailCorner.java:256-257` | 判据 `sameLine = \|deltaYpx\| ≤ height × 0.5`；`isShortJump = sameLine && charsMoved ≤ typingMaxChars` |
+| `ui/settings/NeovideCursorConfigurable.java:3426-3428` | 面板同源下限 `floorLeading` / `floored` / `Math.max` |
+| `resources/messages/…properties:128` | `settings.hint.crossMoveFloor`（中英各一条） |
+
+**触发范围**：`isShortJump` 为假就走跨行分支。除了 `deltaY > height/2` 的真跨行，
+**同一行内 `charsMoved ≥ 4` 也走这一支**（Step B 才修）；下限对这一支同样生效。
+
+**三个内置预设的实测参数**（`settings/CursorPresets.java:355/357/369`）：
+`animationLength` = 0.10 / 0.28 / 0.10 s，`shortAnimationLength` = 0.11 s，
+`trailSize` = 1.0（三者相同）。
+
+**跨行四角时长（rank0 = 后缘，rank1 = 中档，rank2/3 = 前缘）**：
+
+| 预设 | 有下限（现状 aeff707） | 无下限（0.9.127 / 恢复后） |
+|---|---|---|
+| 基础 | 100 / 77.5 / **55** / 55 ms | 100 / 50 / **0** / 0 ms |
+| 缎带 | 280 / 167.5 / **55** / 55 ms | 280 / 140 / **0** / 0 ms |
+| 纯平滑输入 | 100 / 77.5 / **55** / 55 ms | 100 / 50 / **0** / 0 ms |
+
+下限占后缘的比例：基础 / 纯平滑 **55%**，缎带 **19.6%** —— 这就是「短动画预设变化最大」。
+
+**实测（`VTypingSpan` 单跑，HEAD aeff707，`animationLength=0.10 / trailSize=1.0`）**：
+
+```
+charsMoved=1..3（短跳） 四角 = [0.0946, 0.0946, 0.0352, 0.0352]
+charsMoved=4..6（跨行） 四角 = [0.1000, 0.0775, 0.0550, 0.0550]   ← 前缘 55ms
+```
+
+恢复后 `charsMoved=4..6` 的 rank2/3 应为 `0.0000`（第一帧短路，观感 8ms 到位），
+rank0 仍为 `0.1000`（缎带 0.2800）。
+
+**为什么不能留在「共享分支」上**：固定时长下限按定义会同时改掉正常路径；
+真跨行 0ms 是缎带形状的来源，不是 bug。
+
+### 2026-11-03 Step C 实施结果（撤回 55ms 下限）
+
+**改了什么**（生产代码只有一条行为改动）：
+
+| 文件 | 改动 |
+|---|---|
+| `core/TrailCorner.java` | 删除 `leading = Math.max(leading, shortAnimationLength * 0.5)`；0.9.90 注释块改为「已撤回 / 误判留给 Step B」 |
+| `ui/settings/NeovideCursorConfigurable.java` | 恢复 `leading = animationLength × clamp(1 - trailSize)`（含 clamp，与生产逐字同源）；删 `floorLeading` / `floored` / `floorNote` |
+| `NeovideCursorBundle.properties` / `_zh_CN` | 恢复 `comment.trailSize` / `comment.animLenExtra` / `hint.crossMove`（去掉 `{3}` 与下限句）；删除 `hint.crossMoveFloor` |
+| `tools/settings-probe/VTypingSpan.java` | 契约恢复：T-1 改真跨行（垂直位移）前缘 = 0；T-2 拆 T-2a（短跳 1..3 逐位 = `shortAnimationLength × trailFactors`）/ T-2b（同行 4..6 走跨行分支，前缘 = 0，已知误判）；T-3/T-4/T-5 保留 |
+| `tools/settings-probe/VHints.java` | H-5 改为 `= 0 ms` 且不含「触底 / the floor」 |
+| `tools/settings-probe/VTextFacts.java` | T-2 恢复「前缘 ≤ 1 帧、后缘 ≥ 400ms」 |
+| `tools/settings-probe/build-v-probes.ps1` | 仅注册注释同步（不再把下限写成修法） |
+
+**四段验证（实跑）**：
+
+```
+① 红（只改探针、生产未动）
+   VTypingSpan  PASS 4 / FAIL 2（T-1、T-2b）
+   VHints       PASS 10 / FAIL 1（H-5）
+   VTextFacts   PASS 5 / FAIL 1（T-2）
+   V-PROBES RESULT: FAILED（3 个探针未通过）
+
+② 绿（改生产 + 文案后）
+   VTypingSpan 6/6、VHints 11/11、VTextFacts 6/6
+   V-PROBES RESULT: ALL PASS
+
+③ 变异红
+   A. 把 Math.max 加回 TrailCorner → VTypingSpan T-1/T-2b + VTextFacts T-2 红，VHints 仍绿
+   B. 只在面板加回下限 → 仅 VHints H-5 红（实际输出「前缘 = 55 ms」），其余全绿
+
+④ 恢复绿
+   V-PROBES RESULT: ALL PASS；D0 零 diff
+```
+
+**安装**：`build/install.ps1 -Version 0.9.131 -NoStart` 成功；jar 内版本 0.9.131；
+个人配置 15/15 字段还原、0 丢弃。**按「用户当前实际」还原**，实际为
+`stretchRatioK=2.0`、`animPresetBase=2`、`trailSize=0.2`（与任务书里的旧快照不同，
+不是丢失）。注意：`trailSize=0.2` 时 `leading = 0.10 × 0.8 = 80ms`，55ms 下限本来就不生效；
+要对比密度必须选 `trailSize=1.0` 的三个内置预设（基础 / 缎带 / 纯平滑输入）。
+
+**明确未修**：Step B（同行 `charsMoved ≥ 4` 误判）、A（补全弹窗闪烁）、D（删除延迟 / 常驻刷新）。
+**状态**：探针绿、已安装 0.9.131，**待用户实机验收**。
+
 **修复提示词**：[PROMPT-BUG-016-2026-11-03.md](PROMPT-BUG-016-2026-11-03.md)
 （自包含，可整段粘贴给执行会话）。
+
+**下一步交接（跨行拖尾手感回归）**：[HANDOFF-2026-11-03-BUG-016.md](HANDOFF-2026-11-03-BUG-016.md)
+—— 记录 `aeff707` 的前缘下限为什么让三个预设的跨行拖尾都变短，以及推荐改法
+（只给「同一行内的连打/删词」单独分支，真跨行保持 0ms 前缘）。
+
+**全天决策报告**：[DECISION-REPORT-2026-11-03.md](DECISION-REPORT-2026-11-03.md)
+—— 给决策会话的完整素材（attempt-1 否决证据、常驻刷新根因、两个缺陷、待决策项）。

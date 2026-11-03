@@ -72,12 +72,18 @@ public final class VHints {
                 single0.contains(leadMs + " ms"), single0);
         check("H-4 跨行提示含 animationLength 的毫秒数（100）",
                 cross0.contains("100 ms"), cross0);
-        // 【0.9.90 改方向】trailSize=1.0 时前缘不再是 0 ms：
-        // TrailCorner.jump() 已加下限 max(leading, shortAnimationLength × 0.5) = 0.11 × 0.5 = 55 ms。
-        // 面板必须报出这个下限值并注明「触底」，否则用户拖滑块会觉得前缘没反应。
-        long floorMs0 = Math.round(0.11f * 1000f * 0.5f);
-        check("H-5 trailSize=1.00 时跨行提示的前缘 = 下限量 " + floorMs0 + " ms 且注明触底",
-                cross0.contains(floorMs0 + " ms") && cross0.contains("触底"), cross0);
+        // 【Step C 契约恢复，非缺陷 —— 2026-11-03】55ms 下限已撤回：
+        // trailSize=1.0 时前缘 = animationLength × (1 - 1.0) = 0 ms。
+        // 面板必须如实报 0，并且不能再出现任何「已触底 / at the floor」话术。
+        //
+        // 断言用 "= 0 ms" 而不是裸的 "0 ms"：后者会被后缘的 "100 ms" 子串命中，
+        // 属于假通过（aeff707 之前那条 H-5 就是这样蒙对的）。
+        // 中英文模板都是「前缘 = {1}」/「leading = {1}」，两侧都含 "= 0 ms"。
+        check("H-5 trailSize=1.00 时跨行提示的前缘 = 0 ms 且不含触底话术",
+                cross0.contains("= 0 ms")
+                        && !cross0.contains("触底")
+                        && !cross0.contains("the floor"),
+                cross0);
 
         // 改 animationLength → 跨行提示必须变
         //

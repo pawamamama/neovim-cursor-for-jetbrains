@@ -367,30 +367,22 @@ public class TrailCorner {
             // 故严格保持原版逻辑不动。
             double leading = config.animationLength * clamp(1f - config.trailSize, 0f, 1f);
 
-            // 【0.9.90 修复：连打时拖尾长度跳变】给前缘时长加下限。
+            // 【跨行前缘的固定下限：2026-11-03 已撤回（Step C）】
             //
-            // 问题：trailSize=1.0 时 leading 精确为 0 → DampedSpring.update() 首句
-            //   if (animationLength <= dt) { position = 0; return false; }
-            // 命中，该角点每帧瞬移到位。而 charsMoved 是【帧间累计量】
-            // （SpringTrail.updateCharsMoved），8ms 帧下偶尔一帧落进 4+ 次击键就越过
-            // typingMaxChars(3) → 误切跨行分支 → 用户看到「这次有拖尾、下次没有」。
+            // 0.9.90 曾在这里加 `leading = max(leading, shortAnimationLength × 0.5)`，
+            // 想修「同一行连打时 charsMoved 偶尔累计到 4、越过 typingMaxChars(3)
+            // 误切跨行分支 → 前缘 0ms 每帧瞬移 → 拖尾忽有忽无」。
             //
-            // 为什么不改判据：见上方 :161-186 —— 三种像素判据都因字号耦合失败，
-            // 上游的 |jumpX| <= 8 在 2px 光标上等于 16px，中文一个字就踩线。
-            // 改判据的风险远大于收益。
+            // 为什么撤回：这一支同时服务【真跨行】与【同行误判】两种移动，而三个内置
+            // 预设 trailSize 都是 1.0 —— 原公式的 leading 精确为 0，那不是 bug，
+            // 是缎带形状的来源（前缘第一帧咬住新位置、后缘慢慢拖出）。
+            // 下限把它抬到 55ms，真跨行的前缘也一起变慢：
+            // 基础/纯平滑占后缘 55%、缎带占 20%，用户实机确认「跨行密度像没有了」。
+            // 证据与决策：docs/BUG-LOG.md §BUG-016、docs/HANDOFF-2026-11-03-BUG-016.md。
             //
-            // 为什么加下限是安全的：
-            //   · 短跳分支根本不走这段代码，零影响
-            //   · 真跨行（换行 / 大跳）从「瞬移」变成「稍快」，更接近自然过渡
-            //   · 只在「被误判成跨行」时起作用，把后果从「没有拖尾」降级为「拖尾略短」
-            //
-            // 系数 0.5 的依据：shortAnimationLength=0.11s → 下限 55ms，8ms 帧下约 7 帧，
-            // 肉眼能看出过渡；而短跳的 rank0 是 94.6ms，55ms 明显更快但不至于瞬移。
-            // 再大会拖慢真实换行时的响应。
-            //
-            // 面板的「跨行动画时长」提示按同一公式显示（NeovideCursorConfigurable:2439），
-            // 改这里的系数必须同步改那里，否则面板会报出 0ms 而实际是 55ms。
-            leading = Math.max(leading, config.shortAnimationLength * 0.5);
+            // 同行连打被误判成跨行的问题【仍然存在】（Step B 另修，判据不动）：
+            // 那一支走同一个公式，前缘同样是 0 —— 这是已知行为，不是本次引入的缺陷。
+            // 面板的「跨行动画时长」提示必须与本行同源：leading = animationLength × (1 - trailSize)。
             double trailing = config.animationLength;
             if (rank >= 2) {
                 animationLength = leading;

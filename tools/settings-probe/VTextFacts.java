@@ -36,28 +36,26 @@ public final class VTextFacts {
                 same(shortA, shortB),
                 "trailSize=1.0 → " + j(shortA) + "  trailSize=0.0 → " + j(shortB));
 
-        // ---------- T-2：文案说 trailSize=1.0 时跨行前缘「很快跟到位」----------
+        // ---------- T-2：文案说 trailSize=1.0 时跨行前缘「瞬间到位」----------
         //
         // 【探针第一版判据写错了，记下来】
         // 我原来断言 crossA[2] == 0.0，实测是 8ms 而非 0 —— 于是先怀疑代码。
         // 查 DampedSpring.update() 才明白：
         //     if (animationLength <= dt) { position = 0; return false; }
         // 当 leading = 0 时，**第一帧（dt=8ms）就命中短路归零**。
-        // 所以「前缘消耗 1 帧 = 8ms」是修正前的正确行为，0ms 是不可能的
+        // 所以「前缘消耗 1 帧 = 8ms」是正确行为，0ms 的墙钟时长不可能
         // —— 任何角点至少要跑一帧才会被判为「静止」。
         //
-        // 【0.9.90 改方向】前缘为 0/1 帧正是「连打时拖尾忽有忽无」的根因：
-        // 每帧瞬移意味着一旦 charsMoved 误判成跨行，这一跳就没有拖尾。
-        // 现在 TrailCorner.jump() 加了下限 max(leading, shortAnimationLength × 0.5) = 55ms，
-        // 所以断言从「≤1 帧」改成「明显长于 1 帧、但明显短于后缘」——
-        // 前者证明修复生效，后者证明没把前缘拖成和后缘一样长（缎带梯度还在）。
+        // 【Step C 契约恢复，非缺陷 —— 2026-11-03】0.9.90~0.9.130 这里被改成
+        // 「> 1 帧」以迁就 55ms 下限；下限撤回后恢复原断言：前缘 ≤ 1 帧、后缘 ≥ 400ms。
         //
-        // 注意不要断言 crossA[3]：VRank 实测纯横向移动时 rank 恒为 {0,2}，
-        // rank3 根本不存在（它的值恒为 0），断言它等于 0ms 是假通过。
+        // 注意 crossA[3] 在纯纵向移动下恒为 0（对齐度并列 → rank 只到 2，
+        // byRank[3] 永不赋值），所以它 <= 8 是弱断言，只作为「不会变长」的上界；
+        // 真正证明前缘 = 0 的是 crossA[2]（rank2 实测帧数）。
         double[] crossA = frames(1.0f, 99, false);    // 跨行，trailSize=1.0
-        check("T-2 trailSize=1.0 时跨行前缘有实际过渡（>1 帧）且明显短于后缘（文案：『很快跟到位』）",
-                crossA[2] > 8.0 && crossA[0] >= 400.0 && crossA[2] < crossA[0] / 3.0,
-                "四角 = " + j(crossA) + "（前缘应为 55ms 下限对应的实际帧数，后缘应为整段）");
+        check("T-2 trailSize=1.0 时跨行前缘 ≤1 帧、后缘为整段（文案：『瞬间到位』）",
+                crossA[2] <= 8.0 && crossA[3] <= 8.0 && crossA[0] >= 400.0,
+                "四角 = " + j(crossA) + "（前缘应为 1 帧 = 8ms，后缘应为整段）");
 
         // ---------- T-3：文案说调小 trailSize 前缘也开始拖 ----------
         double[] crossB = frames(0.5f, 99, false);    // 跨行，trailSize=0.5
