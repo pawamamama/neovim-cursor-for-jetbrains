@@ -170,15 +170,16 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
              git tag 停在 v0.9.127（0.9.128~0.9.133 未打 tag）—— **不要用 tag 判断已装版本**。
 HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过期一次；2026-11-04 是 Step B 撤回提交）
 远程         fork/main 与本机 HEAD 是否同步，**用命令核实**：
-             git rev-list --left-right --count fork/main...HEAD  → 2026-11-04 实测 **0 7**（本地领先 7，未 push）
+             git rev-list --left-right --count fork/main...HEAD  → 2026-11-04 文档任务后实测 **0 1**
+             （b30c537 未 push；此数字是快照，每次以命令为准）
              ⚠️ 推送必须走 SSH：https 经本机代理 127.0.0.1:7897 会 TLS 中途断开
              （`error:0A000126 SSL unexpected eof`），绕过代理直连 443 也会超时。
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
-工作区       2026-11-04 有未提交的文档纠正（本任务）——**不要 reset / checkout / clean**
-D0 门禁      最近一次记录 PASS（core/NeovideConfig.java 零 diff）；**本轮文档任务未重跑**
+工作区       2026-11-04 文档任务已全部提交，工作区干净 —— **不要 reset / checkout / clean**
+D0 门禁      最近一次 PASS（2026-11-04 文档任务后重跑，core/NeovideConfig.java 零 diff）
 探针         118 个 V*.java / 133 个 *.java / **115 个注册探针**（2026-11-04 实测）；
              最近一次门禁 ALL PASS（0 失败；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9 /
-             **VTypingSpan 9**）；**本轮文档任务没有跑门禁**，不要引用成「刚刚验证过」
+             **VTypingSpan 9**）；**改动代码后必须重跑**，不要引用旧结果
 现状摘要     **先读 `docs/CURRENT-STATE-2026-11-04.md`**（已装版本 / trailSize / A-E 状态 / 下一步）
 ```
 
