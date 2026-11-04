@@ -1,6 +1,6 @@
 # 审计第 2 批修复 · 第 1 轮计划（调度面与 read action 覆盖面）
 
-> 依据：`docs/CODE-AUDIT-2026-10-30.md` 第八节 · 任务书《审查第 2 批修复 · 第 1 轮》
+> 依据：`docs/archive/reports/CODE-AUDIT-2026-10-30.md` 第八节 · 任务书《审查第 2 批修复 · 第 1 轮》
 > 状态：**待用户确认后开工**（本轮停在工作区，不提交）
 > 编写时间：2026-10-30
 
@@ -13,8 +13,8 @@ $ git status --porcelain
  M docs/BUG-LOG.md
  M docs/INDEX.md
 ?? build/night-run-report.md
-?? docs/CODE-AUDIT-2026-10-30.md
-?? docs/HANDOFF-DECISION-2026-10-30.md
+?? docs/archive/reports/CODE-AUDIT-2026-10-30.md
+?? docs/archive/handoffs/HANDOFF-DECISION-2026-10-30.md
 
 $ git log --oneline -3
 6f7d585 fix(robustness): 审计第 1 批 8 条——失败可观测化 + NaN 守卫（零观感变化）
@@ -84,7 +84,7 @@ FAIL        2   （仅 VRegr2 的 R-5 / R-6，informational，不计入通过门
 另外 U-H-3 的修法会让失败路径每 1ms 重试一次——这是**既有行为**（`BUSY_RETRY_MS` 已存在），
 本批不改退避长度，不新增空转。
 
-### ④ `docs/CODE-AUDIT-2026-10-30.md` 第八节对应条目 + §8.6 待确认 5
+### ④ `docs/archive/reports/CODE-AUDIT-2026-10-30.md` 第八节对应条目 + §8.6 待确认 5
 
 - §8.6 第 5 条原文：「VReadAction 盲区修复需要改探针……**这是本批最重要的一条『验证方法存在但不能现在用』**：
   U-H-2/U-M-19 的修复落地前，门禁对这两条路径永远全绿。」

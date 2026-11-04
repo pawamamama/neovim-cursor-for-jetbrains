@@ -138,7 +138,7 @@ Alt + 向下拖出列选时，新光标从上一行形状滑下来，而不是�
 **上游做法**：README 顶部放语言切换栏。
 
 ```markdown
-**Language** — [English](../README.md) | [**简体中文**](../README.zh-CN.md) | [繁體中文](../README.zh-TW.md) | ...
+**Language** — [English](../../README.md) | [**简体中文**](../../README.zh-CN.md) | [繁體中文](README.zh-TW.md) | ...
 ```
 
 **本项目现状**：5 个 README 文件都在，但**没有加语言切换栏**（我重写时漏了）。

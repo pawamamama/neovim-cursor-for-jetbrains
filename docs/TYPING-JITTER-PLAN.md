@@ -108,7 +108,7 @@ for (int i = layers; i >= 1; i--) {
 
 ## 三、为什么不能改回上游的像素判据
 
-**用户已 fork 自上游，上游用像素。实测数据（`docs/CODE-AUDIT-0.9.87.md:300-311`）：**
+**用户已 fork 自上游，上游用像素。实测数据（`docs/archive/reports/CODE-AUDIT-0.9.87.md:300-311`）：**
 
 ```
 === 块选区路径（走像素判据，charsMoved = -1）===

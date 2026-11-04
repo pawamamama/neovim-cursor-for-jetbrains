@@ -1,8 +1,8 @@
 # 校验下沉 —— U-1 / U-2 / U-3（跨层重构）计划与证据
 
 > 起点：`main` @ `923170f`（已推 fork，同步 0 0）。
-> 依据：`docs/BATCH3-FIX-REPORT2-2026-10-31.md` §七 + `plans/batch3-fix2.md` §七（已知未修 U-1/U-2/U-3）
-> + `docs/CODE-AUDIT-2026-10-30.md` §HIGH 的 H-1 / H-2。
+> 依据：`docs/archive/reports/BATCH3-FIX-REPORT2-2026-10-31.md` §七 + `plans/batch3-fix2.md` §七（已知未修 U-1/U-2/U-3）
+> + `docs/archive/reports/CODE-AUDIT-2026-10-30.md` §HIGH 的 H-1 / H-2。
 > 性质：**跨层重构**，不是补丁。目标是把「预设快照的校验」从三个各写一遍的调用方，
 > 下沉到唯一一层 —— `settings/SettingsField`（本项目的「字段表」层）。
 > 改完之后，面板入口、Tools 菜单入口、以及未来新增的任何入口**自动同源**。
@@ -352,7 +352,7 @@ M  tools/settings-probe/VFieldDomain.java              私有夹具 perturb 改�
 M  tools/settings-probe/build-v-probes.ps1             $mains 登记 VValidationSink
 ?? tools/settings-probe/VValidationSink.java           新探针（31 条断言）
 ?? plans/validation-sink.md                            本文件
-?? docs/HANDOFF-NEXT-2026-10-31.md                     §3.1.1 标记 U-1/U-2/U-3 已完成
+?? docs/archive/handoffs/HANDOFF-NEXT-2026-10-31.md                     §3.1.1 标记 U-1/U-2/U-3 已完成
 ```
 
 **白名单外的字节变化：本轮 0**。

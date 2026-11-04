@@ -11,7 +11,7 @@
 > **What this edition adds**: on top of the original effect, a **full settings panel + persistence + preset system**.
 > The original only lets you tweak parameters by editing code — this one lets you adjust, save and switch directly inside the IDE.
 
-> **Current release: v0.9.126** — see [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md) for the full release notes.
+> **Current release: v0.9.126** — see [docs/archive/reports/VERSION-0.9.126.md](docs/archive/reports/VERSION-0.9.126.md) for the full release notes.
 >
 > **Maintainer:** [pawamamama](https://github.com/pawamamama) — since v0.9.83: **106 commits, 239 files, +42,323 / −3,464 lines**.
 
@@ -81,7 +81,7 @@ Built on [yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyy
 
 `v0.9.83` was the last tagged baseline. Since then the fork has **106 commits**
 (**239 files**, **+42,323 / −3,464 lines** as of 2026-11-02, including docs).
-The full per-version detail is in [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md).
+The full per-version detail is in [docs/archive/reports/VERSION-0.9.126.md](docs/archive/reports/VERSION-0.9.126.md).
 
 | Area | What changed | Why it matters |
 |---|---|---|

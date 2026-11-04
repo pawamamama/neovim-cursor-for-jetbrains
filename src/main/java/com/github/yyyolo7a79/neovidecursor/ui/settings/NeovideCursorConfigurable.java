@@ -1461,8 +1461,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             // 三版实现模型（前缘 0ms 吸附 / 四角同长 + 绘制层固定尾巴 /
             // 前缘 0ms + 短后缘）实机验收全部不可行，实现逻辑已删除；
             // 开关与 State 字段保留（能勾、能记住），但【不影响任何行为】。
-            // 决策依据：docs/LEADING-SNAP-ISSUES-2026-11-01.md、
-            // docs/LEADING-SNAP-DECISION-2026-11-01.md。
+            // 决策依据：docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md、
+            // docs/archive/decisions/LEADING-SNAP-DECISION-2026-11-01.md。
             //
             // 位置不变：紧跟在「斜度」之后 —— 两者都涉及单行拖尾的形状；
             // 设备级开关不跟随预设，所以文案挂 TAG_GLOBAL。
@@ -3969,7 +3969,7 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     //
     // SettingsSearchIndex.java 暂时保留：它是零状态的独立类，断开注册后已是零引用。
     // 删除它要连带检查探针与历史文档，属于独立清理
-    // （已登记 docs/DECISIONS-PANEL-2026-10-31.md §10.2），不在本轮白名单的最小改动里做。
+    // （已登记 docs/archive/decisions/DECISIONS-PANEL-2026-10-31.md §10.2），不在本轮白名单的最小改动里做。
 
     // ==================== 小工具 ====================
 

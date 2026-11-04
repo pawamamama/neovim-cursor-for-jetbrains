@@ -1,7 +1,7 @@
 # ROADMAP —— 先干什么、再干什么（唯一顺序权威）
 
 > ⚠️ **本文停在 2026-10-21。**
-> 当前待办看 [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md)；
+> 当前待办看 [docs/NEXT-STEPS.md](../NEXT-STEPS.md)；
 > 明确放弃的项也记在那里（有实测依据，不要重试）。
 
 

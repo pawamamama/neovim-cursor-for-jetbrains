@@ -1,6 +1,6 @@
 # leadingSnap v2 实现计划：回退绘制层尾巴，改走路线 C
 
-> 依据：`docs/LEADING-SNAP-ISSUES-2026-11-01.md`
+> 依据：`docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md`
 > 起点：HEAD `c2ae1e9`，工作区只有两个未跟踪文档。
 > 出稿：planner 代理（2026-11-01），主会话按白名单与任务书做了三处收敛。
 

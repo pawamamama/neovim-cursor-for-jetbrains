@@ -1,6 +1,6 @@
 # 平滑问题的最终结论
 
-> ⚠️ **历史归档**。第 4 节有失效横幅。当前状态看 [../PROJECT-GUIDE.md](../PROJECT-GUIDE.md)。
+> ⚠️ **历史归档**。第 4 节有失效横幅。当前状态看 [../PROJECT-GUIDE.md](PROJECT-GUIDE.md)。
 
 > ## ⚠️ 本文档「性能链条」一节已被推翻
 >

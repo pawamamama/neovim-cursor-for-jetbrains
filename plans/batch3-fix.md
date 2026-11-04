@@ -1,6 +1,6 @@
 # 第 3 批审查修复计划（2026-10-31）
 
-> 依据：`docs/HANDOFF-BATCH3-AUDIT-2026-10-31.md` + `docs/CODE-AUDIT-2026-10-30.md` §九
+> 依据：`docs/archive/handoffs/HANDOFF-BATCH3-AUDIT-2026-10-31.md` + `docs/archive/reports/CODE-AUDIT-2026-10-30.md` §九
 > 分支：`p11-panel-refactor`（HEAD `b5d2270`，= `a1efc13` + 一条 docs 提交）
 > 本轮只改白名单内的文件；`core/NeovideConfig.java`（D0）零 diff；
 > `ui/settings/AnimationPreview.java` 零 diff；`docs/BUG-LOG.md` 零 diff。
@@ -39,7 +39,7 @@ D0：core/NeovideConfig.java 零 diff（本轮开工前）
      记录本身就是那次「给用户看」的等价证据 —— 与项目既有 `*ForProbe()` 的做法一致）。
 - **不改** `CONFIRMED/DEFERRED` 的语义，不改 `persistQuietly()` 本身。
 - **同类调用点登记不修**：`CursorPresetApplier:73/138/200/228`、`NeovideCaretManager:348`
-  （不在本轮白名单；实际登记在 `docs/DECISIONS-PANEL-2026-10-31.md` §10.2 ——
+  （不在本轮白名单；实际登记在 `docs/archive/decisions/DECISIONS-PANEL-2026-10-31.md` §10.2 ——
   `docs/NEXT-STEPS.md` 本轮只允许改探针数量那一行）。
 
 ### P-H-1（HIGH）两条派生提示用两参 `deriveTrailFactors`

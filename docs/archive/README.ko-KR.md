@@ -15,7 +15,7 @@
 > 원본은 코드를 수정해야 파라미터를 바꿀 수 있지만, 이 버전은 IDE 안에서 직접 조정·저장·전환할 수 있습니다.
 
 
-**언어 / Language** — [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja-JP.md) | [**한국어**](README.ko-KR.md)
+**언어 / Language** — [English](../../README.md) | [简体中文](../../README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja-JP.md) | [**한국어**](README.ko-KR.md)
 
 ---
 
@@ -43,8 +43,8 @@
 
 ## 전체 문서
 
-- **중국어 간체 (가장 상세)** → [README.zh-CN.md](README.zh-CN.md)
-- **English** → [README.md](README.md)
+- **중국어 간체 (가장 상세)** → [README.zh-CN.md](../../README.zh-CN.md)
+- **English** → [README.md](../../README.md)
 
 > 이 버전의 UI 는 현재 **중국어 간체만** 지원합니다. 국제화는 미지원.
 > 설정 항목 이름과 파라미터 설명은 기술 용어이므로 위 문서의 파라미터 표와 함께 보면 문제없습니다.
@@ -55,7 +55,7 @@
 
 멀티 커서 미지원. 프레임레이트는 Swing EDT 제약을 받습니다
 (저프레임레이트용으로 "잔상 모드" 제공).
-자세한 내용은 [README.zh-CN.md 의 알려진 결함](README.zh-CN.md#已知缺陷) 참조.
+자세한 내용은 [README.zh-CN.md 의 알려진 결함](../../README.zh-CN.md#已知缺陷) 참조.
 
 ---
 

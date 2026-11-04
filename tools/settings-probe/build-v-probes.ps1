@@ -119,7 +119,7 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         'VRainbowSep', 'VFpsPersist', 'VSwitchKeysGap',
         # 【0.9.88 补回】VReset 写好了但从来没进过这张表 —— 与上面 0.9.83 那次
         # 「写了但从不运行」是同一类漏。它当前有 1 条失败（R-16），
-        # 失败原因已查清并记录在 docs/CODE-AUDIT-0.9.87.md，
+        # 失败原因已查清并记录在 docs/archive/reports/CODE-AUDIT-0.9.87.md，
         # 按纪律「不许改成警告绕过」，所以放在通过门内 —— 红就是红。
         'VReset',
         # 0.9.88 新增：锁 matchColorPreset 判据（彩虹与粉色 HEX 不再重叠）

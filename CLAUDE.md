@@ -60,11 +60,11 @@ do not hold back on token usage.
 分支         main（2026-10-27 起；此前长期在 fix/f7-override-read）
 ```
 
-## 规模（实测 · 2026-11-02，命令见本节末尾）
+## 规模（实测 · 2026-11-04，命令见本节末尾）
 
 ```
-生产代码   src/main/java/.../neovidecursor/    37 文件 / 21,412 行
-探针       tools/settings-probe/*.java        133 文件 / 34,669 行（118 个 V*.java）
+生产代码   src/main/java/.../neovidecursor/    37 文件 / 21,491 行
+探针       tools/settings-probe/*.java        133 文件 / 34,901 行（118 个 V*.java）
 基准       tools/bench/*.java                  16 文件
 ```
 
@@ -93,17 +93,23 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 # 二、当前状态（用这组数字判断一切）
 
 ```
-版本         v0.9.127（IDEA 2026.1 已装 0.9.127；PyCharm 2025.2 装的是**上游 0.6.0**，用于对比，不是本地版 —— 见 docs/UPSTREAM-COMPARE-2026-11-02.md。读 jar 内 META-INF/plugin.xml 确认 —— 文件名恒为 0.9.8.jar）
-             git tag 为 v0.9.127 —— 0.9.84~0.9.125 共 42 个版本未打 tag（0.9.126 / 0.9.127 已打）
-HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过期一次）
-远程         fork/main 与本机 main 是否同步，**用命令核实，不要写结论**：
-             git rev-list --left-right --count fork/main...HEAD  → 应为 0 0
+版本         **0.9.131（已装）**；IDEA 2026.1 实测读 jar 内 META-INF/plugin.xml —— 文件名恒为 0.9.8.jar。
+             当前分支构建 0.9.133，运行时行为 = 0.9.131；0.9.132 / 0.9.133 是**中间版**，
+             **不作为基线，不回退/不重装**。
+             PyCharm 2025.2 装的是**上游 0.6.0**，用于对比，不是本地版 —— 见 docs/UPSTREAM-COMPARE-2026-11-02.md。
+             git tag 停在 v0.9.127（0.9.128~0.9.133 未打 tag）—— **不要用 tag 判断已装版本**。
+HEAD         见 `git log -1`（**不写死 hash**；2026-11-04 为 `fddd529`，每提交一次就过期一次）
+远程         fork/main 与本机 HEAD 是否同步，**用命令核实**：
+             git rev-list --left-right --count fork/main...HEAD  → 2026-11-04 实测 **0 7**（本地领先 7，未 push）
              ⚠️ 推送必须走 SSH：https 经本机代理 127.0.0.1:7897 会 TLS 中途断开
              （`error:0A000126 SSL unexpected eof`），绕过代理直连 443 也会超时。
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
-工作区       干净（gate 绿了不代表工作区干净 —— 用 `git status --porcelain` 自己确认）
-D0 门禁      PASS（core/NeovideConfig.java 零 diff）
-探针         118 个 V*.java（新增 VInlay / VFieldDomain / VBoot / VDocCheck / VBuildDecl / VReadAction / VPresetReset / VPresetChain / VGlowFog / VTrailCap / VTabPages / VAuditBatch1 / VAuditBatch2Round2to4 / VAuditBatch2Round5 / VBatch3Fixes / VBatch3Medium / VPreviewRank / VValidationSink / VCatchRollback / VBatch3Tail / VLeadingSnap / VI18n / VInputCommit / VFadeTick / VFadePreview / VMultiCursorFix / VTypingSpan）/ **115 个注册探针 ALL PASS（0 失败；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9 / VTypingSpan 5）**
+工作区       2026-11-04 有未提交的文档纠正（本任务）——**不要 reset / checkout / clean**
+D0 门禁      最近一次记录 PASS（core/NeovideConfig.java 零 diff）；**本轮文档任务未重跑**
+探针         118 个 V*.java / 133 个 *.java / **115 个注册探针**（2026-11-04 实测）；
+             最近一次门禁 ALL PASS（0 失败；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9 /
+             **VTypingSpan 9**）；**本轮文档任务没有跑门禁**，不要引用成「刚刚验证过」
+现状摘要     **先读 `docs/CURRENT-STATE-2026-11-04.md`**（已装版本 / trailSize / A-E 状态 / 下一步）
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）
@@ -563,8 +569,8 @@ TR（前缘单角）   2.11     7.43    11.58
 关键矛盾：隐藏原生光标后「本体」就是用户看到的唯一光标，必须平滑移动；
 而要「不落后」就得前缘 0ms = 瞬移。且纯弹簧里尾巴长度与停留时间由同一个
 参数决定，要短就消失得快、要久就长到跨格。**这套模型无解**，不是调参能救的。
-完整数据见 `docs/LEADING-SNAP-ISSUES-2026-11-01.md` 与
-`docs/LEADING-SNAP-DECISION-2026-11-01.md`。
+完整数据见 `docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md` 与
+`docs/archive/decisions/LEADING-SNAP-DECISION-2026-11-01.md`。
 
 **回退保留的壳子（能勾、能记住，但不影响行为）**：
 1. State 字段 `leadingSnap = false` / `SettingsField.build()`（第 28 项，
@@ -583,7 +589,7 @@ L-22 行为层五文件剥注释后零消费点（防复活守门）。
 `plans/leading-snap-revert.md`。
 
 本次交付的完整记录（含终检结论、三组变异测试、实机验收清单）见
-`docs/LEADING-SNAP-REPORT-2026-10-31.md`。
+`docs/archive/reports/LEADING-SNAP-REPORT-2026-10-31.md`。
 
 
 ## 7.2 需要用户拍板
@@ -692,7 +698,7 @@ RGB 换成色相循环  -> 140 行死代码 + 功能与名字对不上
 | 改颜色 / 渐变 / 彩虹 | `docs/COLOR-STATE-DECISIONS.md` |
 | 优化性能 | `docs/PERFORMANCE-FPS.md` |
 | 发版 | `docs/RELEASE-SAFETY.md` |
-| 代码审计记录 | `docs/CODE-AUDIT-0.9.87.md`（722 行） |
+| 代码审计记录 | `docs/archive/reports/CODE-AUDIT-0.9.87.md`（722 行） |
 | 全部文档索引 | `docs/INDEX.md` |
 
 ## 历史留痕（**不要当现状**）

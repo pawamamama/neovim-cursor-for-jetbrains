@@ -14,7 +14,7 @@
 > 原版只能改程式碼調參數，本版可以在 IDE 裡直接調、存、切換。
 
 
-**語言 / Language** — [English](README.md) | [简体中文](README.zh-CN.md) | [**繁體中文**](README.zh-TW.md) | [日本語](README.ja-JP.md) | [한국어](README.ko-KR.md)
+**語言 / Language** — [English](../../README.md) | [简体中文](../../README.zh-CN.md) | [**繁體中文**](README.zh-TW.md) | [日本語](README.ja-JP.md) | [한국어](README.ko-KR.md)
 
 ---
 
@@ -42,8 +42,8 @@
 
 ## 完整文件
 
-- **简体中文（最完整）** → [README.zh-CN.md](README.zh-CN.md)
-- **English** → [README.md](README.md)
+- **简体中文（最完整）** → [README.zh-CN.md](../../README.zh-CN.md)
+- **English** → [README.md](../../README.md)
 
 > 本版介面目前為**簡體中文**，暫未做國際化。
 > 設定項名稱與參數說明都是技術術語，配合上述文件的參數表不影響使用。
@@ -53,7 +53,7 @@
 ## 已知限制
 
 不支援多游標；影格率受 Swing EDT 限制（提供「殘影模式」作為低影格率替代）。
-完整清單見 [README.zh-CN.md 的「已知缺陷」](README.zh-CN.md#已知缺陷)。
+完整清單見 [README.zh-CN.md 的「已知缺陷」](../../README.zh-CN.md#已知缺陷)。
 
 ---
 

@@ -1,8 +1,8 @@
 # 第 3 批审查收尾 · 第一批（5 条 MEDIUM）—— 计划与证据
 
 > 起点：`main` @ `ce39138`（已推 fork，同步 0 0）。
-> 依据：`docs/HANDOFF-BATCH3-AUDIT-2026-10-31.md` §三 + `docs/CODE-AUDIT-2026-10-30.md` §9.3。
-> 上游清单：`docs/HANDOFF-NEXT-2026-10-31.md` §3.1（第 6 步第 1 批）。
+> 依据：`docs/archive/handoffs/HANDOFF-BATCH3-AUDIT-2026-10-31.md` §三 + `docs/archive/reports/CODE-AUDIT-2026-10-30.md` §9.3。
+> 上游清单：`docs/archive/handoffs/HANDOFF-NEXT-2026-10-31.md` §3.1（第 6 步第 1 批）。
 > 本轮只做 5 条：**P-M-11 / P-M-8 / P-M-5 / P-M-6 / P-M-3**。其余（P-M-1 / P-M-4 / P-M-7 / P-M-9、16 条 LOW）不在本轮。
 
 ---
@@ -16,11 +16,11 @@
 ```
 $ git status --porcelain
 ?? build/night-run-report.md
-?? docs/HANDOFF-NEXT-2026-10-31.md      ← 多出来的这一个
+?? docs/archive/handoffs/HANDOFF-NEXT-2026-10-31.md      ← 多出来的这一个
 ?? plans/batch3-review-prompt.md
 ```
 
-`docs/HANDOFF-NEXT-2026-10-31.md` 是另一个会话留下的进度快照（未跟踪、未改动任何跟踪文件）。
+`docs/archive/handoffs/HANDOFF-NEXT-2026-10-31.md` 是另一个会话留下的进度快照（未跟踪、未改动任何跟踪文件）。
 它不构成阻塞，本轮不提交它，也不删它。
 
 ### 0.2「第 1 批的 clamp 区间表」在代码里**不存在**

@@ -15,7 +15,7 @@
 > 元版はパラメータをコード編集でしか変えられませんが、本版は IDE 内で直接調整・保存・切替できます。
 
 
-**言語 / Language** — [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [**日本語**](README.ja-JP.md) | [한국어](README.ko-KR.md)
+**言語 / Language** — [English](../../README.md) | [简体中文](../../README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [**日本語**](README.ja-JP.md) | [한국어](README.ko-KR.md)
 
 ---
 
@@ -43,8 +43,8 @@
 
 ## 完全なドキュメント
 
-- **簡体字中国語（最も詳細）** → [README.zh-CN.md](README.zh-CN.md)
-- **English** → [README.md](README.md)
+- **簡体字中国語（最も詳細）** → [README.zh-CN.md](../../README.zh-CN.md)
+- **English** → [README.md](../../README.md)
 
 > 本版の UI は現在**簡体字中国語のみ**です。国際化は未対応。
 > 設定項目名とパラメータ説明は技術用語のため、上記ドキュメントのパラメータ表と併用すれば問題ありません。
@@ -55,7 +55,7 @@
 
 マルチカーソル非対応。フレームレートは Swing EDT の制約を受けます
 （低フレームレート向けに「残像モード」を用意）。
-詳細は [README.zh-CN.md の既知の欠陥](README.zh-CN.md#已知缺陷) を参照。
+詳細は [README.zh-CN.md の既知の欠陥](../../README.zh-CN.md#已知缺陷) を参照。
 
 ---
 

@@ -11,7 +11,7 @@
 > **本版重点**：在原始效果之上，补上了 **完整设置面板 + 持久化 + 预设系统**。
 > 原版只能改代码调参数，本版可以在 IDE 里直接调、存、切换。
 
-> **当前版本：v0.9.126** — 见 [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md)（完整版本说明）。
+> **当前版本：v0.9.126** — 见 [docs/archive/reports/VERSION-0.9.126.md](docs/archive/reports/VERSION-0.9.126.md)（完整版本说明）。
 >
 > **维护者：** [pawamamama](https://github.com/pawamamama) — 自 v0.9.83 以来 **106 个提交、239 个文件、+42,323 / −3,464 行**。
 
@@ -101,7 +101,7 @@ https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/04
 
 `v0.9.83` 是最后一个打过 tag 的基线。此后本 fork 有 **106 个提交**、
 **239 个文件**、**+42,323 / −3,464 行**（含文档，2026-11-02 实测）。
-逐版本细节见 [docs/VERSION-0.9.126.md](docs/VERSION-0.9.126.md)。
+逐版本细节见 [docs/archive/reports/VERSION-0.9.126.md](docs/archive/reports/VERSION-0.9.126.md)。
 
 | 领域 | 改了什么 | 为什么有价值 |
 |---|---|---|

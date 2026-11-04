@@ -1,7 +1,7 @@
 # 版本对照表（权威）
 
 > ⚠️ **本文停在 v0.9.4 附近，之后的版本未补录。**
-> 当前版本看 [docs/NEXT-STEPS.md](docs/NEXT-STEPS.md)。
+> 当前版本看 [docs/NEXT-STEPS.md](../NEXT-STEPS.md)。
 > 本文保留历史版本判定经验（尤其「三个陷阱」一节仍有价值）。
 
 

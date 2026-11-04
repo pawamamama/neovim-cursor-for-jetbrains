@@ -4,7 +4,7 @@
 
 ## 2026-10-27 第二批：斜拉伸修复 + 新纪律
 
-### 根因（详见 docs/BRANCH-AUDIT-20261027.md）
+### 根因（详见 docs/archive/reports/BRANCH-AUDIT-20261027.md）
 
 **不是分支问题，是默认值不一致。**
 
@@ -57,7 +57,7 @@ F-1 精确报 `漂移=[slopeTicks: 冻结=0 实际=100]`。
 | 1 | **Ctrl+滚轮改字号 → 光标纵向漂移**（用户报告） | ✅ 已修 `8d3e787` |
 | 2 | F7 取代证明文档 | ✅ `docs/F7-SUPERSEDED.md` |
 | 3 | VDefects 断言改方向 | ✅ `e7eeec8`（FAIL 6→1） |
-| 4 | VSnap 诊断（不改断言） | ✅ `e7eeec8` + [docs/VSNAP-DIAGNOSIS.md](docs/VSNAP-DIAGNOSIS.md) |
+| 4 | VSnap 诊断（不改断言） | ✅ `e7eeec8` + [docs/VSNAP-DIAGNOSIS.md](VSNAP-DIAGNOSIS.md) |
 
 ### 任务 1（漂移）的关键发现
 
@@ -81,7 +81,7 @@ F-1 精确报 `漂移=[slopeTicks: 冻结=0 实际=100]`。
 `VOverride` 探针也一起被删（-121 行），它断言的三个 API 已不存在。
 要让「7 条全绿」只能回退 `bc903e1`，远超 R6 且触碰 R1。
 
-详见 [docs/F7-SUPERSEDED.md](docs/F7-SUPERSEDED.md)。
+详见 [docs/F7-SUPERSEDED.md](F7-SUPERSEDED.md)。
 
 ### 基线数字（用于控变量对比）
 
@@ -102,17 +102,17 @@ F-1 精确报 `漂移=[slopeTicks: 冻结=0 实际=100]`。
 - 认为「滑块就该吸附整十」→ 现在是对的，只需改探针期望
 - 认为「我设 65 就该 65」→ 需改 `snapToTick` 的就近取整逻辑（属观感，R1 范围）
 
-详见 [docs/VSNAP-DIAGNOSIS.md](docs/VSNAP-DIAGNOSIS.md) 第五节。
+详见 [docs/VSNAP-DIAGNOSIS.md](VSNAP-DIAGNOSIS.md) 第五节。
 
 ---
 
 > ⚠️ **以下内容已过时（停在 2026-10-22 / 0.9.9 时代）。**
-> **当前状态看 [docs/PROJECT-GUIDE.md](docs/PROJECT-GUIDE.md)。**
+> **当前状态看 [docs/PROJECT-GUIDE.md](PROJECT-GUIDE.md)。**
 > 保留本文仅为历史留痕，不要把这里的版本号当现状。
 
 > 更新：2026-10-22 夜。**t9 12 段全绿 / 探针 230 条全绿；重构完成 Phase 0/1/3，Phase 2 未做。**
 >
-> **完整状态看 [ARCHIVE-0.9.9.md](docs/archive/ARCHIVE-0.9.9.md)** —— 那是权威档案。本文只留指针。
+> **完整状态看 [ARCHIVE-0.9.9.md](ARCHIVE-0.9.9.md)** —— 那是权威档案。本文只留指针。
 
 ## 0. 一句话
 

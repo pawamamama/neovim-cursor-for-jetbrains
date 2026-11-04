@@ -1,6 +1,6 @@
 # 第 1 批修复计划（健壮性 / 零观感变化）
 
-> 依据：`docs/CODE-AUDIT-2026-10-30.md` 第六节「修复批次建议」第 1 批 8 条 ——
+> 依据：`docs/archive/reports/CODE-AUDIT-2026-10-30.md` 第六节「修复批次建议」第 1 批 8 条 ——
 > **H-2 / H-3 / M-4 / M-10 / L-4 / L-5 / L-6 / L-8**
 > 基线：HEAD `36cbaa4`，工作区 3 个未跟踪文档、0 个已修改，`fork/main...HEAD = 0 0`
 > 门禁基线（实测两次一致）：**99 条目 / 1008 PASS / 2 FAIL**（都在 `VRegr2`，informational）

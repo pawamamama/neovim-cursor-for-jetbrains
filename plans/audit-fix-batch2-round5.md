@@ -1,8 +1,8 @@
 # 第 2 批第 5 轮：U-H-1 核实 + G 批 8 条 + H 批 6 条
 
-> 依据：`docs/CODE-AUDIT-2026-10-30.md` 第八节
+> 依据：`docs/archive/reports/CODE-AUDIT-2026-10-30.md` 第八节
 > 日期：2026-10-31 · 分支 main · 基线 HEAD `1caf7e5`（任务书写 `c6655b2`，其后 3 个提交均为纯 docs）
-> **收工报告（交接用）**：[`docs/HANDOFF-BATCH2-ROUND5.md`](../docs/HANDOFF-BATCH2-ROUND5.md) —— 本文件是施工计划，那份是结果与遗留问题。
+> **收工报告（交接用）**：[`docs/archive/handoffs/HANDOFF-BATCH2-ROUND5.md`](../docs/archive/handoffs/HANDOFF-BATCH2-ROUND5.md) —— 本文件是施工计划，那份是结果与遗留问题。
 
 ---
 
@@ -62,7 +62,7 @@ EditorImpl.visualPositionToXY(vp)              // 只做 read action 包装 + �
 ### 副作用
 
 - 本部分**未改任何生产代码**。
-- 按白名单允许，在 `docs/CODE-AUDIT-2026-10-30.md` 第八节该条目下加一行复核结论。
+- 按白名单允许，在 `docs/archive/reports/CODE-AUDIT-2026-10-30.md` 第八节该条目下加一行复核结论。
 
 ---
 
@@ -96,7 +96,7 @@ EditorImpl.visualPositionToXY(vp)              // 只做 read action 包装 + �
   `RenderScheduler` 侧不改。
 - U-L-11⑧ 的 `CaretSchemeWatcher:35-36` 在本轮「绝对不许改」名单内 —— 只修 `NeovideCaretManager` 侧。
 - U-L-12 的 `CursorDiag` 文档在本轮禁止修改 —— 只修 `CaretAnimator` 侧。
-- U-H-1 报告段落 `docs/CODE-AUDIT-2026-10-30.md` 允许追加一行复核结论。
+- U-H-1 报告段落 `docs/archive/reports/CODE-AUDIT-2026-10-30.md` 允许追加一行复核结论。
 
 ---
 
@@ -117,7 +117,7 @@ EditorImpl.visualPositionToXY(vp)              // 只做 read action 包装 + �
 | U-M-3 静止仍每帧重绘，保持现状 | `docs/PROJECT-DECISIONS.md` 新增一行 + `CaretAnimator` 提交重绘处加注释 |
 | U-M-21 运行时禁用钩子算待办，不放开 plugin.xml | `docs/NEXT-STEPS.md` 待办表 |
 | 第 3 批（ui/settings/）等 U-H-1 结论后再开始 | `docs/NEXT-STEPS.md` 排期说明（本轮结论：可开始） |
-| U-H-1 结论（用户 2026-10-31 已认可撤销） | 报告正文 + `docs/CODE-AUDIT-2026-10-30.md` 条目撤销标注与汇总复核注 |
+| U-H-1 结论（用户 2026-10-31 已认可撤销） | 报告正文 + `docs/archive/reports/CODE-AUDIT-2026-10-30.md` 条目撤销标注与汇总复核注 |
 
 ## 六甲、执行结果（2026-10-31 实测）
 

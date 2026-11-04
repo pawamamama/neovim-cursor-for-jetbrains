@@ -160,7 +160,7 @@ TR（前缘单角）   2.11     7.43    11.58
 
 **用户已决定（2026-10-25）：做成开关（B 方案）。**
 **2026-10-31 已实现；2026-11-01 已回退 —— 实机验收三版模型均不可行
-（`docs/LEADING-SNAP-ISSUES-2026-11-01.md`），实现逻辑删除，只留开关控件
+（`docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md`），实现逻辑删除，只留开关控件
 （勾选不影响任何行为，文案已写明「待实现」）。探针 `VLeadingSnap`
 改守回退后契约（12 条断言全绿），旧 22 条为契约变更（非缺陷），
 逐条去向见 `plans/leading-snap-revert.md`。**
@@ -274,11 +274,11 @@ TR（前缘单角）   2.11     7.43    11.58
 | [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | **工作纪律（必读）** 741 行，13 条编号纪律 + 13 个专题 |
 | [design/RANK-COLLAPSE-FIX.md](design/RANK-COLLAPSE-FIX.md) | 为什么单行打字画不出斜缎带 |
 | [design/UPSTREAM-VSCODE-RESEARCH.md](design/UPSTREAM-VSCODE-RESEARCH.md) | 上游四版本对比 + 我们还缺什么 |
-| [design/RGB-WASH-REFERENCE.md](design/RGB-WASH-REFERENCE.md) | 上游 wash 实现参数 |
+| [design/RGB-WASH-REFERENCE.md](archive/design/RGB-WASH-REFERENCE.md) | 上游 wash 实现参数 |
 | [PERFORMANCE-FPS.md](PERFORMANCE-FPS.md) | 帧率实测 + 平台限制 |
 | [IDEA-PLATFORM-OPTIMIZATION.md](IDEA-PLATFORM-OPTIMIZATION.md) | 平台规范 + 240Hz 核查 |
 | [RELEASE-SAFETY.md](RELEASE-SAFETY.md) | 升级不掉用户配置的流程 |
-| [DEAD-PROBE-CLEANUP.md](DEAD-PROBE-CLEANUP.md) | 探针覆盖度 49→80 的过程 |
+| [DEAD-PROBE-CLEANUP.md](archive/DEAD-PROBE-CLEANUP.md) | 探针覆盖度 49→80 的过程 |
 | [VIDEO-SCRIPT.md](VIDEO-SCRIPT.md) | 演示视频脚本（未拍） |
 | [BUG-LOG.md](BUG-LOG.md) | 历史 bug 记录 |
 

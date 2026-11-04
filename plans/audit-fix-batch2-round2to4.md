@@ -1,6 +1,6 @@
 # 审计第 2 批 · 第 2~4 轮修复计划（E → F → B）
 
-> 依据：`docs/CODE-AUDIT-2026-10-30.md` 第八节。
+> 依据：`docs/archive/reports/CODE-AUDIT-2026-10-30.md` 第八节。
 > 基线：HEAD `8ee1d46`，`fork/main...HEAD = 0 0`，门禁 **100 条目 / 1048 PASS / 2 FAIL（仅 VRegr2，informational）/ ALL PASS**，D0 零 diff。
 > 三批必须**零观感变化**：每条修复都要说明「正常路径走不到这里」。
 

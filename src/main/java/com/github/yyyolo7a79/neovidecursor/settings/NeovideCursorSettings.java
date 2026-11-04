@@ -905,7 +905,7 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
      * <p><b>当前状态（2026-11-01 回退）</b>：字段与开关控件保留（能勾、能记住、
      * 不进预设域），但<b>没有任何行为层消费点</b> —— 勾选不改变观感。
      * 三版实现模型实机验收均不可行后删除，决策依据见
-     * docs/LEADING-SNAP-ISSUES-2026-11-01.md。
+     * docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md。
      */
     public boolean leadingSnap = false;
 

@@ -18,7 +18,7 @@ import java.util.Locale;
  *
  * <p><b>为什么撤回 Step B</b>：2026-11-04 实机后用户反馈「连打偶发无拖尾」从未感受到，
  * 而选词 / End / 鼠标拖选等同行大跳的观感变化可见 —— 收益不可感知、副作用可见。
- * 详见 docs/STEP-B-REVERT-REPORT-2026-11-04.md。
+ * 详见 docs/archive/reports/STEP-B-REVERT-REPORT-2026-11-04.md。
  *
  * <p><b>历史</b>：0.9.90 的旧观察（提交 c13f517，2026-10-27）与当时的 55ms 下限
  * 已在 2026-11-03 由 Step C 撤回；该观察距今 42 个版本，未再复现。

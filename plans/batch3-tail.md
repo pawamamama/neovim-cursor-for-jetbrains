@@ -1,7 +1,7 @@
 # 第 3 批收尾 —— 5 条 MEDIUM + 16 条 LOW 实施计划
 
-> 生成：2026-10-31 · 依据 `docs/HANDOFF-BATCH3-AUDIT-2026-10-31.md` §三 +
-> `docs/HANDOFF-NEXT-2026-10-31.md` §3.1 + `docs/CODE-AUDIT-2026-10-30.md` §9.3（LOW 全表）。
+> 生成：2026-10-31 · 依据 `docs/archive/handoffs/HANDOFF-BATCH3-AUDIT-2026-10-31.md` §三 +
+> `docs/archive/handoffs/HANDOFF-NEXT-2026-10-31.md` §3.1 + `docs/archive/reports/CODE-AUDIT-2026-10-30.md` §9.3（LOW 全表）。
 > 基线：HEAD `8ce6524`，门禁 ALL PASS（exit 0），D0 零 diff。
 > **本批全部是内部质量，正常使用零观感变化。**
 

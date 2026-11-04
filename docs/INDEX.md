@@ -1,12 +1,12 @@
 # 文档索引
 
-> 本项目有 **113 个** git 跟踪的 md 文件，**活跃 41 份，其余 72 份在 `docs/archive/`**。
+> 本项目有 **169 个** git 跟踪的 md 文件，其中 **108 份在 `docs/archive/`**，**其余 61 份**在活跃目录。
 >
-> 活跃 41 = 根 6 + `docs/` 17 + `docs/design/` 7 + `plans/` 2 + `build/` 8（发布说明，不用读）+ 其他 1
+> 分布（2026-11-04 实测）：根 6 + `docs/` 28（顶层 20 + `docs/design/` 8）+ `plans/` 18 + `build/` 9 = 61。
 >
 > **只读下面标为「必读」的，其他按需查。** 归档目录里的东西**不是现状**。
 >
-> 最后更新：2026-10-28
+> 最后更新：2026-11-04
 
 ---
 
@@ -14,10 +14,11 @@
 
 | 文档 | 行数 | 内容 |
 |---|---|---|
-| [START-HERE.md](../START-HERE.md) | 220 | **唯一的状态入口**。现状 / 门禁 / 地形 / 能做什么不能做什么 |
+| [CURRENT-STATE-2026-11-04.md](CURRENT-STATE-2026-11-04.md) | 146 | **当前真相页（先读这一页）**。已装 0.9.131 / `trailSize=1.0` / A 暂缓 / B 撤回 / C 保留 / D、E 不做 |
+| [START-HERE.md](../START-HERE.md) | 228 | 开发档案入口。现状 / 门禁 / 地形 / 能做什么不能做什么 |
 | [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | 747 | **动手前必读**。13 条编号纪律 + 13 个专题（四-B~四-M） |
-| [PARAMETER-MAP.md](PARAMETER-MAP.md) | 204 | 每个参数是否跟随预设，含字段归属表 |
-| [NEXT-STEPS.md](NEXT-STEPS.md) | 240 | 当前状态 / 已完成 / 已放弃 / 待办 |
+| [PARAMETER-MAP.md](PARAMETER-MAP.md) | 205 | 每个参数是否跟随预设，含字段归属表 |
+| [NEXT-STEPS.md](NEXT-STEPS.md) | 357 | 当前状态 / 已完成 / 已放弃 / 待办 |
 
 ---
 
@@ -41,14 +42,21 @@
 | 发版 | [RELEASE-SAFETY.md](RELEASE-SAFETY.md) | 162 | 0.9.70，未核对 |
 | 接手这个项目 | [SKILL-neovide-cursor-plugin-handoff.md](SKILL-neovide-cursor-plugin-handoff.md) | 165 | 0.9.98 |
 | 离线编译打包插件（通用技巧） | [SKILL-jetbrains-plugin-offline-build.md](SKILL-jetbrains-plugin-offline-build.md) | 148 | 未核对 |
-| 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 1199 | 2026-11-03（补 BUG-016 补全弹窗闪烁；修复提示词见 [PROMPT-BUG-016-2026-11-03.md](PROMPT-BUG-016-2026-11-03.md)） |
+| 查历史 bug | [BUG-LOG.md](BUG-LOG.md) | 1618 | 2026-11-04（§BUG-016 末尾有「结论汇总」；过程记录保留） |
+| **2026-11-03 全天排查与决策材料** | [DECISION-REPORT-2026-11-03.md](archive/decisions/DECISION-REPORT-2026-11-03.md) | 249 | 看文末「2026-11-04 更正」：已装 0.9.131、B 撤回、C 保留、A 暂缓 |
+| **Step C 交付（已验收）** | [STEP-C-FIX-REPORT-2026-11-04.md](archive/reports/STEP-C-FIX-REPORT-2026-11-04.md) | 328 | 2026-11-04：撤回 55ms 下限，真跨行前缘 0 ms |
+| **Step B 交付（已撤回，勿当基线）** | [STEP-B-FIX-REPORT-2026-11-04.md](archive/reports/STEP-B-FIX-REPORT-2026-11-04.md) | 263 | 2026-11-04：用户从未感受到症状；仅作历史 |
+| **Step B 撤回报告** | [STEP-B-REVERT-REPORT-2026-11-04.md](archive/reports/STEP-B-REVERT-REPORT-2026-11-04.md) | 207 | 2026-11-04：0.9.133 行为 = 0.9.131 |
+| **Step B 撤回后的决策材料** | [DECISION-REPORT-2026-11-04-STEP-B.md](archive/decisions/DECISION-REPORT-2026-11-04-STEP-B.md) | 286 | 2026-11-04：已装版本已更正为 0.9.131 |
+| **A 施工提示词（暂缓）** | [PROMPT-A-POPUP-FLICKER-2026-11-04.md](archive/prompts/PROMPT-A-POPUP-FLICKER-2026-11-04.md) | 250 | 基线已更正为 0.9.131；A 暂缓不修 |
+| BUG-016 交接（2026-11-03） | [HANDOFF-2026-11-03-BUG-016.md](archive/handoffs/HANDOFF-2026-11-03-BUG-016.md) | 410 | 看文末「2026-11-04 更正」 |
 | **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 266 | 0.9.92，未核对 |
-| 代码审计记录 | [CODE-AUDIT-0.9.87.md](CODE-AUDIT-0.9.87.md) | 722 | 0.9.87（描述当时） |
-| **面板二次重构决策（2026-10-31）** | [DECISIONS-PANEL-2026-10-31.md](DECISIONS-PANEL-2026-10-31.md) | 192 | 2026-10-31，用户看完 0.9.108 实机后拍板 |
-| **数字输入框 / 辉光淡出 修复交付（2026-11-01）** | [FIX-INPUT-FADE-REPORT-2026-11-01.md](FIX-INPUT-FADE-REPORT-2026-11-01.md) | 506 | 0.9.120，含根因、变异测试与验收步骤 |
-| **辉光淡出交付与决策层优化报告（2026-11-02）** | [GLOW-FADE-0.9.126-REPORT-2026-11-02.md](GLOW-FADE-0.9.126-REPORT-2026-11-02.md) | 294 | 0.9.126，含 B 方案、113 探针、6 组变异、P0~P3 路线图 |
-| **v0.9.126 版本说明（功能 + 0.9.83 对比）** | [VERSION-0.9.126.md](VERSION-0.9.126.md) | 505 | 面向用户/决策层；功能总览与 0.9.83 以来变化 |
-| **发版前最终审查（2026-11-01）** | [FINAL-AUDIT-2026-11-01.md](FINAL-AUDIT-2026-11-01.md) | 517 | 3 代理并行；P0 修复记录见 §十 |
+| 代码审计记录 | [CODE-AUDIT-0.9.87.md](archive/reports/CODE-AUDIT-0.9.87.md) | 722 | 0.9.87（描述当时） |
+| **面板二次重构决策（2026-10-31）** | [DECISIONS-PANEL-2026-10-31.md](archive/decisions/DECISIONS-PANEL-2026-10-31.md) | 192 | 2026-10-31，用户看完 0.9.108 实机后拍板 |
+| **数字输入框 / 辉光淡出 修复交付（2026-11-01）** | [FIX-INPUT-FADE-REPORT-2026-11-01.md](archive/reports/FIX-INPUT-FADE-REPORT-2026-11-01.md) | 506 | 0.9.120，含根因、变异测试与验收步骤 |
+| **辉光淡出交付与决策层优化报告（2026-11-02）** | [GLOW-FADE-0.9.126-REPORT-2026-11-02.md](archive/reports/GLOW-FADE-0.9.126-REPORT-2026-11-02.md) | 294 | 0.9.126，含 B 方案、113 探针、6 组变异、P0~P3 路线图 |
+| **v0.9.126 版本说明（功能 + 0.9.83 对比）** | [VERSION-0.9.126.md](archive/reports/VERSION-0.9.126.md) | 505 | 面向用户/决策层；功能总览与 0.9.83 以来变化 |
+| **发版前最终审查（2026-11-01）** | [FINAL-AUDIT-2026-11-01.md](archive/reports/FINAL-AUDIT-2026-11-01.md) | 517 | 3 代理并行；P0 修复记录见 §十 |
 | **设置系统重构分步方案** | [../plans/settings-refactor.md](../plans/settings-refactor.md) | 830 | 0.9.80 实测结论 |
 | 清理清单与执行记录 | [../plans/cleanup-inventory.md](../plans/cleanup-inventory.md) | 222 | 0.9.61 实测 |
 | 「加参数要改 8 处」的原始论证（**0.9.5 时代，勿当现状**） | [design/NEXT-REFACTOR.md](design/NEXT-REFACTOR.md) | 280 | 已加失效横幅 |
@@ -61,13 +69,16 @@
 
 ## 第三层：已归档（**不要当现状**）
 
-`docs/archive/` 下共 **76 份**，按主题分：
+`docs/archive/` 下共 **116 份**（含未跟踪的 8 份），按主题分：
 
 | 位置 | 主题 |
 |---|---|
-| `docs/archive/design/` | 30 份：设置系统重构系列（含 `SETTINGS-CONTRACT` / `SETTINGS-UI-CONTRACT` 两份旧权威契约）、上游调研、多光标系列、IME 调研、优化批次 |
-| `docs/archive/` | 17 份：早期交接与进度（`PROGRESS` / `ROADMAP` / `VERSIONS` / `HANDOFF-*`）、旧版任务书与验收清单、旧 release notes |
-| `docs/archive/README.*.md` | 3 份：中日韩三语 README（已不再同步） |
+| `docs/archive/reports/` | 20 份：修复 / 审计 / 交付报告（BATCH3、CODE-AUDIT、FINAL-AUDIT、STEP-B/C、VERSION / RELEASE-NOTES 等） |
+| `docs/archive/handoffs/` | 11 份：历次交接（HANDOFF-2026-10-30 ~ 11-03、BATCH2 / BATCH3、FADE、NEXT） |
+| `docs/archive/decisions/` | 4 份：决策报告与面板决策（DECISION-REPORT、DECISIONS-PANEL、LEADING-SNAP-DECISION） |
+| `docs/archive/prompts/` | 8 份：一次性施工提示词（`PROMPT-*`，含已作废 / 已合并） |
+| `docs/archive/design/` | 30 份：旧设计文档（设置系统重构系列、上游调研、多光标、IME 调研、优化批次） |
+| `docs/archive/` 顶层 | 43 份：早期进度与旧版任务书（`PROGRESS` / `ROADMAP` / `VERSIONS` / `README.xx` 等） |
 
 **要追溯「为什么当时这么决定」才去翻它们。** 它们描述的是当时，不是现在。
 
@@ -82,7 +93,10 @@
 
 **文档过时时**：
 - **移到 `docs/archive/`**，不要留在 `docs/` 里冒充现状，**也不要直接删**
+- 归档子目录按类型放：`reports/`（修复/审计/交付）、`handoffs/`（交接）、
+  `decisions/`（决策）、`prompts/`（一次性提示词）；旧的放 `docs/archive/` 顶层
 - 移动后，把本文件与 `CLAUDE.md §9` 里指向它的行一起改掉 —— 否则索引会指向不存在的文件
+- 移动后跑一次断链检查（2026-11-04 本轮用临时 Python 脚本检查，149 条链接 0 断）
 
 **不要做的事**：
 - 不要把「当前版本 / 探针数量 / 通过数」写进任何文档而不跑一遍命令（CLAUDE.md §11）

@@ -17,8 +17,8 @@ import java.nio.file.Paths;
  *
  * <p><b>契约变更（功能回退，2026-11-01 用户决定），非缺陷</b>：
  * 实测证明「前缘贴合」的三版实现模型都不可行（见
- * {@code docs/LEADING-SNAP-ISSUES-2026-11-01.md} 与
- * {@code docs/LEADING-SNAP-DECISION-2026-11-01.md}），实现逻辑已全部删除，
+ * {@code docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md} 与
+ * {@code docs/archive/decisions/LEADING-SNAP-DECISION-2026-11-01.md}），实现逻辑已全部删除，
  * 只保留开关控件与 State 字段。本探针守的是回退后的五类契约：
  * <ol>
  *   <li><b>开关存在</b>：{@code SettingsField} 里有 {@code leadingSnap}，

@@ -1,6 +1,6 @@
 # 计划：半边拖尾（leadingSnap）有选择回退 —— 只留开关控件，逻辑掏空
 
-日期：2026-11-01 ｜ 依据：docs/LEADING-SNAP-ISSUES-2026-11-01.md、docs/LEADING-SNAP-DECISION-2026-11-01.md
+日期：2026-11-01 ｜ 依据：docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md、docs/archive/decisions/LEADING-SNAP-DECISION-2026-11-01.md
 基线：main @ c2ae1e9 ｜ 性质：**不是 git revert** —— 删实现逻辑，保留 UI 控件与 State 字段。
 
 ---

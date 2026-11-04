@@ -356,8 +356,8 @@ public class TrailCorner {
             // 由 SpringTrail 在 jump 之后改写时长。三版模型（前缘 0ms 吸附 /
             // 四角同长 + 绘制层固定尾巴 / 前缘 0ms + 短后缘）实机验收全部不可行，
             // 2026-11-01 用户决定回退，只留设置页开关（不影响任何行为）。
-            // 决策依据见 docs/LEADING-SNAP-ISSUES-2026-11-01.md 与
-            // docs/LEADING-SNAP-DECISION-2026-11-01.md。
+            // 决策依据见 docs/archive/reports/LEADING-SNAP-ISSUES-2026-11-01.md 与
+            // docs/archive/decisions/LEADING-SNAP-DECISION-2026-11-01.md。
             //
             // 保留此段注释，避免下次又从头试一遍（阈值方案仍然不可行）。
         } else {
@@ -378,12 +378,12 @@ public class TrailCorner {
             // 是缎带形状的来源（前缘第一帧咬住新位置、后缘慢慢拖出）。
             // 下限把它抬到 55ms，真跨行的前缘也一起变慢：
             // 基础/纯平滑占后缘 55%、缎带占 20%，用户实机确认「跨行密度像没有了」。
-            // 证据与决策：docs/BUG-LOG.md §BUG-016、docs/HANDOFF-2026-11-03-BUG-016.md。
+            // 证据与决策：docs/BUG-LOG.md §BUG-016、docs/archive/handoffs/HANDOFF-2026-11-03-BUG-016.md。
             //
             // 同行连打被误判成跨行的问题【仍然存在】。2026-11-04 Step B 曾按方案 A
             // 拆出「同行 burst」分支，实机后用户反馈：连打偶发无拖尾的症状从未感受到，
             // 而选词 / End / 鼠标拖选等同行大跳的观感变化可见 —— 收益不可感知、副作用可见，
-            // 因此当天撤回。详见 docs/STEP-B-REVERT-REPORT-2026-11-04.md。
+            // 因此当天撤回。详见 docs/archive/reports/STEP-B-REVERT-REPORT-2026-11-04.md。
             // 判据保持不动；这一支走同一个公式，前缘同样是 0 —— 已知行为。
             // 面板的「跨行动画时长」提示必须与本行同源：leading = animationLength × (1 - trailSize)。
             double trailing = config.animationLength;

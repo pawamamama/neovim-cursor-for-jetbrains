@@ -1,7 +1,7 @@
 # 修复：数字输入框无效 + 辉光淡出无效果（2026-11-01）
 
-> 依据 `docs/HANDOFF-NEXT-2026-11-01.md` §三 的用户原话。
-> 交付后的完整报告：`docs/FIX-INPUT-FADE-REPORT-2026-11-01.md`（本文是计划与根因推导，报告含审查修正与验收）。
+> 依据 `docs/archive/handoffs/HANDOFF-NEXT-2026-11-01.md` §三 的用户原话。
+> 交付后的完整报告：`docs/archive/reports/FIX-INPUT-FADE-REPORT-2026-11-01.md`（本文是计划与根因推导，报告含审查修正与验收）。
 > 本文档的每一条根因都有实测证据，不写「可能」。
 
 ---
@@ -127,7 +127,7 @@ useShadow      = false      ← 辉光本身是关的
 2. **渲染取值与调度分开**（审查 H-1）：新增
    `GlowIntensity.glowForGroup(offset, holdGlow, overlayFadeOut, groupRecentlyActive, fade)`
    （发版前审查把「全局本帧是否移动」改成「本组最近是否活动」，见 §14 与
-   `docs/FINAL-AUDIT-2026-11-01.md` F-01）。
+   `docs/archive/reports/FINAL-AUDIT-2026-11-01.md` F-01）。
    初版把两者压进同一个 `fading` 布尔，运动期间恒为 true → 所有分组读全局强度，
    多光标「静止光标发光」串扰复发。现在 `fading` 只决定「用最后亮度还是逐组强度」，
    `needFrames` 只决定调度。

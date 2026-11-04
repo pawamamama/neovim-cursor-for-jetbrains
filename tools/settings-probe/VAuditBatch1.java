@@ -20,7 +20,7 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * V-AUDIT-BATCH1 —— 审计报告 {@code docs/CODE-AUDIT-2026-10-30.md} 第六节「第 1 批」的守门探针。
+ * V-AUDIT-BATCH1 —— 审计报告 {@code docs/archive/reports/CODE-AUDIT-2026-10-30.md} 第六节「第 1 批」的守门探针。
  *
  * <h2>它抓的是什么</h2>
  *

@@ -1,6 +1,6 @@
 # 设置面板二次重构（P11）—— 施工计划
 
-> 依据：`docs/DECISIONS-PANEL-2026-10-31.md`（用户逐字决策）+ `docs/PROJECT-DECISIONS.md §四 P11`
+> 依据：`docs/archive/decisions/DECISIONS-PANEL-2026-10-31.md`（用户逐字决策）+ `docs/PROJECT-DECISIONS.md §四 P11`
 > 开工 HEAD：`ea3f12d`；分支 `main`；与 `fork/main` 同步 0 0
 > 门禁基线（本轮实测，非手抄）：**102 个探针 / 1103 PASS / 2 FAIL（仅 VRegr2，informational）/ `V-PROBES RESULT: ALL PASS`**
 > └ VRegr2 那 2 条红之后仍抛 NPE 崩溃 —— 是**已知存量状态**（见 memory `probe-regr2-red-with-npe`），本轮不碰。
