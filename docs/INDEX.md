@@ -1,8 +1,8 @@
 # 文档索引
 
-> 本项目有 **169 个** git 跟踪的 md 文件，其中 **108 份在 `docs/archive/`**，**其余 61 份**在活跃目录。
+> 本项目有 **179 个** git 跟踪的 md 文件，其中 **117 份在 `docs/archive/`**，**其余 62 份**在活跃目录。
 >
-> 分布（2026-11-04 实测）：根 6 + `docs/` 28（顶层 20 + `docs/design/` 8）+ `plans/` 18 + `build/` 9 = 61。
+> 分布（2026-11-04 实测）：根 6 + `docs/` 29（顶层 21 + `docs/design/` 8）+ `plans/` 18 + `build/` 9 = 62。
 >
 > **只读下面标为「必读」的，其他按需查。** 归档目录里的东西**不是现状**。
 >
@@ -70,11 +70,11 @@
 
 ## 第三层：已归档（**不要当现状**）
 
-`docs/archive/` 下共 **116 份**（含未跟踪的 8 份），按主题分：
+`docs/archive/` 下共 **117 份**，按主题分：
 
 | 位置 | 主题 |
 |---|---|
-| `docs/archive/reports/` | 20 份：修复 / 审计 / 交付报告（BATCH3、CODE-AUDIT、FINAL-AUDIT、STEP-B/C、VERSION / RELEASE-NOTES 等） |
+| `docs/archive/reports/` | 21 份：修复 / 审计 / 交付报告（BATCH3、CODE-AUDIT、FINAL-AUDIT、STEP-B/C、COMMENT-AUDIT、VERSION / RELEASE-NOTES 等） |
 | `docs/archive/handoffs/` | 11 份：历次交接（HANDOFF-2026-10-30 ~ 11-03、BATCH2 / BATCH3、FADE、NEXT） |
 | `docs/archive/decisions/` | 4 份：决策报告与面板决策（DECISION-REPORT、DECISIONS-PANEL、LEADING-SNAP-DECISION） |
 | `docs/archive/prompts/` | 8 份：一次性施工提示词（`PROMPT-*`，含已作废 / 已合并） |
