@@ -1,6 +1,6 @@
 # 文档索引
 
-> 本项目有 **179 个** git 跟踪的 md 文件，其中 **117 份在 `docs/archive/`**，**其余 62 份**在活跃目录。
+> 本项目有 **180 个** git 跟踪的 md 文件，其中 **118 份在 `docs/archive/`**，**其余 62 份**在活跃目录。
 >
 > 分布（2026-11-04 实测）：根 6 + `docs/` 29（顶层 21 + `docs/design/` 8）+ `plans/` 18 + `build/` 9 = 62。
 >
@@ -51,6 +51,7 @@
 | **A 施工提示词（暂缓）** | [PROMPT-A-POPUP-FLICKER-2026-11-04.md](archive/prompts/PROMPT-A-POPUP-FLICKER-2026-11-04.md) | 250 | 基线已更正为 0.9.131；A 暂缓不修 |
 | BUG-016 交接（2026-11-03） | [HANDOFF-2026-11-03-BUG-016.md](archive/handoffs/HANDOFF-2026-11-03-BUG-016.md) | 410 | 看文末「2026-11-04 更正」 |
 | **重构值不值得做 / 优先级怎么排** | [REFACTOR-FEASIBILITY.md](REFACTOR-FEASIBILITY.md) | 266 | 0.9.92，未核对 |
+| **平台 252 光标冻结修复（0.9.104 当时快照）** | [archive/reports/NIGHT-RUN-REPORT-2026-10-28.md](archive/reports/NIGHT-RUN-REPORT-2026-10-28.md) | 351 | 2026-10-28 当时记录；归档说明见文首 |
 | 代码审计记录 | [CODE-AUDIT-0.9.87.md](archive/reports/CODE-AUDIT-0.9.87.md) | 722 | 0.9.87（描述当时） |
 | **注释审查记录（2026-11-04）** | [archive/reports/COMMENT-AUDIT-2026-11-04.md](archive/reports/COMMENT-AUDIT-2026-11-04.md) | 81 | 本轮 9 处注释修正 + 证据；约定见 `CLAUDE.md §8.5` |
 | **面板二次重构决策（2026-10-31）** | [DECISIONS-PANEL-2026-10-31.md](archive/decisions/DECISIONS-PANEL-2026-10-31.md) | 192 | 2026-10-31，用户看完 0.9.108 实机后拍板 |
@@ -70,11 +71,11 @@
 
 ## 第三层：已归档（**不要当现状**）
 
-`docs/archive/` 下共 **117 份**，按主题分：
+`docs/archive/` 下共 **118 份**，按主题分：
 
 | 位置 | 主题 |
 |---|---|
-| `docs/archive/reports/` | 21 份：修复 / 审计 / 交付报告（BATCH3、CODE-AUDIT、FINAL-AUDIT、STEP-B/C、COMMENT-AUDIT、VERSION / RELEASE-NOTES 等） |
+| `docs/archive/reports/` | 22 份：修复 / 审计 / 交付报告（BATCH3、CODE-AUDIT、FINAL-AUDIT、STEP-B/C、COMMENT-AUDIT、NIGHT-RUN、VERSION / RELEASE-NOTES 等） |
 | `docs/archive/handoffs/` | 11 份：历次交接（HANDOFF-2026-10-30 ~ 11-03、BATCH2 / BATCH3、FADE、NEXT） |
 | `docs/archive/decisions/` | 4 份：决策报告与面板决策（DECISION-REPORT、DECISIONS-PANEL、LEADING-SNAP-DECISION） |
 | `docs/archive/prompts/` | 8 份：一次性施工提示词（`PROMPT-*`，含已作废 / 已合并） |
