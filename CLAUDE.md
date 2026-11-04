@@ -46,6 +46,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 -Version <
 4. **全量门禁 + D0**：禁止并发跑；新增红先分辨「契约变更」还是「真回归」。
 5. **提交 + 交付**：三段式提交信息；安装先 `-DryRun`。
 
+> **两个会话怎么交接**（决策会话出提示词 → 执行会话交报告 → 用户验收 → 回读）
+> 见 `docs/SESSION-PROTOCOL.md`（170 行，含 PROMPT / REPORT 模板与代理、技能分工）。
+
 ## 禁止（每条都真踩过）
 
 1. 不改 `core/NeovideConfig.java`（D0 零 diff）。
@@ -764,6 +767,7 @@ RGB 换成色相循环  -> 140 行死代码 + 功能与名字对不上
 |---|---|---|
 | **本文件** | 接手入口（顶部是执行摘要） | — |
 | `docs/WORKFLOW.md` | **五步工作流**（每次按顺序做什么） | 129 |
+| `docs/SESSION-PROTOCOL.md` | **决策 / 执行会话**的交接协议与模板 | 170 |
 | `docs/WORK-DISCIPLINE.md` | **14 条纪律**，动手前必读 | 747 |
 | `docs/PARAMETER-MAP.md` | 每个参数是否跟随预设 | 205 |
 | `docs/NEXT-STEPS.md` | 待办与已放弃方向 | 357 |
