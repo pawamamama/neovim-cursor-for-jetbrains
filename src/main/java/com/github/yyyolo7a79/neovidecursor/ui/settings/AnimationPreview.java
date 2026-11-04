@@ -713,7 +713,7 @@ public final class AnimationPreview extends JComponent {
             corners[i].jump(cursorW, cursorH, centerX, centerY, ranks[i]);
         }
 
-        // 【lastRanks】每次 pushTarget 都快照本帧的 rank（探针读取）。
+        // 【lastRanks】每次 pushTarget 都快照本帧的 rank（当前无读取者，见字段声明）。
         // corners 恒为 4、ranks 恒与 corners 等长（ranksForAlignment 按 corners.length 建），
         // 所以不需要长度守卫 —— 原来那段不可达的 realloc 已删（审查 L-5）。
         // （「前缘贴合」曾在这里之后按 leadingSnap 把四角时长改成同一值，

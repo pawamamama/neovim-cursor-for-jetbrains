@@ -169,6 +169,9 @@ public class CaretAnimator implements Disposable, CaretListener {
      *
      * <p>取 {@code 1.0/20 = 50ms}：略大于调度上限 40ms，保证调度能交付的
      * 任何间隔都能被物理完整推进，不再丢时间。
+     *
+     * <p>@verified 2026-11-04：{@code MAX_DT = 1.0/20 = 50ms}；下面的 recovery
+     * 分支在短停顿取 8ms、长停顿取 rawDt，已对照 {@link #tick()} 逐行确认。
      */
     private static final double MAX_DT = 1.0 / 20;
 
@@ -177,8 +180,10 @@ public class CaretAnimator implements Disposable, CaretListener {
      *
      * <p>触发场景：切到别的窗口再切回、系统休眠唤醒、EDT 被长时间阻塞。
      * 这些情况下 AWT 会延迟派发 {@code invokeLater} 任务，{@code tick()} 整段不执行，
-     * 于是下一帧的 dt 等于离开的整个时长，被 {@link #MAX_DT} 截断成 33.3ms，
-     * 弹簧一帧走完约 93% —— 观感就是"回来卡一下"。
+     * 于是下一帧的 dt 等于离开的整个时长：≤100ms 的停顿中，超过 50ms 的部分被
+     * {@link #MAX_DT} 截断；>100ms 的停顿走 {@link #tick()} 的 recovery 分支
+     * （短停顿按 8ms 分步、长停顿一次性归位）。dt 拉到 50ms 时弹簧一帧走完约 98%
+     * —— 观感就是"回来卡一下"。
      *
      * <p>阈值取 100ms：正常帧约 8ms，偶发卡顿 20~50ms，都远小于它；
      * 而真正的"离开"通常是几百毫秒到几分钟。取这个量级可以确保
@@ -1268,12 +1273,12 @@ public class CaretAnimator implements Disposable, CaretListener {
             //
             // tick() 开头有 dt = min((now - lastNanos)/1e9, MAX_DT)。
             // 空闲期间 lastNanos 停在最后一次 tick，于是唤醒后的第一帧
-            // dt 直接拉满 MAX_DT = 1/30 ≈ 33.3ms（正常约 8ms，大 4 倍）。
+            // dt 直接拉满 MAX_DT = 1/20 = 50ms（正常约 8ms，大 6 倍）。
             //
             // 而 dt 会原样喂给弹簧：DampedSpring.update() 里 c = exp(-(4/len)·dt)。
             // 取 animationLength = 0.05s、o = 80 时：
             //   dt = 0.008 → c ≈ 0.527（每帧衰减约 47%，动画跨多帧展开）
-            //   dt = 0.033 → c ≈ 0.070（一帧衰减 93%，等于"瞬移"）
+            //   dt = 0.050 → c ≈ 0.018（一帧衰减 98%，等于"瞬移"）
             //
             // 观感上这就是「停几秒后第一次删除到上一行、下方文本并入原行时
             // 卡一下」：位置突变本应由弹簧平滑展开，却被一个超大的 dt
@@ -3170,14 +3175,14 @@ public class CaretAnimator implements Disposable, CaretListener {
 
     /**
      * 从持久化 State 读取「全局生效」的设备级设置
-     * （多光标不辉光 / 光标宽高 / RGB / 目标帧率 / 前缘贴合）。
+     * （多光标不辉光 / 光标宽高 / RGB 渐变 / 目标帧率 / 彩虹反推）。
      *
-     * <p><b>为什么单独抽一个方法</b>：这四项此前只写在 {@link #onModeChanged()} 里，
+     * <p><b>为什么单独抽一个方法</b>：这些设备级设置此前只写在 {@link #onModeChanged()} 里，
      * 而那是「用户点完设置面板」的路径。新打开的编辑器走构造函数，
      * 一条都没读 —— 于是 RGB / 宽度 / 高度比例在新文件里全部退回 Java 默认值。
      * 构造函数与 onModeChanged 现在都调这里，只有一份读取逻辑。
      *
-     * <p><b>为什么用 getState() 而不是 CONFIG</b>：这四项是持久级配置，
+     * <p><b>为什么用 getState() 而不是 CONFIG</b>：这些设置是持久级配置，
      * 不属于任何动画预设（用户明确要求「改预设不该动这些」），
      * 所以运行期直接从 State 取，不经过 {@code NeovideConfig} 这个预设快照。
      *
@@ -3201,10 +3206,10 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorRgbWash = resolveRgbWash(s);
         } catch (Throwable t) {
             // 【0.9.88】这里原来叫 ignored，但它是「改了设置却没生效」的头号可疑点 ——
-            // 四项全局设置读不到时会静默退回默认值，用户看到的是「我调了宽度它自己变回去」。
+            // 这些全局设置读不到时会静默退回默认值，用户看到的是「我调了宽度它自己变回去」。
             // 接进诊断通道：诊断开启时留一行 [error]，关着就是零成本。
             // 用 swallowedQuietly 而不是裸调 CursorDiag.swallowed —— 本 catch 后面还要
-            // 重置四项默认值，诊断通道自己抛会把这四行跳过。
+            // 重置这些默认值，诊断通道自己抛会把这几个赋值跳过。
             swallowedQuietly("syncGlobalSettings", t);
             multiCursorNoGlow = false;
             cursorWidthPx = 2;

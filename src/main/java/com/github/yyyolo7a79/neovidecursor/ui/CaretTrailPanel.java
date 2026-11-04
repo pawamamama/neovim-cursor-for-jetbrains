@@ -368,7 +368,7 @@ public class CaretTrailPanel extends JComponent {
     //   0.58   2.88~3.86   34.2~40.0    当前值
     //   0.50   3.69~4.65   41.1~47.2    接近「两种颜色拼的」
     //
-    // 【待实现】做成面板参数条（用户要求），10 处改动清单见 docs/NEXT-STEPS.md。
+    // 【待实现】做成面板参数条（用户要求）；10 处改动清单见 CLAUDE.md §7.2。
     private static final float DUAL_TONE_LUMA_FACTOR = 0.58f;
 
     /**

@@ -276,7 +276,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
      * <p><b>2026-11-03 起没有下限（Step C 已撤回）</b>：公式算出 0 时就是 0，
      * {@code DampedSpring.update()} 首句使其第一帧到位 —— 这正是缎带形状的来源。
      * 0.9.90~0.9.130 曾加过 {@code 短动画时长 × 0.5} 的下限，本意是压「同行连打被误判成
-     * 跨行」的抖动，但它同时拖慢了真跨行，已撤回。误判本身留给 Step B。
+     * 跨行」的抖动，但它同时拖慢了真跨行，已撤回。误判本身仍是 0.9.131 的已知行为；
+     * Step B 曾尝试拆分判据，因收益不可感知、副作用可见，已于 2026-11-04 撤回。
      * 见 {@code TrailCorner.jump()}。
      */
     private static final String W_TRAIL_SIZE =
@@ -878,7 +879,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     }
 
     /**
-     * 把光标尺寸 / 渐变 / 彩虹 / 前缘贴合推给三个预览窗 —— 改动立即生效，不需要点「应用」。
+     * 把光标尺寸 / 渐变 / 彩虹推给三个预览窗 —— 改动立即生效，不需要点「应用」。
+     * （「前缘贴合」已回退，不再推给预览。）
      *
      * <p><b>名字为什么从 syncPreviewCursorSize 改过来（P-L-16）</b>：它经 {@code pushStyleTo}
      * 推的不止尺寸，还有渐变与彩虹。旧名字与行为不符，正是纪律四-J ③「名字与行为不符 → 改名」。
