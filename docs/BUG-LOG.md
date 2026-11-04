@@ -1464,6 +1464,11 @@ if (isShortJump || isHorizontalBurst) {
 
 ### 2026-11-04 Step B 实施结果（方案 A：同行 burst 拆到短跳分支）
 
+> **【2026-11-04 已撤回】** 本节记录的实施已于当天撤回：用户反馈目标症状
+> 「连打偶发无拖尾」从未感受到，而选词 / End / 鼠标拖选等副作用可见。
+> 当前行为见本节末尾「Step B 撤回」及
+> `docs/STEP-B-REVERT-REPORT-2026-11-04.md`；以下内容仅保留为历史记录。
+
 **生产行为改动只有一处**：`TrailCorner.jump()` 的判据从两分类改为三分类。
 
 ```java
@@ -1545,3 +1550,44 @@ MEDIUM 已在白名单内处理（T-3 假绿、NaN 盲区、T-6 未镜像 clamp�
 以上行为仍正确（真跨行由 `sameLine=false` 决定），只是归因文字过期。
 
 **状态**：探针绿、D0 零 diff；待打包 0.9.132 与用户实机验收。
+
+### 2026-11-04 Step B 撤回（无可感知收益、副作用可见）
+
+**结论**：Step B 当天撤回。生产判据恢复为 0.9.131——同一行 4+ 字符仍走跨行。
+真跨行公式、Step C、A/D/E 均不受影响。
+
+**为什么撤回**：
+
+- 用户明确表示「连打 `ffff...` / 长按退格 / Ctrl+Backspace 时有时无拖尾」
+  **从未感受到**；
+- 而 `Ctrl+Shift+方向键`选词、`End` / `Home`、鼠标拖选、粘贴/接受补全等
+  **同行大跳**的拖尾变短、变斜、帧变少，用户能明显看到；
+- 该「bug」的来源是 `c13f517`（2026-10-27，分支 `claude/typing-jitter-fix-6c8c96`，
+  Claude 会话）里的一句「用户观察」，无 issue / 日志 / 原始对话；
+  0.9.90 距撤回时已 **42 个版本**，执行前未再确认症状是否可复现。
+
+**改了什么**：
+
+| 文件 | 改动 |
+|---|---|
+| `core/TrailCorner.java` | 删除 `isHorizontalBurst` / `useShortBranch`；`lastShortJump = isShortJump`；`if (isShortJump)` |
+| `VTypingSpan.java` | T-2b / T-7 改回「同行 4+ 仍走跨行」；保留 T-3/T-6/T-8、NaN 守卫、clamp 镜像 |
+| `VBlockStretch.java` | B-2 恢复「修前确实用了更长 animationLength」 |
+| `VUniform.java` | U-3 保留真跨行；U-4 改为「同行 10 仍与 1 不同（已知误判）」 |
+| `VAuditBatch1.java` | A-24 注释恢复「上一帧是跨行」 |
+
+**验证（实跑）**：
+
+```
+撤回后门禁：V-PROBES RESULT: ALL PASS（VTypingSpan 9/9、VBlockStretch 2/2、
+            VUniform 4/4、VAuditBatch1 27/27）
+D0：零 diff
+反证 R1（重新加回 Step B）：T-2b / T-7 / B-2 / U-4 红；恢复后 ALL PASS
+安装：0.9.133（jar 内版本核验）；个人配置 12/12 还原、0 丢弃
+```
+
+**仍未解决**：跨行帧变少与 Step B 公式无关；最可能仍是 `install.ps1`
+未还原 `trailSize` / 预设指针 / `animationLength`，需用户在面板核对。
+
+**流程教训**：二手归因不能当既定 bug；跨 40+ 版本的旧观察必须重新取证；
+探针只能证明分支变了，不能证明用户感受到了修复。

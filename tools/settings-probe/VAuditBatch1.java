@@ -476,22 +476,18 @@ public final class VAuditBatch1 {
                 afterZero == shortLen && anyWarnSince(m23, "零尺寸"),
                 "短跳=" + shortLen + " 零尺寸后=" + afterZero + " warn=" + brief(m23));
 
-        // ---- A-24：上一帧是同行 burst（走短跳分支）→ 零尺寸时必须保持该分支 ----
-        //
-        // 【Step B，2026-11-04】同一行 charsMoved=10 不再走跨行，而是走短跳。
-        // 断言逻辑不变（零尺寸后时长 == 上一帧时长），只改注释与标签；
-        // 它守的是 lastShortJump 必须记「短跳分支」，不能只记字面意义的 isShortJump。
+        // ---- A-24：上一帧是跨行 → 零尺寸时必须保持跨行（方向正确性，不作红绿依据）----
         TrailCorner c24 = new TrailCorner(-0.5, -0.5, new NeovideConfig());
         c24.jump(8, 20, 100, 100, 0);
         c24.update(8, 20, 104, 100, 0.008, false);         // 同上：previousDest 只在这里更新
-        c24.setCharsMoved(10);                             // 超过 typingMaxChars → 同行 burst；Step B 后走短跳
+        c24.setCharsMoved(10);                             // 超过 typingMaxChars → 跨行
         c24.jump(8, 20, 104, 100, 0);
-        double burstLen = c24.animationLengthForProbe();
+        double longLen = c24.animationLengthForProbe();
         c24.setCharsMoved(-1);
         c24.jump(0, 0, 150, 100, 0);
-        check("A-24 零尺寸 + 上一帧是同行 burst：保持该分支（Step B 后 lastShortJump 记 burst）",
-                c24.animationLengthForProbe() == burstLen,
-                "burst=" + burstLen + " 零尺寸后=" + c24.animationLengthForProbe());
+        check("A-24 零尺寸 + 上一帧是跨行：保持跨行（与修复前同结果，只守方向）",
+                c24.animationLengthForProbe() == longLen,
+                "跨行=" + longLen + " 零尺寸后=" + c24.animationLengthForProbe());
     }
 
     // ==================== 环境与工具 ====================

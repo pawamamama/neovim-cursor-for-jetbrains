@@ -11,10 +11,10 @@ import java.lang.reflect.Method;
  *
  * <p><b>已知的两个不均匀来源</b>：
  * <ol>
- *   <li><b>charsMoved 行间不同</b> → 旧实现会选到不同分支、时长差 2 倍以上。
- *       Step B（2026-11-04）之后，同一行内的 charsMoved 差异不再改变分支（都走短跳）；
- *       仍会改变分支的是「真跨行 vs 同一行」，以及 charsMoved=-1 的兜底路径。
- *       （块选区共享 charsMoved 的规则仍由 VBlockStretch B-1 守门。）</li>
+ *   <li><b>charsMoved 行间不同</b> → 同一行时也会选到不同分支、时长差 2 倍以上
+ *       （同行 1..3 短跳、4+ 仍走跨行 —— Step B 曾修，2026-11-04 已撤回）。
+ *       修复方向仍是调用方共享同一个值，而不是改 TrailCorner。
+ *       （块选区共享 charsMoved 的规则由 VBlockStretch B-1 守门。）</li>
  *   <li><b>rank 分配不同</b> → trailFactors 不同 → 时长不同
  *       （这是<b>设计如此</b>：前缘快后缘慢才形成拉伸）</li>
  * </ol>
@@ -72,9 +72,9 @@ public final class VUniform {
 
         // ---- U-3：真跨行与短跳必须产生不同位移 ----
         //
-        // 【Step B，2026-11-04】原来用「同一行 charsMoved=10」冒充跨行；Step B 之后
-        // 那走短跳，与 charsMoved=1 完全同速，断言会失败。改用真跨行（纵向 dy=h），
-        // 继续证明两个分支的位移不同。
+        // 【2026-11-04】真跨行用纵向位移（dy=h）制造，不依赖同行 charsMoved 的身份。
+        // 同行 charsMoved=10 在 Step B 撤回后也走跨行，但用它冒充真跨行会让断言
+        // 随判据变化；这里坚持用真跨行锁定跨行梯度。
         TrailCorner cShort = new TrailCorner(-0.5, -0.5, cfg);
         TrailCorner cCross = new TrailCorner(-0.5, -0.5, cfg);
         cShort.snapTo(2, 32, 100, 100);
@@ -96,9 +96,10 @@ public final class VUniform {
                 Math.abs(dShort - dCross) > 0.1,
                 String.format("短跳位移=%.2f 跨行位移=%.2f", dShort, dCross));
 
-        // ---- U-4：同一行 charsMoved=10 与 1 必须同速（Step B 新增）----
+        // ---- U-4：同一行 charsMoved=10 仍与 1 不同（Step B 已撤回）----
         //
-        // 这是 Step B 在本探针层面的直接契约：同一行的 burst 不再借用跨行分支。
+        // 同行 10 字符仍走跨行，1 字符走短跳，所以位移不同。
+        // 这是撤回后的已知误判行为，不是目标；断言它只为锁定现状。
         TrailCorner cOne = new TrailCorner(-0.5, -0.5, cfg);
         TrailCorner cBurst = new TrailCorner(-0.5, -0.5, cfg);
         cOne.snapTo(2, 32, 100, 100);
@@ -113,8 +114,8 @@ public final class VUniform {
         }
         double dOne = Math.abs(cOne.getCurrentX() - 99.0);
         double dBurst = Math.abs(cBurst.getCurrentX() - 99.0);
-        check("U-4 同一行 charsMoved=10 与 1 位移一致（Step B：同行 burst 走短跳）",
-                Math.abs(dOne - dBurst) < 0.01,
+        check("U-4 同一行 charsMoved=10 仍与 1 不同（Step B 已撤回；已知误判）",
+                Math.abs(dOne - dBurst) > 0.1,
                 String.format("charsMoved=1 位移=%.2f，charsMoved=10 位移=%.2f", dOne, dBurst));
 
         System.out.println();

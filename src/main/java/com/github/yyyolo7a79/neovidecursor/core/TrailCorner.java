@@ -65,14 +65,7 @@ public class TrailCorner {
     private int charsMoved = -1;
 
     /**
-     * 上一帧走的是「短跳分支」吗（L-8）。
-     *
-     * <p>Step B 之后这一支同时包含两类移动：
-     * ① 同一行 + {@code charsMoved <= typingMaxChars} 的短跳；
-     * ② 同一行 + {@code charsMoved > typingMaxChars} 的「连续移动」（burst，
-     *    例如一帧内合并了多次击键的连打 / Ctrl+Backspace）。
-     * 两者共用同一支画笔（{@code shortAnimationLength × trailFactors}），
-     * 所以这里记的是「分支」，不是字面意义的 isShortJump。
+     * 上一帧的短跳判定（L-8）。
      *
      * <p>分母为零时用它兜底，而不是让 {@code NaN} 替我们「猜」成跨行。
      * 初值 {@code false} 与「今天 NaN 的比较结果」完全一致 —— 也就是首帧行为不变。
@@ -167,9 +160,8 @@ public class TrailCorner {
      *
      * <p>分配规则：
      * <ul>
-     *   <li>同一行内的移动（含一帧合并多次击键的 burst）→
-     *       {@code shortAnimationLength × trailFactors[rank]}，动作干脆且有梯度</li>
-     *   <li>真跨行 → 按 rank 取原版三档（leading / 中值 / trailing）的时长</li>
+     *   <li>位移小 → 用 shortAnimationLength，动作干脆</li>
+     *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
      * <p>本方法不做任何「前缘吸附」——时长只按 rank 与短跳判定分配。
@@ -211,12 +203,8 @@ public class TrailCorner {
 
         // ==================== 短跳判定 ====================
         //
-        // 【语义】Step B 之后按三类分配：
-        //   ① 同一行 + charsMoved <= typingMaxChars(3)  → 短跳（短动画、有拉伸、连续）
-        //   ② 同一行 + charsMoved >  typingMaxChars     → 同行 burst（同短跳画笔）
-        //   ③ 真跨行（sameLine == false）                → 跨行三档（前缘可 0，缎带形状）
-        //      charsMoved < 0 的归一化兜底也走③（那里没有 sameLine 概念）
-        // ② 是 Step B 从旧跨行分支里拆出来的：同一行多走几个字符不是真换行。
+        // 【语义】「同一行内、移动不超过 N 个字符」→ 走短动画（有拉伸、连续）。
+        //        否则走跨行分支（前缘瞬时吸附的大幅拖尾）。
         //
         // 【为什么最终用「字符偏移差」，而不是像素或字体度量】
         //
@@ -248,31 +236,25 @@ public class TrailCorner {
         //   · 与字体、字号、全角半角、连字完全无关
         //   · 整数，无测量误差；getOffset() 也比两次 visualPositionToXY 便宜
         //
-        // 【缺陷 2 —— 帧间累计量，Step B 解决】
+        // 【缺陷 2 —— 审计确认，本版修复】
         //
         // 问题：这个差值是「自上一帧以来的<b>累计</b>量」。而帧率是会变的：
         //   · 常驻刷新：每 8ms 一帧 → 每次击键都被单独看到，charsMoved = 1
         //   · 空闲降频：每 120~600ms 一帧 → 一帧内可能累积 3~5 次击键
         // 后者会算出 charsMoved = 4 之类，越过 typingMaxChars(3) → 切跨行分支
-        // → 前缘时长为 0 被短路 → 拖尾忽有忽无。
-        // 这正是「同一个按键，这次有拖尾、下次没有」的机制。
+        // → 前缘时长为 0 被短路 → 拉伸暴涨约 4.5 倍。
+        // 这正是「开了常驻刷新可用、不开就卡得更厉害」的机制：
+        // 同一个操作，常驻时 charsMoved=1，降频时可能是 4。
         //
-        // 【历史注释勘误，2026-11-04】早期这里写着「判据改成看是否沿同一方向持续推进 /
-        // 横向位移不超过像素上限」，但 charsMoved >= 0 的主判据里从来没有横向像素上限 ——
-        // 那里只比较 sameLine 与 typingMaxChars（见下方）；
-        // shortMoveThreshold 只在 charsMoved < 0 的归一化兜底里被读。
-        //
-        // Step B 的解法不是加像素上限，而是承认「同一行内多走几个字符仍属于连续移动」：
-        // 它不再借用跨行分支，而是并入短跳画笔（见 isHorizontalBurst）。
+        // 修复：判据不再直接用「累计字符数」，而是看<b>是否沿同一方向持续推进</b>
+        // ——打字/退格本质是逐字符、同方向的事件流。只要纵向在同一行、
+        // 且横向位移没有超出「一次合理跳转」的像素上限，就归为短跳。
+        // 这样无论一帧合并了几次击键，行为都一致。
         boolean isShortJump;
-        // 同一行内超过 typingMaxChars 的「连续移动」。只在 charsMoved >= 0 时成立；
-        // 两个兜底分支保持 false，不改变块选区 / 预览早期帧的既有行为。
-        boolean isHorizontalBurst = false;
         boolean decided = true;
         if (charsMoved >= 0) {
             boolean sameLine = Math.abs(deltaYpx) <= height * 0.5;
             isShortJump = sameLine && charsMoved <= config.typingMaxChars;
-            isHorizontalBurst = sameLine && !isShortJump;
         } else if (!(width > 0) || !(height > 0)) {
             // 【L-8，2026-10-30】分母为零/非有限时不做除法。
             //
@@ -298,20 +280,13 @@ public class TrailCorner {
             double jumpY = deltaYpx / height;
             isShortJump = Math.abs(jumpX) <= config.shortMoveThreshold && Math.abs(jumpY) <= 0.001;
         }
-        // 两支合流：短跳与同行 burst 用同一支画笔。
-        // 先算成一个局部变量，避免「分支条件」与「lastShortJump 记忆」两处各写一遍
-        // 而出现漂移 —— 这个漂移正是 A-24 变异测试要抓的东西。
-        boolean useShortBranch = isShortJump || isHorizontalBurst;
-
         if (decided) {
             // 只有真的做出了判定才更新 —— 兜底那一帧的「保持上一帧」不能覆盖记忆，
             // 否则连续两帧零尺寸之后就没有「上一帧」可保持了。
-            // Step B：必须记 useShortBranch，不能只记 isShortJump，
-            // 否则零尺寸兜底会把 burst 丢回跨行。
-            lastShortJump = useShortBranch;
+            lastShortJump = isShortJump;
         }
 
-        if (useShortBranch) {
+        if (isShortJump) {
             // ---- 【关键修正】短跳也必须保留 rank 梯度 ----
             //
             // 原版短跳分支给四角【同一个】时长（min(animationLength, shortAnimationLength)），
@@ -322,11 +297,6 @@ public class TrailCorner {
             //
             // 改为仍然乘 trailFactors，让后缘慢、前缘快：
             //   shortAnimationLength=0.08 时四角为 80/72/40/24ms，梯度完整保留。
-            //
-            // Step B（2026-11-04）：同一行内 charsMoved 超过 typingMaxChars 的
-            // 「连续移动」（连打 / Ctrl+Backspace / 一帧合并多次击键）也走这一支。
-            // 它不是真换行，不能借用跨行分支的 leading=0；否则前缘每帧瞬移，
-            // 表现为拖尾忽有忽无。
             double factor = (rank < config.trailFactors.length ? config.trailFactors[rank] : 1.0f);
             animationLength = config.shortAnimationLength * clamp(factor, 0, 1);
 
@@ -410,13 +380,12 @@ public class TrailCorner {
             // 基础/纯平滑占后缘 55%、缎带占 20%，用户实机确认「跨行密度像没有了」。
             // 证据与决策：docs/BUG-LOG.md §BUG-016、docs/HANDOFF-2026-11-03-BUG-016.md。
             //
-            // 【Step B，2026-11-04】同一行内的 burst 已拆到短跳分支，本支现在服务：
-            // ① 真跨行：sameLine == false（换行 / 上下跳 / 纵向鼠标拖拽 / 纵向大跨度）；
-            // ② charsMoved < 0 且尺寸有效的归一化兜底（它同样走这套三档）。
-            // 同行的大跨度（Ctrl+End / 行内远点击）已归入短跳，不再走这一支。
-            // 因此这里 leading = 0 不会再影响连打 —— 它是缎带形状的来源，保持不动。
-            // 面板的「跨行动画时长」提示必须与本行同源：
-            // leading = animationLength × clamp(1 - trailSize, 0, 1)。
+            // 同行连打被误判成跨行的问题【仍然存在】。2026-11-04 Step B 曾按方案 A
+            // 拆出「同行 burst」分支，实机后用户反馈：连打偶发无拖尾的症状从未感受到，
+            // 而选词 / End / 鼠标拖选等同行大跳的观感变化可见 —— 收益不可感知、副作用可见，
+            // 因此当天撤回。详见 docs/STEP-B-REVERT-REPORT-2026-11-04.md。
+            // 判据保持不动；这一支走同一个公式，前缘同样是 0 —— 已知行为。
+            // 面板的「跨行动画时长」提示必须与本行同源：leading = animationLength × (1 - trailSize)。
             double trailing = config.animationLength;
             if (rank >= 2) {
                 animationLength = leading;
