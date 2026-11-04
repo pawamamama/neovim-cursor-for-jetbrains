@@ -1,6 +1,6 @@
 # 文档索引
 
-> 本项目有 **181 个** git 跟踪的 md 文件，其中 **118 份在 `docs/archive/`**，**其余 63 份**在活跃目录。
+> 本项目有 **189 个** git 跟踪的 md 文件，其中 **126 份在 `docs/archive/`**，**其余 63 份**在活跃目录。
 >
 > 分布（2026-11-04 实测）：根 6 + `docs/` 30（顶层 22 + `docs/design/` 8）+ `plans/` 18 + `build/` 9 = 63。
 >
@@ -72,7 +72,7 @@
 
 ## 第三层：已归档（**不要当现状**）
 
-`docs/archive/` 下共 **118 份**，按主题分：
+`docs/archive/` 下共 **126 份**，按主题分：
 
 | 位置 | 主题 |
 |---|---|
@@ -80,6 +80,7 @@
 | `docs/archive/handoffs/` | 11 份：历次交接（HANDOFF-2026-10-30 ~ 11-03、BATCH2 / BATCH3、FADE、NEXT） |
 | `docs/archive/decisions/` | 4 份：决策报告与面板决策（DECISION-REPORT、DECISIONS-PANEL、LEADING-SNAP-DECISION） |
 | `docs/archive/prompts/` | 8 份：一次性施工提示词（`PROMPT-*`，含已作废 / 已合并） |
+| `docs/archive/plans/` | 8 份：2026-10 的会话计划（工作区整理、`RUNTIME_SWITCH_KEYS` 重构、BUG-007、辉光淡出、md 收缩等；原在 `~/.claude/plans/`） |
 | `docs/archive/design/` | 30 份：旧设计文档（设置系统重构系列、上游调研、多光标、IME 调研、优化批次） |
 | `docs/archive/` 顶层 | 43 份：早期进度与旧版任务书（`PROGRESS` / `ROADMAP` / `VERSIONS` / `README.xx` 等） |
 
