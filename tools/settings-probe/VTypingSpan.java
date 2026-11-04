@@ -5,7 +5,7 @@ import com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings;
 import java.util.Locale;
 
 /**
- * V-TYPING-SPAN：守 Step C 恢复后的跨行/短跳契约 —— 真跨行前缘 = 0、短跳逐位不变。
+ * V-TYPING-SPAN：真跨行前缘 = 0；同一行的短跳与 burst 同源（Step B）。
  *
  * <p><b>守的是什么</b>：0.9.90 用户观察「按住 f 连打时拖尾长度不一致，辉光最明显」。
  * 根因是 {@code charsMoved} 是<b>帧间累计量</b>（{@code SpringTrail.updateCharsMoved}）：
@@ -21,13 +21,17 @@ import java.util.Locale;
  *
  * <p><b>2026-11-03 Step C 撤回该下限</b>：下限加在真跨行与同行误判<b>共用</b>的分支上，
  * 真跨行前缘从 0 被抬到 55ms，三个预设的缎带密度一起变窄（用户实机确认）。
- * 本探针的契约随之恢复：
+ *
+ * <p><b>2026-11-04 Step B 拆开判据</b>：同一行内 {@code charsMoved > typingMaxChars}
+ * 不再借用跨行分支，而是与短跳共用同一支画笔。当前契约：
  * <ul>
- *   <li>真跨行（垂直位移）→ {@code leading = animationLength × (1 - trailSize)}，trailSize=1.0 时为 0；</li>
+ *   <li>真跨行（{@code sameLine == false}）→ {@code leading = animationLength × (1 - trailSize)}，
+ *       trailSize=1.0 时为 0；rank0 = animationLength；</li>
  *   <li>同一行 1..3 字符 → 短跳公式 {@code shortAnimationLength × trailFactors}；</li>
- *   <li>同一行 4..6 字符 → 仍走跨行分支（<b>已知误判，Step B 另修</b>），前缘为 0。</li>
+ *   <li>同一行 4..10 字符（连打 / 删词一帧合并多次击键）→ <b>同行 burst，同短跳公式</b>；</li>
+ *   <li>{@code charsMoved < 0} 的两个兜底分支保持既有行为（零尺寸沿用上一帧分支）。</li>
  * </ul>
- * 这是<b>契约恢复，非缺陷</b>。
+ * 前两条是 Step C 的契约恢复，后两条是 Step B 的契约变更，均<b>非缺陷</b>。
  *
  * <p><b>纪律四-G</b>：本探针只调用生产方法 {@code TrailCorner.jump()}，
  * 不自己重写判据或分配算法。时长的读取走反射读弹簧私有字段 —— 这是「断言生产行为」，
@@ -44,7 +48,7 @@ public final class VTypingSpan {
     private static final double CHAR_W = 12.0;
 
     public static void main(String[] args) {
-        System.out.println("=== V-TYPING-SPAN：真跨行前缘 = 0、短跳逐位不变（Step C 恢复）===");
+        System.out.println("=== V-TYPING-SPAN：真跨行前缘 = 0、同行 burst 与短跳同源（Step B）===");
 
         NeovideConfig cfg = baseConfig();
         System.out.printf(Locale.ROOT,
@@ -62,23 +66,23 @@ public final class VTypingSpan {
         // DampedSpring.update() 首句 animationLength <= dt 使它第一帧到位。
         // 这正是「缎带」形状的来源 —— 前缘咬住新位置、只有后缘拖出去。
         //
-        // 必须用【垂直位移】制造真跨行。同一行 charsMoved=4 也会走跨行分支，
-        // 但那是误判（Step B 修）；用它冒充真跨行，会在误判被修掉后失去意义。
+        // 必须用【垂直位移】制造真跨行。同一行 charsMoved=4 在 Step B 之后
+        // 走的是短跳分支，不能再用它冒充真跨行。
         double[] crossReal = cornerLens(cfg, 4, false);
         double[] expectCross = {cfg.animationLength, cfg.animationLength / 2.0, 0.0, 0.0};
         check("T-1 真跨行时前缘为 0（trailSize=1.0，缎带形状的来源）",
                 sameWithin(crossReal, expectCross, 1e-9),
                 String.format(Locale.ROOT, "四角 = %s，期望 %s", j(crossReal), j(expectCross)));
 
-        // ---------- T-2：短跳逐位不变；同行走跨行分支（4..6）前缘为 0 ----------
+        // ---------- T-2：短跳 1..3 逐位不变；同行 burst 4..6 同源 ----------
         //
-        // 【Step C 契约恢复，2026-11-03】撤下限后必须同时守住两件事：
-        //   a) 同一行 1..3 字符仍走短跳，四角逐位等于 shortAnimationLength × trailFactors；
-        //   b) 同一行 4..6 字符仍走跨行分支（误判），前缘回到 0 ——
-        //      这是【已知缺陷，Step B 另修】，Step C 只负责把行为恢复到 0.9.127。
+        // 【Step B，2026-11-04】同一行 4..6 字符必须与短跳同源：
+        //   a) 同一行 1..3 字符走短跳，四角逐位等于 shortAnimationLength × trailFactors；
+        //   b) 同一行 4..6 字符走「同行 burst」，同样等于短跳公式。
+        // 旧契约（4..6 走跨行、前缘 = 0）是已知误判，Step B 已改方向。
         double[] expectShort = new double[4];
         for (int rank = 0; rank < 4; rank++) {
-            expectShort[rank] = cfg.shortAnimationLength * cfg.trailFactors[rank];
+            expectShort[rank] = (double) cfg.shortAnimationLength * cfg.trailFactors[rank];
         }
         boolean shortOk = true;
         String shortDetail = "";
@@ -97,30 +101,34 @@ public final class VTypingSpan {
         String burstDetail = "";
         for (int ch = 4; ch <= 6; ch++) {
             double[] lens = cornerLens(cfg, ch, true);
-            System.out.printf(Locale.ROOT, "  charsMoved=%d（跨行分支）四角 = %s%n", ch, j(lens));
-            if (lens[2] != 0.0 || lens[3] != 0.0 || lens[0] != (double) cfg.animationLength) {
+            System.out.printf(Locale.ROOT, "  charsMoved=%d（同行 burst）四角 = %s%n", ch, j(lens));
+            if (!sameWithin(lens, expectShort, 1e-6)) {
                 burstOk = false;
-                burstDetail = "charsMoved=" + ch + " → " + j(lens);
+                burstDetail = "charsMoved=" + ch + " → " + j(lens) + "，公式 " + j(expectShort);
             }
         }
-        check("T-2b 同一行 4..6 字符走跨行分支时前缘为 0（已知误判，Step B 修）",
-                burstOk, burstDetail.isEmpty() ? "4..6 前缘均为 0" : burstDetail);
+        check("T-2b 同一行 4..6 字符走短跳分支（四角 = short × trailFactors，Step B 契约变更）",
+                burstOk, burstDetail.isEmpty() ? "4..6 与短跳逐位一致" : burstDetail);
 
-        // ---------- T-3：大跨度仍要保留梯度：前缘必须比后缘快 ----------
-        double[] cross10 = cornerLens(cfg, 10, true);
-        check("T-3 大跨度时前缘仍比后缘快（不破坏原版 trailSize 三档梯度）",
+        // ---------- T-3：真跨行仍要保留梯度：前缘必须比后缘快 ----------
+        //
+        // 【Step B，2026-11-04】必须用真跨行（sameLine=false）。修复前它用
+        // 「同一行 charsMoved=10」冒充大跨度；Step B 之后那走短跳，断言仍然成立，
+        // 但测的已经不是跨行 —— 会变成一条永久假绿的断言。
+        double[] cross10 = cornerLens(cfg, 10, false);
+        check("T-3 真跨行时前缘仍比后缘快（不破坏原版 trailSize 三档梯度，Step B 改用真跨行）",
                 cross10[3] < cross10[0] && cross10[2] < cross10[0],
                 String.format(Locale.ROOT, "后缘(rank0) = %.4f s，前缘(rank2/3) = %.4f / %.4f s",
                         cross10[0], cross10[2], cross10[3]));
 
         // ---------- T-4：短跳分支逐位不变 ----------
         //
-        // 这是最关键的一条：本次恢复只该动跨行分支，短跳的手感必须与恢复前逐位一致。
+        // 这是最关键的一条：Step B 只拆判据，短跳公式本身必须逐位不变。
         // 期望值不是写死的数字，而是按生产公式 shock = shortAnimationLength × trailFactors[rank] 复算。
         double[] short1 = cornerLens(cfg, SHORT_CHARS, true);
         double[] expect = new double[4];
         for (int rank = 0; rank < 4; rank++) {
-            expect[rank] = cfg.shortAnimationLength * cfg.trailFactors[rank];
+            expect[rank] = (double) cfg.shortAnimationLength * cfg.trailFactors[rank];
         }
         check("T-4 短跳分支四角时长与生产公式逐位一致（修复没有污染单行打字）",
                 sameWithin(short1, expect, 1e-6),
@@ -135,6 +143,74 @@ public final class VTypingSpan {
                 Math.min(crossReal[2], crossReal[3]) <= crossReal[0],
                 String.format(Locale.ROOT, "前缘 %.4f s vs 后缘 %.4f s",
                         Math.min(crossReal[2], crossReal[3]), crossReal[0]));
+
+        // ---------- T-6：真跨行密度守卫（Step B 新增）----------
+        //
+        // 真跨行在 trailSize=0.0 / 0.5 / 1.0 三档都必须保持 Step C 的公式：
+        //   leading  = animationLength × (1 - trailSize)
+        //   trailing = animationLength
+        // rank0 = trailing，rank1 = (leading + trailing) / 2，rank2/3 = leading。
+        // 这条防的是「下一次又有人给真跨行加固定下限」。
+        //
+        // trailSize 追加 -0.5 / 1.5 两档越界值：生产公式里有 clamp(1 - trailSize, 0, 1)，
+        // 期望值必须同样夹取，否则「删掉 clamp」不会有任何探针反应。
+        boolean densityOk = true;
+        String densityDetail = "";
+        for (float ts : new float[]{-0.5f, 0.0f, 0.5f, 1.0f, 1.5f}) {
+            NeovideConfig c = baseConfig();
+            c.trailSize = ts;
+            double[] lens = cornerLens(c, 4, false);
+            double leading = (double) c.animationLength * clamp01(1.0 - (double) ts);
+            double trailing = c.animationLength;
+            double[] expectDensity = {trailing, (leading + trailing) / 2.0, leading, leading};
+            System.out.printf(Locale.ROOT, "  真跨行 trailSize=%.1f 四角 = %s%n", ts, j(lens));
+            if (!sameWithin(lens, expectDensity, 1e-9)) {
+                densityOk = false;
+                densityDetail = "trailSize=" + ts + " → " + j(lens) + "，公式 " + j(expectDensity);
+            }
+        }
+        check("T-6 真跨行密度守卫：trailSize=-0.5/0/0.5/1/1.5 时 "
+                        + "leading = animationLength×clamp(1-trailSize)、rank0 = animationLength",
+                densityOk, densityDetail.isEmpty() ? "五档全部一致" : densityDetail);
+
+        // ---------- T-7：同行 burst 守卫（Step B 新增）----------
+        //
+        // 同一行 charsMoved=4..10 必须走短跳公式；至少覆盖 slope=0 与 slope=100。
+        // 不要断言 rank0 <= animationLength：纯平滑输入 slope=100 时
+        // short rank0 = 0.11 × 1.00 = 110ms > animationLength 100ms，会写出假红。
+        boolean horizontalOk = true;
+        String horizontalDetail = "";
+        for (int slopeTicks : new int[]{0, 100}) {
+            NeovideConfig c = baseConfig();
+            c.trailFactors = NeovideCursorSettings.deriveTrailFactors(4.5f, 0f, slopeTicks);
+            double[] expectBurst = new double[4];
+            for (int rank = 0; rank < 4; rank++) {
+                expectBurst[rank] = (double) c.shortAnimationLength * c.trailFactors[rank];
+            }
+            for (int ch = 4; ch <= 10; ch++) {
+                double[] lens = cornerLens(c, ch, true);
+                if (!sameWithin(lens, expectBurst, 1e-6)) {
+                    horizontalOk = false;
+                    horizontalDetail = "slope=" + slopeTicks + " charsMoved=" + ch
+                            + " → " + j(lens) + "，公式 " + j(expectBurst);
+                }
+            }
+            System.out.printf(Locale.ROOT, "  同行 burst slope=%d 公式 = %s%n",
+                    slopeTicks, j(expectBurst));
+        }
+        check("T-7 同行 burst 守卫：charsMoved=4..10、slope=0/100 四角逐位 = short × trailFactors",
+                horizontalOk, horizontalDetail.isEmpty() ? "两组斜度全部一致" : horizontalDetail);
+
+        // ---------- T-8：真跨行 + charsMoved <= typingMaxChars（Step B 新增）----------
+        //
+        // 旧的「真跨行」用例 charsMoved 全是 4/10/99，全部大于 typingMaxChars，
+        // 所以 sameLine 这一半可以被静默删掉而无人发现：把判据简化成
+        // `charsMoved <= typingMaxChars` 后，按 Enter / 上下键（charsMoved=1）会误走短跳。
+        // 这条用 charsMoved=1 + 纵向位移，锁住 sameLine。
+        double[] crossSmall = cornerLens(cfg, 1, false);
+        check("T-8 真跨行 + charsMoved=1 仍走跨行（sameLine 判据不可丢）",
+                sameWithin(crossSmall, expectCross, 1e-9),
+                String.format(Locale.ROOT, "四角 = %s，期望 %s", j(crossSmall), j(expectCross)));
 
         System.out.println();
         System.out.printf("=== V-TYPING-SPAN 结果：PASS %d，FAIL %d ===%n", pass, fail);
@@ -208,8 +284,18 @@ public final class VTypingSpan {
         }
     }
 
+    /** 与生产 {@code TrailCorner.clamp(...)} 同语义：探针不直接调用生产私有方法。 */
+    private static double clamp01(double v) {
+        return v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
+    }
+
     private static boolean sameWithin(double[] a, double[] b, double eps) {
         for (int i = 0; i < a.length; i++) {
+            // NaN 参与比较时 `Math.abs(NaN - x) > eps` 恒为 false，会静默通过。
+            // 生产短跳时长一旦变成 NaN，没有这一行就可以「全绿」——见审查 M-3。
+            if (!Double.isFinite(a[i]) || !Double.isFinite(b[i])) {
+                return false;
+            }
             if (Math.abs(a[i] - b[i]) > eps) {
                 return false;
             }

@@ -11,8 +11,10 @@ import java.lang.reflect.Method;
  *
  * <p><b>已知的两个不均匀来源</b>：
  * <ol>
- *   <li><b>charsMoved 行间不同</b> → isShortJump 判定不同 → 时长差 2 倍以上
- *       （已修：块选区所有行共享第 0 行的移动量）</li>
+ *   <li><b>charsMoved 行间不同</b> → 旧实现会选到不同分支、时长差 2 倍以上。
+ *       Step B（2026-11-04）之后，同一行内的 charsMoved 差异不再改变分支（都走短跳）；
+ *       仍会改变分支的是「真跨行 vs 同一行」，以及 charsMoved=-1 的兜底路径。
+ *       （块选区共享 charsMoved 的规则仍由 VBlockStretch B-1 守门。）</li>
  *   <li><b>rank 分配不同</b> → trailFactors 不同 → 时长不同
  *       （这是<b>设计如此</b>：前缘快后缘慢才形成拉伸）</li>
  * </ol>
@@ -64,30 +66,56 @@ public final class VUniform {
         check("U-2 相同相对位移 → 两行相对 y 一致", sameRelY,
                 String.format("relY0: %.3f vs %.3f", c1[1] - 100, c2[1] - 200));
 
-        // ---- U-3：不同 charsMoved 会导致不同时长（这是已知的两个分支）----
+        // 把跨行时长拉开到缎带档（0.28s），避免 U-3 的位移差贴着 0.1px 阈值。
+        // 短跳 rank0 仍是 0.11s，两者差 2.5 倍，断言不再依赖默认值恰好差 10%。
+        cfg.animationLength = 0.28f;
+
+        // ---- U-3：真跨行与短跳必须产生不同位移 ----
         //
-        // 验证 TrailCorner 确实按 charsMoved 分支。这是「不均匀」的根源，
-        // 修复方式是调用方共享同一个值，而不是改 TrailCorner。
+        // 【Step B，2026-11-04】原来用「同一行 charsMoved=10」冒充跨行；Step B 之后
+        // 那走短跳，与 charsMoved=1 完全同速，断言会失败。改用真跨行（纵向 dy=h），
+        // 继续证明两个分支的位移不同。
         TrailCorner cShort = new TrailCorner(-0.5, -0.5, cfg);
-        TrailCorner cLong = new TrailCorner(-0.5, -0.5, cfg);
+        TrailCorner cCross = new TrailCorner(-0.5, -0.5, cfg);
         cShort.snapTo(2, 32, 100, 100);
-        cLong.snapTo(2, 32, 100, 100);
+        cCross.snapTo(2, 32, 100, 100);
 
         cShort.setCharsMoved(1);      // 短跳
-        cLong.setCharsMoved(10);      // 跨行
+        cCross.setCharsMoved(10);     // 真跨行：纵向位移一整行高
         cShort.jump(2, 32, 108, 100, 0);
-        cLong.jump(2, 32, 108, 100, 0);
+        cCross.jump(2, 32, 108, 100 + 32, 0);
 
-        // 推进相同帧数，位移应当不同（证明两个分支确实不同）
+        // 推进相同帧数，横向位移应当不同（证明两个分支确实不同）
         for (int f = 0; f < 2; f++) {
             cShort.update(2, 32, 108, 100, 0.008, false);
-            cLong.update(2, 32, 108, 100, 0.008, false);
+            cCross.update(2, 32, 108, 100 + 32, 0.008, false);
         }
         double dShort = Math.abs(cShort.getCurrentX() - 99.0);
-        double dLong = Math.abs(cLong.getCurrentX() - 99.0);
-        check("U-3 不同 charsMoved 确实产生不同位移（证明必须共享）",
-                Math.abs(dShort - dLong) > 0.1,
-                String.format("短跳位移=%.2f 跨行位移=%.2f", dShort, dLong));
+        double dCross = Math.abs(cCross.getCurrentX() - 99.0);
+        check("U-3 真跨行与短跳确实产生不同位移（证明两个分支不同）",
+                Math.abs(dShort - dCross) > 0.1,
+                String.format("短跳位移=%.2f 跨行位移=%.2f", dShort, dCross));
+
+        // ---- U-4：同一行 charsMoved=10 与 1 必须同速（Step B 新增）----
+        //
+        // 这是 Step B 在本探针层面的直接契约：同一行的 burst 不再借用跨行分支。
+        TrailCorner cOne = new TrailCorner(-0.5, -0.5, cfg);
+        TrailCorner cBurst = new TrailCorner(-0.5, -0.5, cfg);
+        cOne.snapTo(2, 32, 100, 100);
+        cBurst.snapTo(2, 32, 100, 100);
+        cOne.setCharsMoved(1);
+        cBurst.setCharsMoved(10);
+        cOne.jump(2, 32, 108, 100, 0);
+        cBurst.jump(2, 32, 108, 100, 0);
+        for (int f = 0; f < 2; f++) {
+            cOne.update(2, 32, 108, 100, 0.008, false);
+            cBurst.update(2, 32, 108, 100, 0.008, false);
+        }
+        double dOne = Math.abs(cOne.getCurrentX() - 99.0);
+        double dBurst = Math.abs(cBurst.getCurrentX() - 99.0);
+        check("U-4 同一行 charsMoved=10 与 1 位移一致（Step B：同行 burst 走短跳）",
+                Math.abs(dOne - dBurst) < 0.01,
+                String.format("charsMoved=1 位移=%.2f，charsMoved=10 位移=%.2f", dOne, dBurst));
 
         System.out.println();
         System.out.printf("=== V-UNIFORM 结果：PASS %d，FAIL %d ===%n", pass, fail);

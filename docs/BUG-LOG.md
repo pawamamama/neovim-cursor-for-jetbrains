@@ -1362,3 +1362,186 @@ rank0 仍为 `0.1000`（缎带 0.2800）。
 **Step C 修复报告（交付记录）**：[STEP-C-FIX-REPORT-2026-11-04.md](STEP-C-FIX-REPORT-2026-11-04.md)
 —— 根因、改动清单、四段验证、变异测试、审查结论、安装与实机验收步骤。
 —— 给决策会话的完整素材（attempt-1 否决证据、常驻刷新根因、两个缺陷、待决策项）。
+
+### 2026-11-04 Step B 取证：同一行 `charsMoved ≥ 4` 误判成跨行（修复前证据）
+
+**结论（先给）**：`TrailCorner.jump()` 只把「同一行且 `charsMoved ≤ typingMaxChars(3)`」
+判成短跳；同一行内一帧累计到 4 个字符以上时，`isShortJump == false`，
+掉进**与真跨行共用**的跨行分支。该分支在 `trailSize=1.0` 时前缘精确为 0，
+所以同一按键会出现「这次有拖尾、下次瞬移」。这是 0.9.127 时代就存在的行为，
+**不是 0.9.130 的回归**。
+
+#### 代码事实（HEAD = `cda7141`）
+
+| 位置 | 内容 |
+|---|---|
+| `core/TrailCorner.java:199-200` | `deltaXpx = destX - previousDestX` / `deltaYpx = destY - previousDestY`（与上一帧**目标**的差） |
+| `core/TrailCorner.java:253-257` | 判据：`sameLine = \|deltaYpx\| <= height × 0.5`；`isShortJump = sameLine && charsMoved <= config.typingMaxChars` |
+| `core/TrailCorner.java:283-287` | `lastShortJump` 只在 `decided == true` 时更新，供零尺寸兜底（`:271`）使用 |
+| `core/TrailCorner.java:289-301` | 短跳分支：`animationLength = shortAnimationLength × trailFactors[rank]` |
+| `core/TrailCorner.java:363-393` | 跨行分支：`leading = animationLength × clamp(1 - trailSize, 0, 1)`、`trailing = animationLength`；rank2/3 → `leading`，rank1 → 中值，rank0 → `trailing` |
+| `ui/SpringTrail.java:139-148` | `updateCharsMoved()` 返回 `\|caretOffset - lastCaretOffset\|` —— **帧间累计量**，不是单次击键 |
+| `tools/settings-probe/VTypingSpan.java:98-107` | T-2b 当前把「同行 4..6 走跨行、前缘 = 0」写成了契约（Step B 要改方向） |
+
+#### 参数（`settings/CursorPresets.java:355/357/369` + `NeovideConfig` 默认值）
+
+`shortAnimationLength = 0.11 s`，`typingMaxChars = 3`，三个内置预设的
+`animationLength` = **0.10 / 0.28 / 0.10 s**，`trailSize` 均为 **1.0**。
+四角系数（`NeovideCursorSettings.deriveTrailFactors`）：
+
+```
+基础        k=4.5 smooth=0.0 slope=0   → [0.86, 0.86, 0.32, 0.32]
+缎带        k=8.0 smooth=0.0 slope=0   → [0.85, 0.85, 0.24, 0.24]
+纯平滑输入  k=2.0 smooth=0.2 slope=100 → [1.00, 0.85, 0.69, 0.58]
+```
+
+> 注意：纯平滑输入的短跳 rank0 = `0.11 × 1.00 = 110 ms`，**大于**它的
+> `animationLength = 100 ms`。这是合法值（短跳分支不读 `animationLength`），
+> 所以 B 的探针不能用 `rank0 <= animationLength` 当判据。
+
+#### 四角时长复算（单位 ms；rank0 = 后缘，rank1 = 中档，rank2/3 = 前缘）
+
+以 Step 0 基线实测为准（下面的数字来自当时的输出；`build/v2-probe/VTypingSpan.txt`
+会被后续门禁重跑覆盖，不能作为长期出处）：
+
+```
+配置：animationLength=0.10s shortAnimationLength=0.11s trailSize=1.00 typingMaxChars=3
+charsMoved=1..3（同一行，短跳）       四角 = [0.0946, 0.0946, 0.0352, 0.0352]
+charsMoved=4..6（同一行，误判跨行）   四角 = [0.1000, 0.0500, 0.0000, 0.0000]
+真跨行（deltaY = height）             四角 = [0.1000, 0.0500, 0.0000, 0.0000]
+```
+
+按同一公式推广到三个预设：
+
+| 场景 | 分支 | 基础 | 缎带 | 纯平滑输入 |
+|---|---|---|---|---|
+| 同行 1..3 字符 | 短跳 | 94.6 / 94.6 / 35.2 / 35.2 | 93.5 / 93.5 / 26.4 / 26.4 | 110 / 93.5 / 75.9 / 63.8 |
+| **同行 4..6 字符（误判）** | **跨行** | **100 / 50 / 0 / 0** | **280 / 140 / 0 / 0** | **100 / 50 / 0 / 0** |
+| 真跨行 | 跨行 | 100 / 50 / 0 / 0 | 280 / 140 / 0 / 0 | 100 / 50 / 0 / 0 |
+
+**观感差异在哪**：同一行 4..6 字符时，前缘（rank2/3）从 35.2 / 26.4 / 75.9 ms
+变成 **0 ms** —— `DampedSpring.update()` 首句 `animationLength <= dt` 让前缘第一帧
+就咬到新位置，只剩后缘拖出去。对缎带还叠加后缘从 93.5 ms 变成 280 ms。
+这就是「同一个按键，这次有拖尾、下次没有」。
+
+#### 起源（不是回归）
+
+```
+74d3a8a  2026-10-18 18:01:16 +0800
+feat: 常驻刷新默认开启 + 原生光标开关 + CJK 短跳修复 + 完整交接文档
+gradle.properties: pluginVersion=0.4.3
+```
+
+该提交引入 `charsMoved` / `setCharsMoved()` 与
+`isShortJump = sameLine && charsMoved <= typingMaxChars`，误判从这时起就存在。
+`git log --follow` 之后判据主线未变：`6f7d585`（2026-10-30）只补了
+`charsMoved < 0` 的零尺寸兜底，Step C 的 `aeff707` / `79acfd3` 只改跨行
+`leading` 下限，**都没有改 `isShortJump` 判据本身**。
+
+#### 本次不碰的边界
+
+- 真跨行（`sameLine == false`）保持 Step C 恢复的
+  `leading = animationLength × clamp(1 - trailSize, 0, 1)`（`trailSize=1.0` → 0）；
+- A（补全弹窗闪烁）、D（删除延迟）、E（上游跨行模型实验）均不属于 Step B；
+- `core/NeovideConfig.java`（D0）、`CaretAnimator`、`SpringTrail`、`install.ps1` 不动。
+
+#### 修复方向（方案 A，已由用户拍板）
+
+```java
+boolean sameLine = Math.abs(deltaYpx) <= height * 0.5;
+boolean isShortJump = sameLine && charsMoved <= config.typingMaxChars;   // 保持
+boolean isHorizontalBurst = sameLine && !isShortJump;                    // 新增
+
+if (isShortJump || isHorizontalBurst) {
+    // 短跳那支：shortAnimationLength × trailFactors[rank]
+} else {
+    // 真跨行那支：leading = animationLength × clamp(1 - trailSize, 0, 1)  ← 逐字不动
+}
+```
+
+`lastShortJump` 必须同时记住「短跳」与「同行 burst」（`isShortJump || isHorizontalBurst`），
+否则零尺寸兜底会把 burst 丢回跨行，`VAuditBatch1` A-24 会红。
+
+### 2026-11-04 Step B 实施结果（方案 A：同行 burst 拆到短跳分支）
+
+**生产行为改动只有一处**：`TrailCorner.jump()` 的判据从两分类改为三分类。
+
+```java
+boolean isShortJump = false;
+boolean isHorizontalBurst = false;
+if (charsMoved >= 0) {
+    boolean sameLine = Math.abs(deltaYpx) <= height * 0.5;
+    isShortJump = sameLine && charsMoved <= config.typingMaxChars;
+    isHorizontalBurst = sameLine && !isShortJump;
+}
+boolean useShortBranch = isShortJump || isHorizontalBurst;
+if (decided) lastShortJump = useShortBranch;
+if (useShortBranch) { /* shortAnimationLength × trailFactors[rank] */ }
+```
+
+- 短跳公式与真跨行公式**逐字未动**；`git diff` 只出现判据、注释与 `lastShortJump` 赋值。
+- `charsMoved < 0` 的两个兜底分支行为不变：零尺寸只读 `lastShortJump` 且 `decided=false`，
+  归一化兜底照旧写记忆。
+- 真跨行 `leading = animationLength × clamp(1 - trailSize, 0, 1)` 保持 Step C 原样，
+  没有 `Math.max`、没有新下限。
+
+**新契约（实测）**：
+
+| 场景 | 分支 | 基础预设四角（秒） |
+|---|---|---|
+| 同行 1..3 字符 | 短跳 | 0.0946 / 0.0946 / 0.0352 / 0.0352 |
+| 同行 4..6 字符 | **短跳（burst）** | 0.0946 / 0.0946 / 0.0352 / 0.0352 |
+| 真跨行（trailSize=1.0） | 跨行 | 0.1000 / 0.0500 / 0.0000 / 0.0000 |
+
+真跨行在 `trailSize = -0.5 / 0 / 0.5 / 1 / 1.5` 五档下均与
+`animationLength × clamp(1 - trailSize)` 逐位一致（T-6）。
+
+**探针改动（契约变更，非缺陷；未删断言）**：
+
+| 文件 | 改动 |
+|---|---|
+| `VTypingSpan` | 6 → **9 条**：T-2b 改「同行 4..6 走短跳」；T-3 改真跨行；新增 T-6（跨行密度五档含 clamp 越界）、T-7（同行 burst 4..10、slope=0/100）、T-8（真跨行 + charsMoved=1，锁 `sameLine`）；`sameWithIn` 增加 NaN/Infinity 守卫 |
+| `VBlockStretch` | B-2 改为「同行 charsMoved=50 与单行短跳一致」；B-1 未动 |
+| `VUniform` | U-3 改用真跨行（`animationLength=0.28` 拉开差距）；新增 U-4（同行 10 与 1 同速） |
+| `VAuditBatch1` | A-24 仅改注释/标签/变量名，断言逻辑与数量不变 |
+
+**四段验证（实跑）**：
+
+```
+① 红（只改探针，生产未动）
+   VTypingSpan 6/2（T-2b、T-7）、VBlockStretch 1/1（B-2）、VUniform 3/1（U-4）
+   V-PROBES RESULT: FAILED（3 个探针未通过）
+② 绿（改生产后）
+   VTypingSpan 9/9、VBlockStretch 2/2、VUniform 4/4、VAuditBatch1 27/27
+   V-PROBES RESULT: ALL PASS
+③ 变异红（六段）
+   M1 isHorizontalBurst=false          → T-2b/T-7/B-2/U-4 红（4 条断言）
+   M2 真跨行加回 55ms 下限             → T-1/T-6 + VTextFacts T-2 红；VHints 绿
+   M3 lastShortJump=isShortJump        → 仅 A-24 红
+   M4 isShortJump 丢掉 sameLine        → 仅 T-8 红
+   M5 删掉跨行 clamp                   → 仅 T-6 红（trailSize=1.5）
+   M6 短跳时长改 Double.NaN            → T-2a/T-2b/T-4/T-7 红（NaN 盲区已堵）
+④ 恢复绿
+   V-PROBES RESULT: ALL PASS；D0 零 diff；无 MUTATION 残留
+```
+
+**审查结论**：`code-reviewer` / `java-reviewer` 均 **0 CRITICAL / 0 HIGH，APPROVE**。
+MEDIUM 已在白名单内处理（T-3 假绿、NaN 盲区、T-6 未镜像 clamp、U-3 阈值、注释措辞）；
+白名单外的过期注释只登记（见下）。
+
+**已知副作用（B-AC-4，方案 A 的固有行为，不是缺陷）**：
+同一行内所有 `charsMoved > 3` 的移动现在都走短跳，包括 Ctrl+End、行内远点击、
+粘贴短文本、接受补全的大横向跳转。缎带预设的后缘从 280ms 变为 93.5ms（约 1/3）；
+基础/纯平滑后缘几乎不变，前缘从 0 变为 35.2 / 75.9ms。**没有加固定时长上限**，
+是否需要「同行大跳兜底」属于新的产品决策，等实机验收后由用户拍板。
+
+**明确未修**：A（补全弹窗闪烁）、C（已验收，保持）、D（删除延迟）、E（上游跨行模型）。
+
+**已知文档漂移（白名单外，未改）**：
+- `tools/settings-probe/build-v-probes.ps1:273-275` 仍写「六条 / 同行 4..6 已知误判」；
+- `ui/settings/AnimationPreview.java:670/686/735`、`ui/CaretAnimator.java:347/2481`、
+  `ui/settings/NeovideCursorConfigurable.java:1438` 仍按旧判据解释跨行；
+- `CLAUDE.md` / `docs/NEXT-STEPS.md` 的 `VTypingSpan 5` 旧数字。
+以上行为仍正确（真跨行由 `sameLine=false` 决定），只是归因文字过期。
+
+**状态**：探针绿、D0 零 diff；待打包 0.9.132 与用户实机验收。

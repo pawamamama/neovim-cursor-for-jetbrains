@@ -9,11 +9,15 @@ import java.lang.reflect.Method;
  * <p><b>用户报的 bug（2026-10-24）</b>：「多行缎带光标的拉伸表现和缎带单行不一致，
  * 多光标很长」。
  *
- * <p><b>根因</b>：块选区的 charsMoved 用 offset 差值算，跨行时必然 &gt; typingMaxChars(3)
+ * <p><b>根因（Step B 前）</b>：块选区的 charsMoved 用 offset 差值算，跨行时必然 &gt; typingMaxChars(3)
  * → 被判成「跨行」→ 用 animationLength(0.28) 而不是 shortAnimationLength(0.11)。
  *
  * <p><b>本探针的判据</b>：同样「行内小步移动」，
  * 块选区（charsMoved=-1 走归一化）与单行（charsMoved=1）算出的时长必须一致。
+ *
+ * <p><b>2026-11-04 Step B 契约变更</b>：同一行内 {@code charsMoved > typingMaxChars}
+ * 不再走跨行分支，而是与短跳同源。因此 B-2 从「旧行为必须更长」改为
+ * 「同行 burst 必须与单行短跳一致」—— 这是契约变更，不是缺陷。
  */
 public final class VBlockStretch {
     private static int pass = 0, fail = 0;
@@ -48,24 +52,26 @@ public final class VBlockStretch {
         jump.invoke(block, w, h, x1, y0, 0);
         double blockLen = springLen(block);
 
-        // C) 旧行为：块选区误用大 charsMoved（模拟跨行 offset 差）
-        TrailCorner oldBad = new TrailCorner(-0.5, -0.5, cfg);
-        oldBad.snapTo(w, h, x0, y0);
-        setChars.invoke(oldBad, 50);            // offset 差 50 字符
-        jump.invoke(oldBad, w, h, x1, y0, 0);
-        double oldLen = springLen(oldBad);
+        // C) 同一行 burst：charsMoved=50（一帧合并大量击键 / Ctrl+End 等）。
+        // Step B 之前它被误判成跨行，用 animationLength=0.28；修复后必须与短跳一致。
+        TrailCorner burst = new TrailCorner(-0.5, -0.5, cfg);
+        burst.snapTo(w, h, x0, y0);
+        setChars.invoke(burst, 50);
+        jump.invoke(burst, w, h, x1, y0, 0);
+        double burstLen = springLen(burst);
 
         System.out.printf("%n  单行(charsMoved=2)      时长 = %.4f s%n", singleLen);
         System.out.printf("  块选区(修后, -1)        时长 = %.4f s%n", blockLen);
-        System.out.printf("  块选区(修前, 50)        时长 = %.4f s%n", oldLen);
+        System.out.printf("  同一行 burst(50)        时长 = %.4f s%n", burstLen);
 
         check("B-1 块选区（修后）与单行时长一致",
                 Math.abs(blockLen - singleLen) < 0.01,
                 String.format("%.4f vs %.4f", blockLen, singleLen));
 
-        check("B-2 修前确实用了更长的 animationLength（复现 bug）",
-                oldLen > singleLen * 2,
-                String.format("修前 %.4f，是单行的 %.1f 倍", oldLen, oldLen / singleLen));
+        check("B-2 同一行 charsMoved=50 现在与单行短跳一致（Step B 契约变更，非缺陷）",
+                Math.abs(burstLen - singleLen) < 0.01,
+                String.format("同行 burst %.4f vs 单行 %.4f（Step B 前会是 animationLength=%.4f）",
+                        burstLen, singleLen, cfg.animationLength));
 
         System.out.println();
         System.out.printf("=== V-BLOCK-STRETCH 结果：PASS %d，FAIL %d ===%n", pass, fail);
