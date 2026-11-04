@@ -1,7 +1,74 @@
 # CLAUDE.md —— 接手这份工作前先读
 
 > 写给一个**全新会话的 Claude**：读完这一份就能直接干活，不需要再问任何人。
-> 生成时间：2026-10-25 深夜 · 最后校订：2026-10-28 · 提交号见 `git log -1`（**不写死 hash**：写死必然下一次提交就过期）
+> 生成时间：2026-10-25 深夜 · 最后校订：2026-11-04（增执行摘要与工作流入口）· 提交号见 `git log -1`（**不写死 hash**：写死必然下一次提交就过期）
+
+---
+
+# 执行摘要（每轮先读这一节；细节都在下面）
+
+## 这是什么
+
+JetBrains IDE 插件（Java 21，IntelliJ Platform 2.x），Neovide 风格的光标拖尾：
+四角各挂一个阻尼弹簧，按运动方向分配时长，把规整矩形拉成平行四边形。
+**版本 / 探针数 / 工作区状态只看 §二**，不要在这里再抄一份（`VDocCheck` 守三处一致）。
+
+## 四条命令（可直接粘贴，PowerShell 7）
+
+```powershell
+# 1) 全量门禁 = 本项目的「测试」，唯一权威；看最后一行 RESULT
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools\settings-probe\build-v-probes.ps1 -Repo D:\deepseekwork\neovim-cursor-pr
+
+# 2) D0：核心配置必须零 diff
+git diff --exit-code -- src/main/java/com/github/yyyolo7a79/neovidecursor/core/NeovideConfig.java
+
+# 3) 打包安装（先 -DryRun 看备份/丢弃清单，再真装）
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <版本> -DryRun
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version <版本> -NoStart
+
+# 4) 只打包不安装
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 -Version <版本> -OutName neovide-cursor-<版本>.jar -BaseJar <底包.jar>
+```
+
+- **没有 JUnit**：探针就是测试；`build-v-probes.ps1` 是唯一入口，**不能只跑一个探针**
+  （脚本没有选择参数，全部注册探针一起跑）。
+- 编译细节（裸 javac / 平台 classpath）见 §三。
+- Gradle 虽在库，但 `gradle.properties` 仍写 `pluginVersion=0.4.3` / `platformVersion=2025.2.1`，
+  与现状不符且未验证可跑 —— **日常一律用上面四条**。
+
+## 五步工作流
+
+展开版在 `docs/WORKFLOW.md`。bug 必修第 1 步：
+
+1. **复现 + 证据**：日志 / 配置现值 / jar 内版本 / 探针复现；说不清怎么复现就不许改代码。
+2. **定位 + 方案**：调用面、六层链路、要不要动预设域；每个改动都要能回答「探针怎么证明」。
+3. **实现 + 守门探针**：先断言后代码；变异测试证明抓得住。
+4. **全量门禁 + D0**：禁止并发跑；新增红先分辨「契约变更」还是「真回归」。
+5. **提交 + 交付**：三段式提交信息；安装先 `-DryRun`。
+
+## 禁止（每条都真踩过）
+
+1. 不改 `core/NeovideConfig.java`（D0 零 diff）。
+2. 不为不存在的「老用户」写兼容 / 迁移代码（四-K）。
+3. 语义不清就问，不许猜；「改善 / 不对劲 / 土」这类词必须给选项问（四-I）。
+4. 不为了让门禁变绿而改断言；改断言方向必须写清理由并做变异测试。
+5. 不在 `build/` 下新增 / 维护一次性脚本（`mut-*.ps1` 会覆写 D0 文件）。
+6. 不并发跑两次门禁（共用 `build\v2-probe\classes`，会假红）。
+7. 不静默吞异常；`catch` 必须回滚状态 + 打 warn。
+8. 不加 UI 控件不问用户；字段名带中文（四-M）。
+9. 不写死 commit hash / 版本号 / 探针数；数字先跑命令再写。
+10. 不用文件名判断版本（恒为 `jetbrains-neovide-cursor-0.9.8.jar`，读 jar 内 `META-INF/plugin.xml`）。
+11. 不 `push` 走 https（代理会断）；用 `git push fork main`（SSH）。
+
+## 文档入口
+
+| 想知道 | 看 |
+|---|---|
+| 现状（版本 / trailSize / A-E 状态） | `docs/CURRENT-STATE-2026-11-04.md` |
+| 为什么这么规定（14 条纪律） | `docs/WORK-DISCIPLINE.md` |
+| 每次按什么顺序做（五步展开） | `docs/WORKFLOW.md` |
+| 待办 / 已放弃方向 | `docs/NEXT-STEPS.md` |
+| 全部文档索引 | `docs/INDEX.md` |
 
 ---
 
@@ -695,11 +762,12 @@ RGB 换成色相循环  -> 140 行死代码 + 功能与名字对不上
 
 | 文档 | 内容 | 行数 |
 |---|---|---|
-| **本文件** | 接手入口 | — |
-| `docs/WORK-DISCIPLINE.md` | **14 条纪律**，动手前必读 | 641 |
-| `docs/PARAMETER-MAP.md` | 每个参数是否跟随预设 | 165 |
-| `docs/NEXT-STEPS.md` | 待办与已放弃方向 | 164 |
-| `START-HERE.md` | 项目状态入口 | 212 |
+| **本文件** | 接手入口（顶部是执行摘要） | — |
+| `docs/WORKFLOW.md` | **五步工作流**（每次按顺序做什么） | 129 |
+| `docs/WORK-DISCIPLINE.md` | **14 条纪律**，动手前必读 | 747 |
+| `docs/PARAMETER-MAP.md` | 每个参数是否跟随预设 | 205 |
+| `docs/NEXT-STEPS.md` | 待办与已放弃方向 | 357 |
+| `START-HERE.md` | 项目状态入口 | 228 |
 
 ## 按任务查
 
