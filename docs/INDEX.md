@@ -1,12 +1,12 @@
 # 文档索引
 
-> 本项目有 **190 个** git 跟踪的 md 文件，其中 **126 份在 `docs/archive/`**，**其余 64 份**在活跃目录。
+> 本项目有 **191 个** git 跟踪的 md 文件，其中 **126 份在 `docs/archive/`**，**其余 65 份**在活跃目录。
 >
-> 分布（2026-11-04 实测）：根 6 + `docs/` 31（顶层 23 + `docs/design/` 8）+ `plans/` 18 + `build/` 9 = 64。
+> 分布（2026-11-05 实测）：根 6 + `docs/` 31（顶层 23 + `docs/design/` 8）+ `docs/sessions/` 1 + `plans/` 18 + `build/` 9 = 65。
 >
 > **只读下面标为「必读」的，其他按需查。** 归档目录里的东西**不是现状**。
 >
-> 最后更新：2026-11-04
+> 最后更新：2026-11-05
 
 ---
 
@@ -17,6 +17,7 @@
 | [CURRENT-STATE-2026-11-04.md](CURRENT-STATE-2026-11-04.md) | 146 | **当前真相页（先读这一页）**。已装 0.9.131 / `trailSize=1.0` / A 暂缓 / B 撤回 / C 保留 / D、E 不做 |
 | [WORKFLOW.md](WORKFLOW.md) | 129 | **每次干活的五步顺序**（bug 第一步 = 复现 + 证据） |
 | [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) | 170 | **决策会话 ↔ 执行会话**：PROMPT / REPORT 模板、代理与技能分工 |
+| [sessions/2026-11-05-doc-handoff/HANDOFF-TO-DECISION.md](sessions/2026-11-05-doc-handoff/HANDOFF-TO-DECISION.md) | 100 | **给决策会话的交接**：本轮改了什么、门禁出错的真相、下一轮该生成什么 |
 | [START-HERE.md](../START-HERE.md) | 228 | 开发档案入口。现状 / 门禁 / 地形 / 能做什么不能做什么 |
 | [WORK-DISCIPLINE.md](WORK-DISCIPLINE.md) | 747 | **动手前必读**。13 条编号纪律 + 13 个专题（四-B~四-M） |
 | [PARAMETER-MAP.md](PARAMETER-MAP.md) | 205 | 每个参数是否跟随预设，含字段归属表 |

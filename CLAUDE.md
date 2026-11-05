@@ -169,9 +169,9 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
              PyCharm 2025.2 装的是**上游 0.6.0**，用于对比，不是本地版 —— 见 docs/UPSTREAM-COMPARE-2026-11-02.md。
              git tag 停在 v0.9.127（0.9.128~0.9.133 未打 tag）—— **不要用 tag 判断已装版本**。
 HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过期一次；2026-11-04 是 Step B 撤回提交）
-远程         fork/main 与本机 HEAD 是否同步，**用命令核实**：
-             git rev-list --left-right --count fork/main...HEAD  → 2026-11-04 文档任务后实测 **0 1**
-             （b30c537 未 push；此数字是快照，每次以命令为准）
+远程         fork/main 与本机 HEAD 是否同步，**用命令核实，不在此写快照数字**：
+             git rev-list --left-right --count fork/main...HEAD  → 输出 0 0 表示已同步；
+             左边的 0 = 远程没有本地缺的提交，右边 = 本地未 push 的提交数
              ⚠️ 推送必须走 SSH：https 经本机代理 127.0.0.1:7897 会 TLS 中途断开
              （`error:0A000126 SSL unexpected eof`），绕过代理直连 443 也会超时。
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
