@@ -1,420 +1,263 @@
-# Neovide Cursor for JetBrains——可配置版
+# Neovide Cursor for JetBrains
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2024.2%2B-000000?logo=intellijidea&logoColor=white)
+![IntelliJ Platform](https://img.shields.io/badge/IntelliJ%20Platform-2024.2%20–%202026.1-000000?logo=intellijidea&logoColor=white)
 ![Java](https://img.shields.io/badge/Java-21-ED8B00?logo=openjdk&logoColor=white)
 
-> 把 **Neovide 风格的拖尾光标**带到 JetBrains IDE —— 光标移动时留下渐隐的拉伸拖尾，带辉光光晕。
->
-> **适用**：IntelliJ IDEA / CLion / PyCharm 等 **2024.2 ~ 2026.2+**
->
-> **本版重点**：在原始效果之上，补上了 **完整设置面板 + 持久化 + 预设系统**。
-> 原版只能改代码调参数，本版可以在 IDE 里直接调、存、切换。
+> 给 JetBrains IDE 换上 Neovide 风格的光标拖尾：光标矩形的四个角各挂一套阻尼弹簧，
+> 移动时被拉成一条渐隐的缎带，外面裹一层柔和的多层辉光。
 
-> **当前版本：v0.9.126** — 见 [docs/archive/reports/VERSION-0.9.126.md](docs/archive/reports/VERSION-0.9.126.md)（完整版本说明）。
->
-> **维护者：** [pawamamama](https://github.com/pawamamama) — 自 v0.9.83 以来 **106 个提交、239 个文件、+42,323 / −3,464 行**。
+**当前版本：`v0.9.138-a1`**（2026-11-06）。
+A1「视觉行分支统一」已实现，并已由维护者在 **IntelliJ IDEA 2026.1.3**（Windows 11）
+上**实机验收通过**。
 
-**语言 / Language** — [English](README.md) | [**简体中文**](README.zh-CN.md)
-
-> 繁體中文 / 日本語 / 한국어 三份翻译已停止同步（停在多光标支持之前），
-> 已移入 `docs/archive/`。以本文件与 `README.md` 为准。
+**语言 / Language：** [English](README.md) | 简体中文
 
 ---
 
-## 效果
+## 0.9.138-a1（A1）改了什么
 
-> ### ⚠️ 先说一件事：视频看着比实际卡
->
-> 视频存放在本仓库 [`docs/media/`](docs/media/)，
-> **点击链接可下载观看（GitHub 不支持在 README 内嵌 mp4 播放）**。
->
-> 下面四个视频是 **60fps 屏幕录制**，但录屏本身会掉帧、压缩也会损失细节。
->
-> **作者实测手感明显好于视频呈现** —— 尤其是连续打字时的拖尾连贯度，
-> 视频里看起来有断续感，实机上要顺得多。
->
-> 不要以视频帧率判断实际体验，请自己装上看。
+A1 之前，插件用**两套不同的判据**选择动画分支：
 
----
+- 单光标：`|offset 变化| <= typingMaxChars`（字符数）；
+- 多光标：写死的 **16px** 像素兜底（`charsMoved = -1`）。
 
-### 1. 大幅拖尾（跨行跳转）
+实机日志证明这个组合会把同行大跳（`Tab`、`End`、`Ctrl+方向`、按词移动、
+同行鼠标跳转）误判成跨行：320 条样本里，多光标的 100 次 CROSS 有 93 次发生在
+同一视觉行，其中 49 次位移只有 17px，刚过 16px 阈值。
 
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/01-large-trail.mp4
+A1 把两者统一成**一条规则**：
 
-`docs/media/01-large-trail.mp4` · 11 秒 · 1436×444 · 60fps
-
-### 2. 打字与删除
-
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/02-typing-delete.mp4
-
-`docs/media/02-typing-delete.mp4` · 10 秒 · 1040×442 · 60fps
-
-> 这一段最能看出拖尾的"拉伸感"——注意删除时光标是怎么被"拽回"的。
-
-### 3. Tools 菜单快捷切换预设（动画 + 颜色）
-
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/03-tools-preset.mp4
-
-`docs/media/03-tools-preset.mp4` · 45 秒 · 1630×878 · 60fps
-
-> 不用进设置页，`Tools → Neovide 光标：动画预设 ▸` 直接切。
-
-### 4. 设置面板（可调参数全览）
-
-https://github.com/pawamamama/neovim-cursor-for-jetbrains/raw/main/docs/media/04-settings-panel.mp4
-
-`docs/media/04-settings-panel.mp4` · 39 秒 · 1722×1074 · 60fps
-
-> **这是本版和原版最大的区别** —— 14 个滑块 + 10 个复选框 + 4 个下拉，全部实时生效、持久化。
-
----
-
-### 关于界面语言
-
-**0.9.126 已做 i18n**：设置面板、信息条、诊断对话框共 **165 个键**，
-英文 root + 简体中文覆盖。英文 IDE 显示英文，中文 IDE 显示中文；
-繁体中文 / 日文 / 韩文翻译仍停在旧版（`docs/archive/`）。
-
----
-
-## 与上游的区别
-
-本版基于 [yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains) 的 v0.5.x 开发，**核心拖尾物理同源**，补上了上游没有的一整层可用性：
-
-| 能力 | 上游 | **本版** |
-|---|---|---|
-| 拖尾 / 辉光 / 残影 | ✅ | ✅ |
-| 多光标 | ✅ | ✅ **0.9.32 起支持** |
-| 保留原生光标 | ✅ | ⚠️ 默认关闭（见缺陷 2） |
-| **设置面板** | ❌ 改代码 | ✅ **14 个滑块 + 10 个复选框** |
-| **持久化** | ❌ | ✅ 存进 IDE 配置 |
-| **动画预设** | ❌ | ✅ 3 个 |
-| **颜色预设** | ❌ | ✅ 6 个（含动态彩虹） |
-| **自定义预设** | ❌ | ✅ 上限 50 个 |
-| **Tools 菜单** | 4 项 | ✅ **8 项** |
-| **实时预览** | ❌ | ✅ 面板内有预览副本 |
-| **辉光淡出** | ❌ | ✅ **限速下降、参数可调（0.9.126）** |
-| **i18n** | ❌ | ✅ **165 个键（英文 + 简体中文）** |
-
-### 0.9.83 以来发生了什么
-
-`v0.9.83` 是最后一个打过 tag 的基线。此后本 fork 有 **106 个提交**、
-**239 个文件**、**+42,323 / −3,464 行**（含文档，2026-11-02 实测）。
-逐版本细节见 [docs/archive/reports/VERSION-0.9.126.md](docs/archive/reports/VERSION-0.9.126.md)。
-
-| 领域 | 改了什么 | 为什么有价值 |
-|---|---|---|
-| 设置面板 | 7 个标签页；14 滑块 + 10 复选框 + 4 下拉 | 所有参数在 IDE 内直接调，不用改代码 |
-| 预设 | 3 动画 + 6 颜色 + 最多 50 自定义；父链快照；13 个预设域字段 | 切预设不再偷偷改颜色、不再丢手调值 |
-| 国际化 | 165 个键；英文 root + 简体中文 | 英文 IDE 不再中英混排 |
-| 颜色路径 | 彩虹 / 双拼 / 纯色三条互斥路径 | 名字和行为一致，不再「选彩虹变粉色」 |
-| 拖尾 / 输入 | 默认斜度 0；字号 / block inlay 漂移修复；按字符判断短跳 | 新安装是干净矩形；中文 / emoji / 换字号不飘 |
-| 辉光 / 淡出（0.9.126） | 目标曲线 + 限速下降；逐 trail 状态；淡出参数真实影响尾巴 | 跟着拖尾一起暗，不是停下才暗；跨行不中断 |
-| 多光标 / 平台 | 逐 trail 辉光状态；平台 252 read action；PyCharm 2025.2 同步 | 拆组后静止光标不孤光；PyCharm 不再冻结 |
-| 质量 | 门禁脚本修复；113 个注册探针 ALL PASS；116 个 `V*.java`；VDocCheck | 「全绿」可复现，不再手抄数字 |
-
-### 核心贡献：按字符判断的输入逻辑
-
-**这是本项目与上游最本质的差异，也是手感更好的根源。**
-
-上游用**像素反推字符数**：
-
-```java
-jumpX = 位移 / 光标宽;
-isShortMove = |jumpX| <= threshold;   // 阈值 = max(16px, 字宽 × 2.5)
+```text
+同一屏幕视觉行  -> SHORT 分支（shortAnimationLength）
+视觉行发生变化  -> CROSS 分支（animationLength）
 ```
 
-本项目用**编辑器的原生字符偏移**：
+具体改动：
 
-```java
-charsMoved = |当前 offset - 上一帧 offset|;   // 精确的字符个数
-isShortJump = sameLine && charsMoved <= typingMaxChars(3);
-```
+- 单光标与多光标共用
+  `SpringTrail.semanticCharsMoved(initialized, previousVisualLine, currentVisualLine)`。
+- 设置页预览发送同一组语义值：`INLINE -> 0`，`CROSS -> Integer.MAX_VALUE`。
+- 旧的字符数判据（`lastCaretOffset` / `updateCharsMoved`）和多光标像素兜底
+  （`updateBlockCharsMoved`）已从**生产路径删除**。
+- `TrailCorner` 的旧像素兜底（`charsMoved < 0`）只保留给「没有提供语义值」的调用方；
+  生产路径不再走它。
+- 行为变化：同行大跳现在走 **SHORT** 分支，不再被误判成跨行；真实换行仍走
+  **CROSS** 分支，并保持现有的 A-like 缎带形状。
+- 每个光标保存自己的上一帧视觉行：同一帧里，真的换行的光标走 CROSS，
+  同行移动的光标走 SHORT，互不串扰。
 
-| 场景 | 上游 | **本项目** |
-|---|---|---|
-| 中文单字 | 大字号下需 `shortMoveMinChars` 补偿 | **天然正确** |
-| emoji / 代理对 | 需自行换算 | `getOffset()` 直接给对 |
-| 一帧合并多次击键 | 会误判成长距离 | `sameLine` + 字符数双重约束 |
-| 换字号 | 阈值也跟着变，手感漂移 | **完全无关** |
+**本版验证**（命令与完整日志见
+[发布报告](docs/sessions/2026-11-06-release-0.9.138/REPORT.md)）：
 
-**这个方案是踩了四次坑才定下来的**（源码注释完整记录了失败过程）：
-
-1. 用光标宽归一化 → 本插件 2px 光标永远超不过阈值，短跳分支**永不生效**
-2. 写死 16px → 字号 20px 的中文被判成长距离，「**英文不卡、删中文卡**」
-3. `FontMetrics.charWidth('m')` → 'm' 是西文推进量，中文是 2 倍
-4. 取「第 0 列到第 1 列宽度」→ 取的是**行首**字符，光标在中文区仍翻倍
-
-### 精心调整的输入手感参数
-
-上游的 `trailFactors` 是**硬编码数组** `{1.0, 0.9, 0.5, 0.3}`，改要重新编译。
-
-本项目把它拆成三个**连续可调**的参数：
-
-| 参数 | 作用 | 范围 |
-|---|---|---|
-| **拉伸强度**（`stretchRatioK`） | 派生四角梯度 | 1 ~ 8 连续 |
-| **输入平滑**（`typingSmoothness`） | 把梯度朝 1 压平 | 0 ~ 100 |
-| **斜度**（`slopeTicks`） | 纯矩形 ←→ 完全斜 | 0 ~ 100 |
-
-由纯函数 `deriveTrailFactors(k, smooth, slope)` 计算，
-**面板显示的数字与实际运行期用同一套公式**（修过一个「面板虚报 6.4 倍」的 bug）。
-
-#### 斜度（0–100）
-
-控制四边形**倾斜多少**，与拉伸多长解耦：
-
-| 斜度 | 四角系数 | 拉伸 | 倾斜 |
-|---|---|---|---|
-| **0** | `0.86/0.86/0.32/0.32` | 5.84px | **0.00px** ← 纯矩形 |
-| 50 | `0.93/0.79/0.37/0.27` | 7.10px | 2.02px |
-| **100** | `1.00/0.72/0.42/0.22` | 8.26px | 4.06px ← 上游原版 |
-
-**斜度 0 仍有拉伸**（5.84px）—— 它只取消倾斜，不取消形变。
-原理：倾斜来自**同侧**上下角的时长差，把同侧两角取平均即消除倾斜，
-而上下之间仍有梯度，拉伸保留。
-
-斜度属于预设域：改它会派生副本，切预设回到该预设的值。
-
-#### 单行打字曾经画不出斜缎带（0.9.82 修复）
-
-四角排名用的是「比我小的有几个」计数：
-
-```java
-for (j) if (alignment[j] < alignment[i]) rank++;   // 并列时不计数
-```
-
-打字右移时四个对齐度是 `-0.71 / 0.71 / 0.71 / -0.71` —— 左右各有一对相等，
-于是同侧两角拿到**同一个 rank**：
-
-```
-修前：TL=0  TR=2  BR=2  BL=0    只有 2 档
-修后：TL=0  TR=2  BR=3  BL=1    4 档
-```
-
-同 rank → 同时长 → 同速度 → 左右边缘都垂直 → **只能画矩形，斜度恒为 0**。
-
-改成稳定排序 + 索引 tiebreak（上游四个 JS 版本一致做法），
-结果与上游逐位一致：打字 `0 2 3 1`、删除 `2 0 1 3`。
-
-### 向上游回馈的三项修复（已合并进 v0.5.1 / PR #10）
-
-| 修复 | 影响 |
+| 检查项 | 结果 |
 |---|---|
-| 只在空闲档唤醒时重置计时 | 停手后拖尾不再整段以 25fps 播放 |
-| 中文短距离判定（`shortMoveMinChars`） | 大字号下单个汉字不再被误判成长距离 |
-| IME 坐标缓存加入文档修改戳 | 第三方输入法上屏后不再错位 |
+| 全量门禁 | `V-PROBES RESULT: ALL PASS`（117 个注册探针） |
+| D0 门禁 | `core/NeovideConfig.java` 零 diff（`EXIT=0`） |
+| A1 专项探针 | `VMultiBranchDiag` 35/35、`VPreviewBranch` 8/8、`VTypingSpan` 9/9 |
+| 实机验收 | **PASS**，IDEA 2026.1.3，2026-11-06 |
 
-### 为什么手感更好
+---
 
-- **拉伸，不是残影。** 四个角各挂独立阻尼弹簧；按运动方向排名，前缘时长短、后缘时长长，
-  矩形被拉成不规则四边形，而不是叠一层残影。
-- **按字符判断短跳。** 用编辑器原生 offset 算精确字符数，中文单字、emoji、换字号
-  都不会被误判成长跳。
-- **三个连续可调参数。** 拉伸强度 / 输入平滑 / 斜度，替代上游写死的四档系数；
-  面板和运行期共用 `deriveTrailFactors`。
-- **辉光跟着拖尾暗（0.9.126）。** 目标就是拖尾自身强度曲线，亮度每帧最多下降
-  `dt / 淡出时长`；参数决定「降多慢」，不是「何时开始」；跨行不中途灭，不按层数跳变。
-- **多光标隔离。** 每个 trail 保存自己的亮度，组内只共享「显示最大值」；
-  静止光标不再被邻居点亮，拆组后也不会单独发光。
+## 功能
+
+- **拉伸，不是残影。** 光标矩形的四个角各有一套 X/Y 阻尼弹簧；按运动方向排名，
+  前缘角跟得快、后缘角跟得慢，矩形被拉成不规则四边形，而不是叠一层残影。
+- **视觉行分支判据（A1）。** 单行打字 / 退格与跨行缎带由光标的屏幕视觉行选择，
+  单光标与多光标规则相同。
+- **七标签设置面板。** 所有观感参数都能在 IDE 里直接调、直接存，不用改代码、不用重编译。
+- **预设。** 3 个内置动画预设、6 个内置颜色预设、最多 50 个自定义预设。
+  内置预设只读：在内置预设上改参数会自动派生一个「XX 副本」。
+- **实时预览。** 「光标行手感」「列手感」「辉光」三页各有一个动画预览，
+  与真机共用同一套生产逻辑。
+- **Tools 菜单快捷方式。** 不进设置页即可切换动画 / 颜色预设和几个主开关。
+- **辉光淡出。** 亮度跟随拖尾强度，下降速度每帧最多 `dt / 淡出时长`；
+  淡出参数决定「降多慢」，而不是「何时开始」。
+- **多光标支持**（弹簧模式），每根 trail 保存自己的辉光状态。
+- **国际化。** 168 个消息键，英文 root + 简体中文。
+
+---
+
+## 设置面板（7 个标签页）
+
+`Settings / Preferences -> 其他设置 -> Neovide 光标`
+
+| 标签页 | 内容 |
+|---|---|
+| **1 总开关** | 启用、隐藏原生光标、常驻高帧率、目标帧率（125 / 144）、多光标关闭辉光 |
+| **2 颜色** | 拖尾颜色、拖尾不透明度、辉光颜色、光标渐变（双拼） |
+| **3 光标行手感** | 短跳时长、输入平滑、拉伸强度、斜度、前缘贴合（占位）、光标宽高 |
+| **4 列手感** | 跨行动画时长、拖尾密度、跨行形状实验（默认关） |
+| **5 辉光** | 实时预览、辉光层数、锐度、不透明度、淡出保持 / 时长、淡出开关 |
+| **6 特殊** | 渲染模式（弹簧 / 残影）、实验性选项 |
+| **7 调试** | 诊断日志、绘制诊断 |
+
+控件数量：**14 个滑块 + 11 个复选框 + 4 个下拉**。设置模型共 **29 个字段**，
+其中 **13 个**属于预设域。
+
+### 关键参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| 拉伸强度（`stretchRatioK`） | `4.5` | 四角时长梯度，范围 1–8 |
+| 输入平滑（`typingSmoothness`） | `0` | 把梯度朝 1 压平；`0` = 保留梯度 |
+| 斜度（`slopeTicks`） | `0` | 0 = 矩形，100 = 上游四档倾斜 |
+| 短跳时长（`shortAnimationLength`） | `0.11 s` | 同一视觉行的打字 / 退格 |
+| 跨行时长（`animationLength`） | `0.10 s` | 视觉行变化；上限 0.35 s |
+| 拖尾密度（`trailSize`） | `1.0` | 前缘与后缘的时长差。**1.0 是期望值**；调低只会让缎带更短 |
+| 辉光层数（`glowLayers`） | `8` | 只影响过渡细腻度，不改变整体亮度 |
+| 辉光锐度（`shadowBlurFactor`） | `0.20` | 外扩半径 = 该值 × 光标较长边 |
+| 辉光不透明度（`glowOpacity`） | `0.55` | 辉光峰值不透明度 |
+| 淡出前保持（`cursorDisappearDelay`） | `50 ms` | 开始下降前的保持时长 |
+| 淡出时长（`cursorFadeOutDuration`） | `0.075 s` | 每帧最大下降速度 |
+| 光标宽 / 高 | `2 px` / `1.0` | 高度 1.0 = 顶格 |
+
+> **`trailSize = 1.0` 是有意为之。** 它给出最长的可见缎带。调低会让拖尾更短、
+> 更不明显，它不是任何已知问题的解决办法。
+
+---
+
+## 实验性功能 —— 不建议日常使用
+
+### 跨行形状实验（`crossShapeExperiment`）
+
+- **设备级复选框，默认关**，位于「特殊」标签页。
+- 开启后只接管**跨行 / 鼠标拖动 / 键盘大跨度**路径；单行打字、斜度、拉伸、
+  平滑、辉光、颜色、淡出都不变。
+- 当前公式（A-like，VS Code 1.0.1 风格）：运动对齐度 `> 0.5` 的角固定给 **20 ms**，
+  其余角取 `animationLength × {1.0, 0.72, 0.42, 0.22}`。
+- **状态：实验性，尚未改好。** A-like 形状还没有通过观感验收，
+  **不要在日常工作里使用**。
+- 开启后**「拖尾密度」会置灰**，不再影响该路径；它的值会保留，不会被清空。
+  跨行动画时长仍然是时间基准。
+- 与「缎带」预设组合时可能很难看；这是已知的组合限制。
+
+### 前缘贴合（`leadingSnap`）
+
+占位复选框。能勾选、能持久化，但**不改变任何行为**；界面文案已写明「待实现」。
+
+### 残影模式
+
+实验性渲染模式。它记录真实历史位置，掉帧只会让残影变稀；但它**只跟随主光标**，
+辉光淡出也不适用于它。除非你确实需要在低帧率环境里使用，否则请保持默认的
+**弹簧（拉伸）** 模式。
 
 ---
 
 ## 安装
 
-### 方式一：下载 Release（推荐）
+### 从 Release 安装（推荐）
 
-1. 从 [Releases](../../releases) 下载 `neovide-cursor-*.jar`
-2. IDEA → `Settings → Plugins → ⚙ → Install Plugin from Disk...`
-3. 选择 jar，重启 IDE
+1. 从 [Releases](https://github.com/pawamamama/neovide-cursor-for-jetbrains/releases)
+   下载 `neovide-cursor-0.9.138-a1.jar`。
+2. IDE：`Settings -> Plugins -> 齿轮 -> Install Plugin from Disk...`
+3. 选择 jar，重启 IDE。
 
-### 方式二：自行构建
+### 用仓库脚本安装（Windows，开发期便利）
+
+```powershell
+# 只预览备份/丢弃清单，不动任何文件
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.138-a1 -DryRun
+
+# 安装但不启动 IDE
+pwsh -NoProfile -ExecutionPolicy Bypass -File build\install.ps1 -Version 0.9.138-a1 -NoStart
+```
+
+脚本会关闭 IDEA、清空插件 `lib` 目录、设置 XML 和诊断日志，拷贝新 jar，
+再把备份的个人配置写回。它写死了 Windows 上 **IDEA 2026.1** 的配置路径，
+不会自动安装到 PyCharm。
+
+> 已安装目录里的文件名恒为 `jetbrains-neovide-cursor-0.9.8.jar`（加载约定）。
+> **不要用文件名判断版本**；请读 `META-INF/plugin.xml` 里的 `<version>`。
+
+### 从源码构建
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File build\offline-build.ps1 `
-  -Version 0.9.126 `
-  -OutName neovide-cursor-0.9.126.jar `
-  -BaseJar "<path-to-any-idea-plugin-jar>"
+  -Version 0.9.138-a1 `
+  -OutName neovide-cursor-0.9.138-a1.jar `
+  -BaseJar "<任意一个 IDEA 插件 jar 的路径>"
 ```
 
-本项目**不使用 Gradle** —— `build\offline-build.ps1` 用 `javac` + `jar` 手工打包，
-只需一个 IDEA 自带的 jar 作为 classpath 基底。
+不需要 Gradle：`offline-build.ps1` 用 `javac` 编译、用 `jar` 打包，
+只需要一个 IDE 自带的 jar 作为 classpath 基底。
 
 ---
 
-## 使用
+## 兼容性
 
-### 设置面板在哪里
-
-`Settings / Preferences → 其他设置 → Neovide 光标`
-
-面板分 7 个标签页：
-
-| 标签页 | 内容 |
+| 项 | 值 |
 |---|---|
-| **1 总开关** | 启用、渲染模式（弹簧 / 残影）、隐藏原生光标、常驻刷新 |
-| **2 颜色** | 拖尾颜色、不透明度、辉光颜色、光标渐变 |
-| **3 光标行手感** | 单行输入 / 退格的时长、拉伸、平滑、斜度、光标尺寸 |
-| **4 列手感** | 多行缎带（换行 / 跳转） |
-| **5 辉光** | 辉光预览、层数、锐度、不透明度、淡出 |
-| **6 特殊** | 实验性选项（官方不建议） |
-| **7 调试** | 高级诊断 |
+| IDE 构建区间 | `since-build="242"` / `until-build="261.*"` -> IntelliJ Platform **2024.2 至 2026.1** |
+| Java | 21（class 文件版本 65） |
+| 已实机验证 | **IntelliJ IDEA 2026.1.3**（build 261），Windows 11 |
+| 已验证构建 | `0.9.138-a1`，jar SHA-256 `b81ec276b403eb81d2caaf68393daac492f0245c6542ef5bef99ede0252688ff` |
+| 未验证 | 2024.2 运行时；其他 JetBrains 产品（WebStorm、GoLand、CLion、Rider、PhpStorm 等）；Linux / macOS |
+| 不支持 | Fleet |
 
-### Tools 菜单
-
-`Tools → Neovide 光标：动画预设 ▸` / `颜色预设 ▸`
-
-外加四个开关：总开关、隐藏原生光标、性能诊断、残影模式。
-
-### 预设的语义
-
-**内置预设只读。** 你在某个内置预设上改任何一个参数，会自动派生出一个
-「XX 副本」自定义预设并选中它 —— **内置那份永远不变**。
-
-想保留一套配置，点「新建预设」起个名字即可。
-
-> 自定义预设存的是**全部 19 个参数**的快照，不是增量。
+维护者机器上的 PyCharm 2025.2 装的是**上游 0.6.0**，仅用于对比，不是本版。
 
 ---
 
-## 参数说明
+## 已知限制
 
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| **拉伸强度**（`stretchRatioK`） | `4.5` | 四角时长梯度。越大越斜、越"缎带"。范围 1~8 |
-| **输入平滑**（`typingSmoothness`） | `0` | 把四角系数朝 1 压平。**0 = 保持梯度** |
-| **短动画时长**（`shortAnimationLength`） | `0.11` | 同行打字/退格的拖尾总时长 |
-| **跨行动画时长**（`animationLength`） | `0.1` | 跨行跳转的拖尾时长 |
-| **辉光锐度**（`shadowBlurFactor`） | `0.20` | 外扩半径 = 该值 × 光标较长边 |
-| **辉光层数**（`glowLayers`） | `8` | **只影响过渡细腻度，不影响亮度** |
-| **拖尾密度**（`trailSize`） | `1.0` | 前缘与后缘的时长差 |
-
-> ⚠️ **「输入平滑」是纯粹的梯度压平，不是"让动画更顺"。**
-> 实测 `smooth=0` 的二阶差分比 `smooth=0.8` **更小**（更顺），而梯度大 3.3 倍。
-> 默认 0 是实测选择，不建议随意调高。
-
----
-
-## 已知缺陷
-
-> 如实记录，不粉饰。
-
-### 1. 残影模式仍是单光标
-
-拖尾（弹簧）模式已完整支持多光标；**残影模式只跟主光标**。
-`AfterimageTrail` 是「单条历史轨迹」模型，多光标需要每光标一条轨迹 + 各自淘汰。
-
-### 2. 保留原生光标时可能"两个光标"
-
-本版默认**隐藏原生光标**（`hideNativeCaret = true`），由覆盖层全权绘制。
-
-若你选择保留原生光标，可能出现：
-
-- IDEA 原生光标约 **5px** 宽
-- 覆盖层用 `NeovideConfig.cursorWidth`（默认 **2px**）
-- **宽度不一致 → 两条边都露出来，看起来像两个光标**
-
-修法已定位（读 `EditorSettings.getLineCursorWidth()` 对齐），但**尚未实现**。
-
-### 3. 帧率受 EDT 影响
-
-Swing/AWT 的 `invokeLater` 优先级低于原生输入事件，编辑器繁忙时会掉帧。
-
-**实测**（2609 条日志）：fps 中位 **36.4**，maxGap 中位 **51ms**、P90 **279ms**。
-
-**替代方案**：`Tools → 残影模式`。它记录真实历史位置，掉帧只让残影稀疏、轨迹不失真。
-
-### 4. 快速连打吃不到长拖尾
-
-`TrailCorner.jump()` 每次按键无条件 `reset()`，
-所以后缘时长超过键间隔（80~150ms）时**实际达不到**。
-声明 240ms 的拖尾在连打时感受不到。
-
-### 5. 不采用"前缘硬吸附"
-
-上游用「前缘瞬间到位」换拉伸感。本版没采用 —— 因为前缘时长归零
-意味着前缘完全没有平滑，与「平滑输入」直接矛盾。
-
-**0.9.83 又试了一次，实测确认不能采用**：
-
-```
-阈值      吸附角数   拉伸px   斜度px
-关闭        0         8.26     4.06
-0.3~0.707   2        11.58     2.11   ← 斜度反而变小
->0.707     0         8.26     4.06   ← 完全不触发
-```
-
-两个硬障碍：
-
-1. **对齐度是离散的。** 纯轴向移动恒为 ±0.707，没有可调区间。
-   阈值只能一刀切 —— 想「只吸附 1 个角」在纯轴向移动下不可能实现。
-2. **吸附会压小斜度。** 2 个角同时吸附消除了同侧两角原本的时长差，
-   而「斜」正是由那个差产生的 —— 效果与目标相反。
-
-要真做得先改 rank 体系（用移动向量而非角点残余位移），那是动核心物理。
-
-### 6. 「基础」预设是三者里最跳的
-
-因为「基础」必须逐位等于 `NeovideConfig` 默认值（契约要求），
-而另两个预设的短跳时长更长、单帧位移更小。
-
-### 7. 连续 10 键/秒时辉光会呼吸
-
-两次按键之间拖尾几乎收拢，0.9.126 的限速淡出会在下一次按键前先降一点亮度，
-按键时再回满。当前配置（保持 25ms / 淡出 50ms）约在 **0.32 ~ 1.0** 之间起伏；
-保持 50 / 淡出 75 时约 0.57 ~ 1.0。这是参数权衡，不是正确性 bug：
-把「淡出前保持时长」调到 **100ms** 可覆盖 100ms 的按键间隔，或把「淡出时长」调大。
-可选的「连续输入保护」在报告里，但 0.9.126 未启用。
+1. **残影模式只支持单光标。** 弹簧模式支持多光标；残影模式只跟随主光标。
+2. **保留原生光标时可能像「两个光标」。** 原生光标约 5px 宽，覆盖层默认 2px。
+   保持 `hideNativeCaret = true`（默认）即可避免。
+3. **帧率受 EDT 限制。** 渲染走 `invokeLater`，优先级低于原生输入事件。
+   2609 条日志样本实测：fps 中位 36.4，maxGap 中位 51ms、P90 279ms。
+4. **快速连打吃不到长拖尾。** `TrailCorner.jump()` 每次按键都会 `reset()`，
+   后缘时长超过按键间隔（80–150ms）时实际达不到。
+5. **「基础」预设是三者里最跳的。** 它必须逐位等于 `NeovideConfig` 默认值；
+   另外两个预设的短跳时长更长。
+6. **约 10 键/秒时辉光会呼吸。** 默认 50ms 保持 / 75ms 淡出时，亮度约在
+   0.57–1.0 之间起伏；25/50 配置可低到约 0.32。介意的话把「淡出前保持」
+   调到 100ms，或增大「淡出时长」。
+7. **`crossShapeExperiment` 尚未完成。** 见上面的警告；日常使用请保持关闭。
+8. **`leadingSnap` 是占位开关。** 勾选它不会改变任何东西。
+9. **终端不会播放动画。** 终端光标不受 `CARET_COLOR` 控制，这是已知的平台限制。
+10. **A1 改变了同行大跳的行为。** `Tab`、`End`、`Ctrl+方向`、按词移动和同行鼠标跳转
+    现在走短跳分支。这是 A1 的有意行为，并已实机验收通过，不是 bug；
+    真实换行仍走 CROSS 缎带。
 
 ---
 
-## 技术实现
+## 工作原理
 
-### 挂载点：`contentComponent`
+1. 光标矩形有四个角；每个角挂一套 X/Y 阻尼弹簧（`DampedSpring`，闭式解，
+   不受帧率波动影响）。
+2. 移动时按「运动方向与角点方向的夹角」排名（`assignRanks`，稳定排序 + 索引 tiebreak）。
+3. 排名映射为时长系数：前缘角系数大（跟得紧），后缘角系数小（拖沓）。
+4. A1 用光标上一帧 / 当前帧的**屏幕视觉行**选择 SHORT 或 CROSS，
+   单光标与多光标规则相同。
+5. 辉光按同心层绘制；每层 alpha 由层数反解，所以「层数」与「强度」互不干扰。
+   淡出按 `dt / 淡出时长` 限速。
+6. 帧调度由后台线程按 `nanoTime` 睡眠，再通过 `invokeLater` 回 EDT 绘制。
 
-`editor.getContentComponent()`（`EditorComponentImpl`）是唯一安全点：
-它是 `JTextComponent`、`layout` 为 `null`，不会被 `revalidate()` 拉伸；
-坐标系与 `visualPositionToXY()` 天然对齐。
+延伸阅读：
 
-**已证伪**：`JBViewport`、`editor.getComponent()`、祖先 `JLayeredPane`、窗口根 `LayeredPane`
-—— 都会让覆盖层被拉伸到整个编辑器（"全屏变色"）。
-
-### 拖尾原理：拉伸，不是残影
-
-1. 4 个角点，各挂 X/Y 阻尼弹簧（`DampedSpring`，闭式解，不受帧率波动影响）
-2. 移动时按「运动方向与角点方向的夹角」排序（`assignRanks`）
-3. 前方角拿大系数（跟得紧），后方角拿小系数（拖沓）
-4. 矩形被拉成不规则四边形 → 视觉上就是拖尾
-
-### 高精度调度
-
-| 机制 | 实测精度 |
-|---|---|
-| `javax.swing.Timer`（`Object.wait`） | 15.61 ms ❌ 钉死 64fps |
-| `Thread.sleep` | **1.56 ms** ✅ |
-
-### 辉光：多层同心外扩
-
-每层 alpha 由层数反解：`A = 1 - (1 - peak)^(1/N)`
-——「层数」与「强度」互不干扰。半径线性分布，在 `r ≈ glowWidth/2` 处衰减到峰值 60%。
+- [docs/CURRENT-STATE-2026-11-04.md](docs/CURRENT-STATE-2026-11-04.md) —— 当前版本、`trailSize`、A–E 状态
+- [docs/WORKFLOW.md](docs/WORKFLOW.md) —— 项目五步工作流
+- [docs/WORK-DISCIPLINE.md](docs/WORK-DISCIPLINE.md) —— 14 条项目纪律
+- [docs/PARAMETER-MAP.md](docs/PARAMETER-MAP.md) —— 哪些参数跟随预设
+- [docs/INDEX.md](docs/INDEX.md) —— 全部文档索引
+- [CLAUDE.md](CLAUDE.md) —— 新会话接手入口
 
 ---
 
 ## 贡献者
 
-- **pawamamama**（[@pawamamama](https://github.com/pawamamama)）—— 本 fork 维护者与提交作者。
-  自 v0.9.83 以来：**106 个提交、239 个文件、+42,323 / −3,464 行**（代码 + 测试 + 文档，2026-11-02 实测）。
-  当前代码：**生产 37 文件 / 21,342 行**，**探针 131 文件 / 33,487 行**（116 个 `V*.java`，113 个注册）。
-  维护了设置 / 预设层、i18n、平台 252 read action 修复和 0.9.126 辉光淡出模型。
-- **yyyyolo7a79-sketch** —— 原项目与核心拖尾物理，见「致谢」。
+- **pawamamama**（[@pawamamama](https://github.com/pawamamama)）—— 本 fork 维护者：
+  设置 / 预设层、国际化、平台 252 read action 修复、辉光淡出模型，
+  以及 A1 视觉行分支统一。
+- **yyyyolo7a79-sketch** —— 原项目与核心拖尾物理。
 
 ---
 
 ## 致谢
 
 - **[yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains)**
-  —— 本项目的起点。核心拖尾物理、踩坑记录、目录结构均来自该项目。
+  —— 本项目的起点：核心拖尾物理、踩坑记录和目录结构。
 - **[LengineerC/vscode-neovide-cursor](https://github.com/LengineerC/vscode-neovide-cursor)**
   —— 参数语义与 VS Code 版对齐的原始依据。
 - **[Neovide](https://github.com/neovide/neovide)** —— 拖尾效果的最初来源。
@@ -425,4 +268,10 @@ Swing/AWT 的 `invokeLater` 优先级低于原生输入事件，编辑器繁忙�
 
 MIT，见 [LICENSE](LICENSE)。
 
-算法源自 VS Code 版 `neovide-cursor`（MIT），详见 [NOTICE.md](NOTICE.md)。
+算法源自 VS Code 版 `neovide-cursor` 扩展（MIT），详见 [NOTICE.md](NOTICE.md)。
+
+---
+
+<sub>**给贡献者：** 本项目的「测试」就是探针门禁 —— 运行
+`tools/settings-probe/build-v-probes.ps1`，看最后一行的 `V-PROBES RESULT`。
+`core/NeovideConfig.java` 是 D0 冻结文件：任何 diff 都会让发布门禁失败。</sub>
