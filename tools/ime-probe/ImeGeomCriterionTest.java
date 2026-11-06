@@ -34,6 +34,13 @@ import java.util.List;
  *   <li>快速路径（vp 未变）— 不得调用昂贵的坐标换算</li>
  *   <li>每帧 getOffset 调用次数 = 1（P0-5）</li>
  * </ol>
+ *
+ * <p><b>【2026-11-06 A1 迁移】</b>SpringTrail 的 {@code lastCaretOffset} /
+ * {@code updateCharsMoved} 已随 A1（视觉行分支）删除。本测试不再读写该字段；
+ * A8b 从「旧字段保持旧值」改为「getOffset 失败后仍按正常帧记账」，
+ * 其余 IME 几何覆盖（A1..A13b、B1）不变。另补最小 Application 桩：
+ * 平台 252 起 {@code CaretAnimator} 构造函数走 {@code ReadAction.compute}，
+ * 裸 JVM 需要 {@code ApplicationManager.getApplication()} 非空。
  */
 public final class ImeGeomCriterionTest {
 
@@ -69,6 +76,7 @@ public final class ImeGeomCriterionTest {
         System.out.println("=== F1-c 几何判据验证（驱动真实的 CaretAnimator.refreshTarget） ===");
         System.out.println();
 
+        installFakeApplication();
         buildAnimator();
 
         System.out.println("--- A. 边界逐条 ---");
@@ -97,6 +105,61 @@ public final class ImeGeomCriterionTest {
             throw new AssertionError("有 " + failed + " 项未通过");
         }
         System.out.println("ALL OK");
+    }
+
+    // ==================== 平台桩（2026-11-06 A1 迁移补） ====================
+
+    /**
+     * 平台 252 起生产代码用 {@code ReadAction.compute} 包住编辑器读取，
+     * 而它需要 {@code ApplicationManager.getApplication()} 非空。
+     * 原测试（2026-10-26）写于该修复之前，裸 JVM 直接在 {@code CaretAnimator}
+     * 构造器里 NPE；这里装一个最小 Application 桩。
+     *
+     * <p><b>不能返回 null 而不执行</b>：那样生产读取全部不会发生，测到的是空壳
+     * （CLAUDE.md 陷阱 4 的「假通过」）。这里真的执行 read action 的 body。
+     */
+    private static void installFakeApplication() {
+        if (com.intellij.openapi.application.ApplicationManager.getApplication() != null) {
+            return;
+        }
+        com.intellij.openapi.application.Application app =
+                (com.intellij.openapi.application.Application) Proxy.newProxyInstance(
+                        ImeGeomCriterionTest.class.getClassLoader(),
+                        new Class<?>[]{com.intellij.openapi.application.Application.class},
+                        (p, m, a) -> {
+                            switch (m.getName()) {
+                                case "runReadAction":
+                                case "maybeRunReadAction":
+                                    return runBody(a[0]);
+                                case "isDispatchThread":
+                                    return true;
+                                case "isReadAccessAllowed":
+                                    return true;
+                                case "invokeLater":
+                                    ((Runnable) a[0]).run();
+                                    return null;
+                                case "toString":
+                                    return "FakeApp(ime-geom)";
+                                case "hashCode":
+                                    return 1;
+                                case "equals":
+                                    return p == a[0];
+                                default:
+                                    return defaultValue(m.getReturnType());
+                            }
+                        });
+        com.intellij.openapi.application.ApplicationManager.setApplication(app, () -> { });
+    }
+
+    /** 真正执行 read action body（Runnable 或 ThrowableComputable）。 */
+    private static Object runBody(Object body) throws Throwable {
+        if (body instanceof com.intellij.openapi.util.ThrowableComputable) {
+            return ((com.intellij.openapi.util.ThrowableComputable<?, ?>) body).compute();
+        }
+        if (body instanceof Runnable) {
+            ((Runnable) body).run();
+        }
+        return null;
     }
 
     // ==================== 搭架子 ====================
@@ -240,8 +303,9 @@ public final class ImeGeomCriterionTest {
 
         // 【多光标改造适配 2026-10-23】
         //
-        // lastCaretOffset / initialized / centerX / centerY / corners 已从
-        // CaretAnimator 下沉到 SpringTrail（每个 Caret 一份）。
+        // initialized / centerX / centerY / corners 已从 CaretAnimator
+        // 下沉到 SpringTrail（每个 Caret 一份）。lastCaretOffset 已于 A1 删除，
+        // 本测试不再读写它（分支判据改为视觉行，见 SpringTrail.semanticCharsMoved）。
         // 判据逻辑仍在 CaretAnimator.refreshTarget 里，因此本测试要
         // 「注入一个已就位的主光标拖尾」，而不是直接写那几个字段。
         //
@@ -301,7 +365,6 @@ public final class ImeGeomCriterionTest {
         vpColumn = 0;
         refreshTarget.invoke(animator);
         setTrailField("initialized", true);
-        setTrailField("lastCaretOffset", 10);
     }
 
     private static Field field(String name) throws Exception {
@@ -388,7 +451,6 @@ public final class ImeGeomCriterionTest {
         imeSkipFramesField.setInt(animator, 0);
 
         setTrailField("initialized", true);
-        setTrailField("lastCaretOffset", lastOffset);
         setTrailField("centerX", cx);
         setTrailField("centerY", cy);
         // 缓存键必须与「即将被测的那一帧」匹配，否则快速路径不会命中：
@@ -417,7 +479,6 @@ public final class ImeGeomCriterionTest {
         caretOffset = 10;
         vpColumn = 0;
         refreshTarget.invoke(animator);
-        setTrailField("lastCaretOffset", -1);
         setTrailField("initialized", false);
         // 清掉上次遗留的目标点：refreshTarget 的返回值语义是
         // "中心点/高度是否变化"，遗留同值会让正确的路径也返回 false。
@@ -592,9 +653,15 @@ public final class ImeGeomCriterionTest {
         check("A8 getOffset 取不到时判据不介入（正常放行）",
                 moved,
                 "refreshTarget=" + moved + "（期望 true）");
-        check("A8b getOffset 失败不影响 lastCaretOffset（保持旧值）",
-                getTrailInt("lastCaretOffset") == 50,
-                "lastCaretOffset=" + getTrailInt("lastCaretOffset") + "（期望 50）");
+        // 【A1 2026-11-06 迁移】原断言是「getOffset 失败不影响 lastCaretOffset
+        // （保持旧值）」。该字段已随 A1 删除；这里改为用当前几何状态证明同一意图：
+        // 失败帧不得被误判为 IME 中间态，而应按正常帧记账（markAt 写入新 vp），
+        // 且不消耗冻结预算（imeSkipFrames 保持 0）。
+        check("A8b getOffset 失败后仍按正常帧记账（lastColumn=7、imeSkipFrames=0）",
+                getTrailInt("lastColumn") == 7 && imeSkipFramesField.getInt(animator) == 0,
+                "lastColumn=" + getTrailInt("lastColumn")
+                        + " imeSkipFrames=" + imeSkipFramesField.getInt(animator)
+                        + "（期望 7 / 0）");
     }
 
     private static void a9_fastPath() throws Exception {

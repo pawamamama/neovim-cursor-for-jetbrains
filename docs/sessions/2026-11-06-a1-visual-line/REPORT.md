@@ -206,3 +206,54 @@ SHA256 b81ec276b403eb81d2caaf68393daac492f0245c6542ef5bef99ede0252688ff
   鼠标同行与跨行 / 选区 / 按词移动 / Enter / 行尾回绕：用户已实机验收，结论 **通过（PASS）**；逐项操作细节未写入仓库，验收记录来源为 2026-11-06 执行会话交接笔记
 - 同行大跳是否变成短跳；真换行是否保持现有 A-like 形状；是否可接受：用户确认通过；A1 只改分支选择，未改 A-like/真换行形状
 - 结论：**通过**（2026-11-06）
+
+## 8. IME 旧探针迁移（2026-11-06，用户决定「迁移保留」）
+
+> 触发：A1 删除 `SpringTrail.lastCaretOffset` / `updateCharsMoved` 后，
+> `tools/ime-probe/ImeGeomCriterionTest.java` 仍反射读写该字段，直接运行会失败。
+> 用户决定迁移保留（不删除旧测试）；本轮只改 `tools/ime-probe` 与本报告，
+> 不改生产代码 / `V*.java` / 门禁脚本。
+
+### 8.1 改动
+
+| 位置 | 改了什么 | 为什么 |
+|---|---|---|
+| `initBaselineTrail()` | 删除 `setTrailField("lastCaretOffset", 10)` | 字段已删；`initialized=true` 足以建立基线 |
+| `resetToStableBaseline(...)` | 删除 `setTrailField("lastCaretOffset", lastOffset)` | `lastOffset` 仍用于当前帧 `caretOffset`，签名不动；只删旧字段写入 |
+| `a1_firstCall()` | 删除 `setTrailField("lastCaretOffset", -1)` | 字段已删；首帧语义不变 |
+| `a8_getOffsetUnavailable()` | A8b 从「`lastCaretOffset` 保持 50」改为「getOffset 失败后仍按正常帧记账（`lastColumn=7`、`imeSkipFrames=0`）」 | 旧字段已删；用当前几何状态证明同一意图：失败帧不被误判为 IME 中间态、不消耗冻结预算 |
+| 文件头 / 平台桩 | 新增 `installFakeApplication()` + `runBody(...)`，`main` 开头调用 | 平台 252 起 `CaretAnimator` 构造函数走 `ReadAction.compute`，裸 JVM 需要 `ApplicationManager.getApplication()` 非空；桩真的执行 read action body，避免「假通过」（CLAUDE.md 陷阱 4） |
+
+**未删除任何 IME 几何断言**：A1/A1b、A2/A2b、A3/A3b、A4/A4b/A4c/A4d、
+A5/A5b、A6/A6b、A7、A8/A8b、A9/A9b/A9c/A9d、A10、A11、A12/A12b、
+A13/A13b、B1 全部保留；只改写 A8b 的观测对象。
+
+### 8.2 命令与结果
+
+```text
+pwsh -NoProfile -ExecutionPolicy Bypass -File tools\ime-probe\run-ime-geom-test.ps1 -Repo D:\a1wt
+==> 结果：通过 29，失败 0 ===
+ALL OK
+IME_EXIT=0
+```
+
+> `-Repo D:\a1wt` 是本 worktree 的短路径 junction（长路径会让脚本的源码树
+> 编译触发 Windows 命令行上限）；`run-ime-geom-test.ps1` 本身未改。
+
+### 8.3 迁移前失败证据
+
+未改测试时直接运行，首先暴露的是平台读锁桩缺失（`lastCaretOffset` 的
+`NoSuchFieldException` 会在补桩后出现）：
+
+```text
+java.lang.NullPointerException: Cannot invoke
+"com.intellij.openapi.application.Application.runReadAction(...)"
+because the return value of "ApplicationManager.getApplication()" is null
+    at com.intellij.openapi.application.ReadAction.computeBlocking(ReadAction.java:88)
+    at com.github.yyyolo7a79.neovidecursor.ui.CaretAnimator.readEditor(CaretAnimator.java:1829)
+    at com.github.yyyolo7a79.neovidecursor.ui.CaretAnimator.<init>(CaretAnimator.java:862)
+```
+
+`grep -n "lastCaretOffset\|updateCharsMoved" tools/ime-probe/ImeGeomCriterionTest.java`
+迁移后只剩注释说明，零反射读写。
+
