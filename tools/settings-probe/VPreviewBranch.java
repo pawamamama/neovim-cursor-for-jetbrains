@@ -43,22 +43,22 @@ public final class VPreviewBranch {
         double h = 32.0, cx = 100, cy = 100, cursorW = 1.8;
         double charWsmall = 8.0, charWbig = 17.0;
 
-        int[] inSmall  = frames(cfg, cursorW, h, cx, cy, 1, charWsmall, 0.0);
-        int[] inBig    = frames(cfg, cursorW, h, cx, cy, 1, charWbig, 0.0);
-        int[] crossD   = frames(cfg, cursorW, h, cx, cy, 99, charWsmall, h);
+        int[] inSmall  = frames(cfg, cursorW, h, cx, cy, 0, charWsmall, 0.0);
+        int[] inBig    = frames(cfg, cursorW, h, cx, cy, 0, charWbig, 0.0);
+        int[] crossD   = frames(cfg, cursorW, h, cx, cy, Integer.MAX_VALUE, charWsmall, h);
         int[] fbSmall  = frames(cfg, cursorW, h, cx, cy, -1, charWsmall, 0.0);
         int[] fbBig    = frames(cfg, cursorW, h, cx, cy, -1, charWbig, 0.0);
 
-        report("单行 charsMoved=1  (charW=8 )", inSmall);
-        report("单行 charsMoved=1  (charW=17)", inBig);
-        report("跨行 charsMoved=99", crossD);
+        report("单行 charsMoved=0  (charW=8 )", inSmall);
+        report("单行 charsMoved=0  (charW=17)", inBig);
+        report("跨行 charsMoved=MAX", crossD);
         report("兜底 -1 (charW=8 )", fbSmall);
         report("兜底 -1 (charW=17)", fbBig);
 
         // B-1：显式设值时，两个字号必须走【同一条分支】——
         // 判据：都不出现「后缘 40+ 帧」的跨行特征
         boolean bothShort = inSmall[0] < 30 && inBig[0] < 30;
-        check("B-1 charsMoved=1 时两字号都走短跳分支（后缘 < 30 帧）",
+        check("B-1 charsMoved=0 时两字号都走短跳分支（后缘 < 30 帧）",
                 bothShort,
                 "charW=8 后缘 " + inSmall[0] + " 帧 / charW=17 后缘 " + inBig[0] + " 帧"
                         + "（跨行档是 40+）");
@@ -92,10 +92,33 @@ public final class VPreviewBranch {
         while ((idx = src.indexOf("setCharsMoved(", idx)) >= 0) { calls++; idx++; }
         check("B-6 AnimationPreview 调用了 setCharsMoved", calls >= 1, "出现 " + calls + " 次");
 
-        // B-7：预览必须区分单行/跨行两种模式（避免又退回「一套算法套两种场景」）
+        // B-7：预览常量必须与 A1 语义同源（单行 0 / 跨行 Integer.MAX_VALUE），
+        // 不得退回 1 / 99 那种「只要大于 typingMaxChars 就行」的近似值。
         boolean hasCrossConst = src.contains("CROSS_CHARS_MOVED");
-        check("B-7 预览用常量区分跨行（不写魔法数字 99）", hasCrossConst,
-                hasCrossConst ? "CROSS_CHARS_MOVED 已定义" : "缺失");
+        boolean crossIsMax = src.contains("CROSS_CHARS_MOVED = Integer.MAX_VALUE");
+        boolean inlineZero = src.contains("pendingCharsMoved = 0;");
+        check("B-7 预览跨行常量 = Integer.MAX_VALUE、单行 = 0（与 A1 同源）",
+                hasCrossConst && crossIsMax && inlineZero,
+                "CROSS常量=" + hasCrossConst + " =MAX:" + crossIsMax
+                        + " 单行0:" + inlineZero);
+
+        // B-8：预览常量与生产 A1 语义逐位同源（0 == 同行，MAX == 视觉行变化）。
+        // 这条防的是「预览改成 0/MAX 了，但生产语义又漂成别的值」。
+        try {
+            Class<?> st = Class.forName(
+                    "com.github.yyyolo7a79.neovidecursor.ui.SpringTrail");
+            java.lang.reflect.Method sem = st.getDeclaredMethod(
+                    "semanticCharsMoved", boolean.class, int.class, int.class);
+            sem.setAccessible(true);
+            int prodSame = (Integer) sem.invoke(null, true, 7, 7);
+            int prodChanged = (Integer) sem.invoke(null, true, 7, 8);
+            check("B-8 预览常量与生产语义同源（同行=0，变化=MAX）",
+                    prodSame == 0 && prodChanged == Integer.MAX_VALUE
+                            && crossIsMax && inlineZero,
+                    "prodSame=" + prodSame + " prodChanged=" + prodChanged);
+        } catch (Throwable t) {
+            check("B-8 预览常量与生产语义同源（同行=0，变化=MAX）", false, t.toString());
+        }
 
         System.out.println();
         System.out.printf("=== V-PREVIEW-BRANCH 结果：PASS %d，FAIL %d ===%n", pass, fail);

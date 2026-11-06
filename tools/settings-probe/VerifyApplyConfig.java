@@ -534,14 +534,14 @@ public final class VerifyApplyConfig {
         refreshTarget = CaretAnimator.class.getDeclaredMethod("refreshTarget");
         refreshTarget.setAccessible(true);
 
-        // 【多光标改造适配 2026-10-23】
-        // initialized / lastCaretOffset 已从 CaretAnimator 下沉到 SpringTrail。
-        // 先跑一帧把主光标拖尾建起来，再把这两个值注入到那份拖尾上。
+        // 【多光标改造适配 2026-10-23；A1 2026-11-06 更新】
+        // initialized 已从 CaretAnimator 下沉到 SpringTrail，先跑一帧把主光标拖尾建起来。
+        // lastCaretOffset 随旧字符数判据一起删除 —— A1 只读 lastLine（上一帧视觉行），
+        // 首帧 refreshTarget 已由 markAt 写入，无需注入。
         refreshTarget.invoke(animator);
         Object mainTrail = mainTrail();
         if (mainTrail != null) {
             trailField(mainTrail, "initialized").setBoolean(mainTrail, true);
-            trailField(mainTrail, "lastCaretOffset").setInt(mainTrail, caretOffset);
         }
 
         // 【多光标改造适配 2026-10-23 补充】

@@ -20,9 +20,9 @@ import com.github.yyyolo7a79.neovidecursor.core.TrailCorner;
  *       前一个」，Alt+点击散点选时会让新光标从远处飞入。</li>
  *   <li><b>缓存键含文档修改戳</b> —— 只比 (行, 列) 会在第三方输入法上屏后误判
  *       「没移动」（列号不变但像素位置已变）。这是上游 issue #6 的修复，保留。</li>
- *   <li><b>{@code charsMoved} 逐光标独立</b> —— 上游用像素反推字符数；
- *       本项目用编辑器的原生字符偏移，多光标时必须每个光标各记一份，
- *       否则光标 A 的移动量会被光标 B 的读数污染。</li>
+ *   <li><b>上一帧视觉行逐光标独立</b> —— A1（2026-11-06）起，分支判据是
+ *       「同一屏幕视觉行 → SHORT，视觉行变化 → CROSS」。多光标时每个光标
+ *       各记一份上一帧视觉行；若共用，光标 A 的行号会把光标 B 的判定带错。</li>
  * </ol>
  *
  * <p><b>线程约束</b>：全部方法只在 EDT 上调用（与 {@code CaretAnimator} 一致）。
@@ -46,7 +46,8 @@ final class SpringTrail {
     double height;
 
     /**
-     * 快速路径缓存键：上次换算坐标时的视觉位置 + 文档修改戳。
+     * 上次换算坐标时的视觉位置 + 文档修改戳（{@code lastLine} 同时是 A1 的
+     * 「上一帧视觉行」，见 {@link #semanticCharsMoved(boolean, int, int)}）。
      *
      * <p>只看 (行, 列) 不够：文字变了但列号恰好没变时（第三方输入法把光标放进
      * 拼音音节内部，上屏后列号相同但像素位置已变），会误判「没移动」、
@@ -56,14 +57,11 @@ final class SpringTrail {
     private int lastColumn = Integer.MIN_VALUE;
     private long lastStamp = Long.MIN_VALUE;
 
-    /**
-     * 本光标上次记录的字符偏移（用于算 {@code charsMoved}）。
-     *
-     * <p><b>为什么必须逐光标存</b>：多光标时每个 {@code Caret} 有独立 offset。
-     * 若共用一个字段，光标 A 的读数会与光标 B 的交错，算出荒谬的「移动了几个字符」，
-     * 直接破坏本项目最重要的差异点（按字符判断短跳）。
-     */
-    private int lastCaretOffset = -1;
+    // 【A1 2026-11-06 删除 lastCaretOffset / updateCharsMoved】
+    //
+    // 旧判据是「|offset 差| <= typingMaxChars」，它把同行 Tab/End/Ctrl+方向/鼠标大跳
+    // 按字符数误判成跨行；多光标则恒传 -1 走 16px 像素兜底。A1 统一为屏幕视觉行：
+    // 同行 → 0，视觉行变化 → Integer.MAX_VALUE。判据唯一来源见 semanticCharsMoved。
 
     /** 目标点刚变化，下一帧需要重新分配角点 rank */
     private boolean jumped = false;
@@ -131,23 +129,32 @@ final class SpringTrail {
     }
 
     /**
-     * 更新「上一个字符偏移」，返回本次移动了几个字符。
+     * 上一次 {@link #markAt} 记下的屏幕视觉行（{@link Integer#MIN_VALUE} = 从未记录）。
      *
-     * @param caretOffset 当前 caret 的文档偏移；负值表示不可用
-     * @return 移动的字符数；首次调用或 offset 不可用时返回 -1（退化到像素判据）
+     * <p>A1 分支判据的唯一状态来源：同一视觉行 → SHORT，视觉行变化 → CROSS。
+     * 每个 {@code SpringTrail} 各存一份，多光标互不污染。
      */
-    int updateCharsMoved(int caretOffset) {
-        int moved = -1;
-        if (caretOffset >= 0) {
-            if (lastCaretOffset >= 0) {
-                moved = Math.abs(caretOffset - lastCaretOffset);
-            }
-            lastCaretOffset = caretOffset;
-        }
-        return moved;
+    int lastVisualLine() {
+        return lastLine;
     }
 
-    /** 把本次的字符移动量分发给四个角点（供 {@code jump} 判定短跳） */
+    /**
+     * A1 语义的唯一判据：同一屏幕视觉行 → 0（SHORT），视觉行变化 → MAX（CROSS）。
+     *
+     * <p>生产 {@code CaretAnimator} 与预览 / 守门探针共用这一份，避免「预览一套、
+     * 真机一套」。首帧（{@code initialized == false}）尚未建立基准行，按 CROSS 处理；
+     * 首帧的 {@link #setTarget} 走吸附，不会真正执行 {@code jump()}。
+     *
+     * @param previousVisualLine 上一帧 {@link #markAt} 记下的视觉行
+     * @param currentVisualLine  本帧跟随点（caret / 选区活动端）的视觉行
+     */
+    static int semanticCharsMoved(boolean initialized, int previousVisualLine,
+                                  int currentVisualLine) {
+        return initialized && previousVisualLine == currentVisualLine
+                ? 0 : Integer.MAX_VALUE;
+    }
+
+    /** 把本次的字符移动量（A1：只有 0 / MAX 两种语义值）分发给四个角点。 */
     void applyCharsMoved(int charsMoved) {
         for (TrailCorner corner : corners) {
             corner.setCharsMoved(charsMoved);
@@ -367,9 +374,9 @@ final class SpringTrail {
         };
     }
 
-    /** 诊断只读：上一次 markAt 记下的视觉行；从未记录时为 Integer.MIN_VALUE。 */
+    /** 诊断只读：委托 {@link #lastVisualLine()}（保留旧名字给既有诊断调用）。 */
     int lastVisualLineForProbe() {
-        return lastLine;
+        return lastVisualLine();
     }
 
     /**

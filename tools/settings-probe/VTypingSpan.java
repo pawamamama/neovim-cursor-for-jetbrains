@@ -7,6 +7,12 @@ import java.util.Locale;
 /**
  * V-TYPING-SPAN：真跨行前缘 = 0；同行 1..3 短跳、4+ 仍走跨行（Step B 已撤回）。
  *
+ * <p><b>【A1 2026-11-06】</b>生产 {@code CaretAnimator} 现在只传 0（同一屏幕视觉行）
+ * 与 {@code Integer.MAX_VALUE}（视觉行变化），不再传 1..10 的字符数。
+ * 本探针<b>直调</b> {@code TrailCorner.jump()}，锁的是它自身的判定契约：
+ * {@code TrailCorner} 本轮未改，0/1..3 同行 → SHORT，4+ 同行 → CROSS；
+ * 旧像素兜底分支仍保留（{@code charsMoved < 0}）。
+ *
  * <p><b>契约（2026-11-04 撤回 Step B 后的现状）</b>：
  * <ul>
  *   <li>真跨行（{@code sameLine == false}）→ {@code leading = animationLength × clamp(1 - trailSize)}，

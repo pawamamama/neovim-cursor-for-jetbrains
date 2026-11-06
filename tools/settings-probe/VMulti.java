@@ -13,7 +13,7 @@ import java.util.Map;
  * 并验证「每个光标独立」的几件事：
  * <ol>
  *   <li>四角状态互不干扰</li>
- *   <li>字符移动量逐光标独立（本项目最重要的差异点）</li>
+ *   <li>上一帧视觉行逐光标独立（A1 分支判据，本项目最重要的差异点）</li>
  *   <li>起飞复制的是源的形状，不是目标点</li>
  *   <li>帧号标记-清除能在「合并导致数量不变」时正确回收</li>
  * </ol>
@@ -44,25 +44,34 @@ public final class VMulti {
                 c1[0] != c2[0] && c1[1] != c2[1],
                 String.format("t1=(%.1f,%.1f) t2=(%.1f,%.1f)", c1[0], c1[1], c2[0], c2[1]));
 
-        // ---- M-2：字符移动量逐光标独立（核心差异点）----
+        // ---- M-2：上一帧视觉行逐光标独立（A1 核心差异点）----
         //
-        // 场景：光标 A 从 offset 10 移到 11（移动 1 个字符）
-        //       光标 B 从 offset 100 移到 103（移动 3 个字符）
-        // 若共用一份 lastCaretOffset，第二次调用会算出 |103 - 11| = 92，
-        // 荒谬的移动量会破坏「按字符判断短跳」。
+        // 场景：光标 A 上一帧视觉行 10，当前仍在 10 → 同一视觉行 → SHORT（0）
+        //       光标 B 上一帧视觉行 100，当前到 10 → 视觉行变化 → CROSS（MAX）
+        // 若共用一份 lastVisualLine，两者会被算成同一结果，
+        // 多光标里「另一个光标的换行」会污染本光标的判定。
         Object t3 = ctor.newInstance(cfg);
         Object t4 = ctor.newInstance(cfg);
-        Method upChars = stClass.getDeclaredMethod("updateCharsMoved", int.class);
-        upChars.setAccessible(true);
+        Method markAt = stClass.getDeclaredMethod("markAt", int.class, int.class, long.class);
+        Method lastLine = stClass.getDeclaredMethod("lastVisualLine");
+        Method semantic = stClass.getDeclaredMethod(
+                "semanticCharsMoved", boolean.class, int.class, int.class);
+        markAt.setAccessible(true);
+        lastLine.setAccessible(true);
+        semantic.setAccessible(true);
 
-        upChars.invoke(t3, 10);      // 首次：返回 -1（无基线）
-        upChars.invoke(t4, 100);
-        int movedA = (int) upChars.invoke(t3, 11);
-        int movedB = (int) upChars.invoke(t4, 103);
+        markAt.invoke(t3, 10, 0, 1L);
+        markAt.invoke(t4, 100, 0, 1L);
+        int lineA = (int) lastLine.invoke(t3);
+        int lineB = (int) lastLine.invoke(t4);
+        int charsA = (int) semantic.invoke(null, true, lineA, 10);
+        int charsB = (int) semantic.invoke(null, true, lineB, 10);
 
-        check("M-2 字符移动量逐光标独立（A=1, B=3，不串扰）",
-                movedA == 1 && movedB == 3,
-                "A=" + movedA + " B=" + movedB);
+        check("M-2 上一帧视觉行逐光标独立（A=10, B=100；语义 A=0, B=MAX，不串扰）",
+                lineA == 10 && lineB == 100
+                        && charsA == 0 && charsB == Integer.MAX_VALUE,
+                "lineA=" + lineA + " lineB=" + lineB
+                        + " charsA=" + charsA + " charsB=" + charsB);
 
         // ---- M-3：起飞复制的是源的【当前形状】 ----
         Object src = ctor.newInstance(cfg);

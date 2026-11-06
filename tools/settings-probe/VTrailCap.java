@@ -1,3 +1,5 @@
+import com.github.yyyolo7a79.neovidecursor.core.NeovideConfig;
+
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.lang.reflect.Field;
@@ -269,6 +271,7 @@ final class VMultiBranchDiag {
 
         formatAndFields(format, offLine);
         productionBranchTruth();
+        a1VisualLineContract();
         budgetAndGate(branch, budget, sizes, temp);
         behaviorUnchanged();
         sourceContract();
@@ -351,6 +354,186 @@ final class VMultiBranchDiag {
         }
     }
 
+    /**
+     * A1（2026-11-06）：同一屏幕视觉行 → SHORT；视觉行变化 → CROSS；单/多光标共用。
+     *
+     * <p><b>不复刻算法</b>：语义值由生产 {@code SpringTrail.semanticCharsMoved(...)}
+     * 给出，分支结果由生产 {@code TrailCorner.jump()} 真实分配、再由
+     * {@code SpringTrail.lastBranchShortForProbe()} 读回；探针只负责造输入与断言。
+     */
+    private static void a1VisualLineContract() throws Exception {
+        Class<?> trailClass = Class.forName(
+                "com.github.yyyolo7a79.neovidecursor.ui.SpringTrail");
+        Method semantic = trailClass.getDeclaredMethod(
+                "semanticCharsMoved", boolean.class, int.class, int.class);
+        semantic.setAccessible(true);
+
+        // A1-1：生产语义真值表
+        int same = (Integer) semantic.invoke(null, true, 7, 7);
+        int changed = (Integer) semantic.invoke(null, true, 7, 8);
+        int first = (Integer) semantic.invoke(null, false, 7, 7);
+        check("A1-1 生产语义：同视觉行→0，视觉行变化→MAX，首帧→MAX",
+                same == 0 && changed == Integer.MAX_VALUE && first == Integer.MAX_VALUE,
+                "same=" + same + " changed=" + changed + " first=" + first);
+
+        NeovideConfig cfg = baseConfig();
+        double[] shortFormula = new double[4];
+        for (int rank = 0; rank < 4; rank++) {
+            shortFormula[rank] = (double) cfg.shortAnimationLength * cfg.trailFactors[rank];
+        }
+        double[] crossFormula = {cfg.animationLength, cfg.animationLength / 2.0, 0.0, 0.0};
+
+        // A1-2（AC-1）：同一视觉行、dx 1..1000px 全部 SHORT（不再按字符数/16px 分裂）
+        boolean horizOk = true;
+        String horizDetail = "";
+        for (double dx : new double[]{1, 2, 8, 17, 100, 500, 1000}) {
+            double[] lens = cornerLensA1(cfg, 0, dx, 0.0);
+            if (!sameWithin(lens, shortFormula, 1e-6)) {
+                horizOk = false;
+                horizDetail = "dx=" + dx + " → " + java.util.Arrays.toString(lens);
+            }
+        }
+        check("A1-2 同一视觉行、dx=1..1000px 全部 SHORT（四角 = 短跳公式）",
+                horizOk, horizOk ? "七档全部一致" : horizDetail);
+
+        // A1-3（AC-2）：视觉行变化（Enter / 上下行 / 软换行跨屏行）全部 CROSS
+        boolean crossOk = true;
+        String crossDetail = "";
+        double[][] crossMoves = {{0.0, 32.0}, {0.0, -32.0}, {-17.0, 32.0}, {17.0, 32.0}};
+        for (double[] mv : crossMoves) {
+            double[] lens = cornerLensA1(cfg, Integer.MAX_VALUE, mv[0], mv[1]);
+            if (!sameWithin(lens, crossFormula, 1e-9)) {
+                crossOk = false;
+                crossDetail = "dx=" + mv[0] + " dy=" + mv[1]
+                        + " → " + java.util.Arrays.toString(lens);
+            }
+        }
+        check("A1-3 视觉行变化（上下 / 回绕 / 跨行）全部 CROSS（四角 = 跨行公式）",
+                crossOk, crossOk ? "四档全部一致" : crossDetail);
+
+        // A1-4（AC-3）：每个 trail 用自己的上一帧视觉行，不共享 0/MAX
+        Object tA = newTrail(trailClass, cfg);
+        Object tB = newTrail(trailClass, cfg);
+        Method markAt = trailClass.getDeclaredMethod(
+                "markAt", int.class, int.class, long.class);
+        Method lastLine = trailClass.getDeclaredMethod("lastVisualLine");
+        markAt.setAccessible(true);
+        lastLine.setAccessible(true);
+        markAt.invoke(tA, 5, 0, 1L);
+        markAt.invoke(tB, 7, 0, 1L);
+        int lineA = (int) lastLine.invoke(tA);
+        int lineB = (int) lastLine.invoke(tB);
+        boolean branchA = branchOf(trailClass, cfg, 5, 5, 500.0, 0.0);
+        boolean branchB = branchOf(trailClass, cfg, 7, 5, 500.0, 0.0);
+        check("A1-4 上一帧视觉行逐光标独立（A 同行→SHORT，B 变化→CROSS，同 dx=500）",
+                lineA == 5 && lineB == 7 && branchA && !branchB,
+                "lineA=" + lineA + " lineB=" + lineB
+                        + " branchA=" + branchA + " branchB=" + branchB);
+
+        // A1-5（AC-3 / AC-4）：5 光标同帧、同向不同速；
+        // 同一视觉行的 4 个必须全部 SHORT，唯一真实换行者才 CROSS。
+        boolean s1 = branchOf(trailClass, cfg, 5, 5, 1.0, 0.0);
+        boolean s2 = branchOf(trailClass, cfg, 5, 5, 10.0, 0.0);
+        boolean s3 = branchOf(trailClass, cfg, 5, 5, 100.0, 0.0);
+        boolean s4 = branchOf(trailClass, cfg, 5, 5, 1000.0, 0.0);
+        boolean c1 = branchOf(trailClass, cfg, 5, 6, 10.0, 32.0);
+        check("A1-5 5 光标同帧：4 个同行不同速全 SHORT，唯一换行者 CROSS",
+                s1 && s2 && s3 && s4 && !c1,
+                "同行1px=" + s1 + " 10px=" + s2 + " 100px=" + s3
+                        + " 1000px=" + s4 + " 换行=" + c1);
+
+        // A1-6（AC-7）：旧判据已删除（源码零引用）
+        String caret = strippedSource("ui/CaretAnimator.java");
+        String spring = strippedSource("ui/SpringTrail.java");
+        boolean oldGone = !caret.contains("updateBlockCharsMoved")
+                && !caret.contains("updateCharsMoved")
+                && !caret.contains("lastCaretOffset")
+                && !spring.contains("updateCharsMoved")
+                && !spring.contains("lastCaretOffset");
+        check("A1-6 旧判据已删除（CaretAnimator / SpringTrail 零引用）",
+                oldGone, "caret/spring 静态扫描");
+
+        // A1-7（AC-7）：生产分支同源接线。
+        // 必须是无条件赋值（不能写成 multiCaret ? ... : updateCharsMoved），
+        // 否则「单光标仍走字符数」的变异会逃过行为断言（M3 守门）。
+        boolean wired = caret.contains("int semanticChars = SpringTrail.semanticCharsMoved(")
+                && caret.contains("wasInitialized, previousVisualLine, cvp.line")
+                && caret.contains("trail.applyCharsMoved(semanticChars)");
+        check("A1-7 CaretAnimator 先读上一帧视觉行，再无条件调用生产语义函数",
+                wired, "wired=" + wired);
+
+        // A1-8（AC-8）：typingMaxChars 保留默认值，只不再决定 A1 分支
+        String cfgSrc = strippedSource("core/NeovideConfig.java");
+        check("A1-8 typingMaxChars 保留且默认 3f（只不再决定 A1 分支）",
+                cfgSrc.contains("public float typingMaxChars = 3f;"),
+                "默认值未变");
+    }
+
+    /** 用生产 TrailCorner 真实分配四角时长；rank = 角点索引（与 VTypingSpan 同口径）。 */
+    private static double[] cornerLensA1(NeovideConfig cfg, int charsMoved,
+                                         double dx, double dy) {
+        double w = 2.0, h = 32.0, cx = 100.0, cy = 100.0;
+        double[][] rel = {{-0.5, -0.5}, {0.5, -0.5}, {0.5, 0.5}, {-0.5, 0.5}};
+        double[] out = new double[4];
+        for (int i = 0; i < 4; i++) {
+            com.github.yyyolo7a79.neovidecursor.core.TrailCorner c =
+                    new com.github.yyyolo7a79.neovidecursor.core.TrailCorner(
+                            rel[i][0], rel[i][1], cfg);
+            c.snapTo(w, h, cx, cy);
+            c.setCharsMoved(charsMoved);
+            c.jump(w, h, cx + dx, cy + dy, i);
+            out[i] = c.animationLengthForProbe();
+        }
+        return out;
+    }
+
+    /** 新建一个生产 SpringTrail（反射，包私有类）。 */
+    private static Object newTrail(Class<?> trailClass, NeovideConfig cfg) throws Exception {
+        java.lang.reflect.Constructor<?> ctor =
+                trailClass.getDeclaredConstructor(NeovideConfig.class);
+        ctor.setAccessible(true);
+        return ctor.newInstance(cfg);
+    }
+
+    /**
+     * 走生产 SpringTrail 的完整链路：首帧吸附 → 记上一帧视觉行 → 生产语义 →
+     * 目标变化 → update() 触发 jump → 读回生产最终分支。
+     */
+    private static boolean branchOf(Class<?> trailClass, NeovideConfig cfg,
+                                    int prevLine, int currentLine,
+                                    double dx, double dy) throws Exception {
+        Object trail = newTrail(trailClass, cfg);
+        Method setTarget = trailClass.getDeclaredMethod("setTarget",
+                double.class, double.class, double.class, double.class);
+        Method markAt = trailClass.getDeclaredMethod(
+                "markAt", int.class, int.class, long.class);
+        Method apply = trailClass.getDeclaredMethod("applyCharsMoved", int.class);
+        Method update = trailClass.getDeclaredMethod("update", double.class);
+        Method branch = trailClass.getDeclaredMethod("lastBranchShortForProbe");
+        Method semantic = trailClass.getDeclaredMethod(
+                "semanticCharsMoved", boolean.class, int.class, int.class);
+        for (Method m : new Method[]{setTarget, markAt, apply, update, branch, semantic}) {
+            m.setAccessible(true);
+        }
+        setTarget.invoke(trail, 100.0, 100.0, 2.0, 32.0);
+        markAt.invoke(trail, prevLine, 0, 1L);
+        apply.invoke(trail, semantic.invoke(null, true, prevLine, currentLine));
+        setTarget.invoke(trail, 100.0 + dx, 100.0 + dy, 2.0, 32.0);
+        update.invoke(trail, 0.008);
+        return Boolean.TRUE.equals(branch.invoke(trail));
+    }
+
+    /** 浮点数组逐位比较（NaN / Infinity 直接判失败）。 */
+    private static boolean sameWithin(double[] a, double[] b, double eps) {
+        for (int i = 0; i < a.length; i++) {
+            if (!Double.isFinite(a[i]) || !Double.isFinite(b[i])
+                    || Math.abs(a[i] - b[i]) > eps) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static void budgetAndGate(Method branch, Method budget, Method sizes, Path temp)
             throws Exception {
         Class<?> diag = Class.forName("com.github.yyyolo7a79.neovidecursor.ui.CursorDiag");
@@ -422,9 +605,10 @@ final class VMultiBranchDiag {
         check("D-10c 短跳与跨行仍是两条不同的生产路径",
                 !same(shortA, crossA), "short=" + java.util.Arrays.toString(shortA)
                         + " cross=" + java.util.Arrays.toString(crossA));
-        check("D-10d updateBlockCharsMoved() 仍恒为 -1（未实施 A）",
-                returnsMinusOne(),
-                "源码检查：方法体 return -1 且 multiCaret 调用点未被 0/MAX 替换");
+        check("D-10d A1 分支使用 0/MAX，旧 updateBlockCharsMoved 不再被生产分支调用",
+                a1BranchWired(),
+                a1BranchWired() ? "旧方法已删除，CaretAnimator 走 semanticCharsMoved"
+                        : "旧判据仍在或 A1 未接线");
     }
 
     private static void sourceContract() throws Exception {
@@ -435,9 +619,8 @@ final class VMultiBranchDiag {
             String body = stripComments(new String(Files.readAllBytes(src.resolve(rel)),
                     java.nio.charset.StandardCharsets.UTF_8));
             if (!"ui/CursorDiag.java".equals(rel)) {
-                if (body.contains("applyCharsMoved(0)") || body.contains("applyCharsMoved(Integer.MAX_VALUE)")) {
-                    forbidden.append(rel).append(" 含 A 方案; ");
-                }
+                // 【A1 2026-11-06】A1 已实施：CaretAnimator 允许使用 0/MAX 语义。
+                // 这里仍禁止 B1/B2 —— 跨行分支不得新读 trailFactors。
                 if (rel.contains("TrailCorner") && body.contains("config.trailFactors[rank]")
                         && body.split("config.trailFactors\\[rank\\]", -1).length > 2) {
                     forbidden.append(rel).append(" 跨行新读 trailFactors; ");
@@ -449,8 +632,22 @@ final class VMultiBranchDiag {
                 }
             }
         }
-        check("D-11 行为层无 A / B1 / B2 实施痕迹", forbidden.length() == 0,
+        check("D-11 行为层无 B1 / B2 实施痕迹（A1 已按本轮 PROMPT 实施）",
+                forbidden.length() == 0,
                 forbidden.length() == 0 ? "四个文件零泄漏" : forbidden.toString());
+
+        // 【A1 2026-11-06】新增正向接线断言：旧判据必须零引用，A1 语义必须被生产调用。
+        String caretA1 = stripComments(new String(Files.readAllBytes(
+                src.resolve("ui/CaretAnimator.java")),
+                java.nio.charset.StandardCharsets.UTF_8));
+        boolean semanticWired = caretA1.contains(
+                "int semanticChars = SpringTrail.semanticCharsMoved(")
+                && caretA1.contains("trail.applyCharsMoved(semanticChars)");
+        boolean oldCallsGone = !caretA1.contains("updateBlockCharsMoved()")
+                && !caretA1.contains("updateCharsMoved(");
+        check("D-11a A1 分支已接线（CaretAnimator 调 semanticCharsMoved，旧判据零引用）",
+                semanticWired && oldCallsGone,
+                "语义调用=" + semanticWired + " 旧调用残留=" + !oldCallsGone);
 
         Path settings = src.resolve("settings/NeovideCursorSettings.java");
         Path fields = src.resolve("settings/SettingsField.java");
@@ -550,21 +747,27 @@ final class VMultiBranchDiag {
         return out;
     }
 
-    private static boolean returnsMinusOne() throws Exception {
+    /**
+     * A1 接线：旧判据零引用，CaretAnimator 调生产语义函数并先读上一帧视觉行。
+     *
+     * <p>用剥离注释后的源码做静态断言 —— 注释里保留历史说明不算引用。
+     */
+    private static boolean a1BranchWired() throws Exception {
+        String body = strippedSource("ui/CaretAnimator.java");
+        return !body.contains("updateBlockCharsMoved")
+                && !body.contains("updateCharsMoved")
+                && !body.contains("lastCaretOffset")
+                && body.contains("int semanticChars = SpringTrail.semanticCharsMoved(")
+                && body.contains("wasInitialized, previousVisualLine, cvp.line")
+                && body.contains("trail.applyCharsMoved(semanticChars)");
+    }
+
+    /** 读生产源码并剥掉注释（与 D-11 的判据同一口径）。 */
+    private static String strippedSource(String rel) throws Exception {
         Path file = repoRoot().resolve(
-                "src/main/java/com/github/yyyolo7a79/neovidecursor/ui/CaretAnimator.java");
-        String body = stripComments(new String(Files.readAllBytes(file),
+                "src/main/java/com/github/yyyolo7a79/neovidecursor").resolve(rel);
+        return stripComments(new String(Files.readAllBytes(file),
                 java.nio.charset.StandardCharsets.UTF_8));
-        int start = body.indexOf("private int updateBlockCharsMoved()");
-        if (start < 0) {
-            return false;
-        }
-        int end = body.indexOf("\n    }", start);
-        String method = end < 0 ? "" : body.substring(start, end);
-        boolean methodOk = method.contains("return -1;") && !method.contains("return 0;");
-        boolean callSiteOk = body.contains("charsMoved = updateBlockCharsMoved();")
-                && !body.contains("charsMoved = 0;");
-        return methodOk && callSiteOk;
     }
 
     private static Method find(Class<?> type, String name, Class<?>[] args) {

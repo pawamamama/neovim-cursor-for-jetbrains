@@ -336,39 +336,16 @@ public class CaretAnimator implements Disposable, CaretListener {
     //
     // lastBlockOffset 只在 updateBlockCharsMoved 里被写一次，注释写着「只为诊断保留」，
     // 但全仓没有任何读者 —— 诊断日志读的是 SpringTrail 的 maxOffset，不是它。
+    // （updateBlockCharsMoved 本身也已在 A1 2026-11-06 删除，见下方说明。）
     //
     // 核实方法（全仓 src + tools 逐个符号计数，见提交说明）。
 
-    /**
-     * 多光标槽位共享的字符移动量 —— 恒为 {@code -1}（让 jump 走归一化判据）。
-     *
-     * <p><b>为什么必须共享</b>：{@code TrailCorner.jump()} 会按 charsMoved 分成
-     * 「短跳」与「跨行」两个分支，两者时长差 2 倍以上。若各槽位独立计算，
-     * 会出现「有的槽位短跳、有的跨行」→ 加速度不均匀。
-     *
-     * <p>历史：这个方法是为「块选区」写的（那时一次列选在语义上是一次整体移动）；
-     * 261 契约下 {@code multiCaret} 覆盖所有多光标，所以它现在服务的是全部多光标槽位。
-     */
-    private int updateBlockCharsMoved() {
-        // 【0.9.56 修复：多光标横向拉伸比单行长得多的根因】
-        //
-        // TrailCorner.jump() 的分支判据是：
-        //     isShortJump = 同一行 && charsMoved <= typingMaxChars(3)
-        //
-        // 块选区的 blockStarts[i] 是 offset，跨行时天然差异极大
-        // （差一整行就是几十上百个字符）。用它算 charsMoved 必然 > 3，
-        // 于是连行内小步移动也被判成跨行 → 走 animationLength(0.28)
-        // 而不是 shortAnimationLength(0.11) → 横向拉伸暴涨 2.55 倍。
-        //
-        // 修法：块选区只传 -1，让 jump() 走归一化兜底分支 ——
-        // 那里按 deltaX/width、deltaY/height 判断，
-        // 块选区同一行内移动天然满足 |jumpY| <= 0.001，能正确走短跳。
-        //
-        // 【0.9.88】原来这个方法收一个 caretOffset 参数，唯一用途是写给
-        // lastBlockOffset（那个字段零读者，已删）。参数随之失去意义 ——
-        // 留着会让后来者以为「块选区的 offset 在这里被用到了」。
-        return -1;
-    }
+    // 【A1 2026-11-06 删除 updateBlockCharsMoved()】
+    //
+    // 旧实现恒返回 -1，让多光标走 TrailCorner 的像素兜底（16px 阈值）；
+    // 320 条实机日志里 93/100 的多光标 CROSS 是同一视觉行被该阈值误判。
+    // A1 统一为「同一屏幕视觉行 → 0，视觉行变化 → MAX」，单/多光标共用
+    // SpringTrail.semanticCharsMoved(...)，不再需要这个方法。
 
 
     /** 诊断用：数组前若干个元素 → "[a,b,c...]" */
@@ -743,17 +720,13 @@ public class CaretAnimator implements Disposable, CaretListener {
     // 唯一的外部引用在 tools/ImeGeomCriterionTest.java，那是已废弃的旧测试，
     // 不在构建与探针门禁范围内。
 
-    /**
-     * 上一帧的光标字符偏移（{@link com.intellij.openapi.editor.CaretModel#getOffset()}）。
-     *
-     * <p>用于算出「本次移动跨越了几个字符」，供短跳判定使用。
-     * 负数表示尚未初始化。
-     *
-     * <p><b>为什么用 offset 而不是像素</b>：offset 是编辑器的原生字符坐标，
-     * 差值是精确的字符个数，与字体、字号、全角半角、连字全部无关 ——
-     * 这正是「英文丝滑但中文卡」问题的根治法。详见 {@code TrailCorner#jump}。
-     */
-    // lastCaretOffset 已下沉到 SpringTrail（每光标独立，见该类注释第 4 点）
+    // 【A1 2026-11-06】上一帧字符偏移（lastCaretOffset）已随旧字符数判据删除。
+    // 分支判据改为屏幕视觉行：同一视觉行 → 0，视觉行变化 → MAX；
+    // 判据唯一来源是 SpringTrail.semanticCharsMoved(...)。
+    //
+    // 历史：字符偏移曾用于「本次移动几个字符」，优势是与字体 / 全角半角无关；
+    // 但它无法区分「同行大跳」与「真实换行」—— Tab/End/Ctrl+方向/鼠标同行
+    // 都会被字符数判成跨行，而多光标恒传 -1 又退回 16px 像素兜底。A1 因此取代它。
 
     // ===== 动画目标状态 =====
 
@@ -2084,12 +2057,13 @@ public class CaretAnimator implements Disposable, CaretListener {
             //   · 正常移动：vp 与 offset 指向同一个字符边界 → x 相等 → 放行
             //   · 连续不一致达到 IME_MAX_SKIP_FRAMES 后强制放行一次（保留冻结上界）
             //
-            // 注意：offset 只读一次，供本判据与下方 charsMoved 共用（契约 P0-5）。
+            // 注意：offset 只读一次，供本判据与几何诊断共用（契约 P0-5）。
+            // A1 起分支判据不再读它（改读视觉行），但 IME 几何判据仍必须读。
             int caretOffset = -1;
             try {
                 caretOffset = editor.getCaretModel().getOffset();
             } catch (Throwable ignored) {
-                // 取不到就保持 -1：本判据不介入，charsMoved 也退回兼容分支
+                // 取不到就保持 -1：本判据不介入
             }
 
             // 【T0-5】耗时埋点起点：必须在快速路径提前返回"之后" ——
@@ -2516,13 +2490,16 @@ public class CaretAnimator implements Disposable, CaretListener {
                         || recheckThisFrame.contains(trail);
 
                 if (needsUpdate) {
-                    // 诊断必须在 markAt 覆盖 lastLine 之前取上一帧视觉行。
+                    // 【A1 2026-11-06】分支判据必须在 markAt 覆盖 lastLine 之前读取：
+                    // 上一帧视觉行 + 本帧视觉行共同决定 SHORT / CROSS。
+                    int previousVisualLine = trail.lastVisualLine();
+                    boolean wasInitialized = trail.isInitialized();
                     int branchPrevLine = branchDiagWanted
-                            ? trail.lastVisualLineForProbe() : Integer.MIN_VALUE;
+                            ? previousVisualLine : Integer.MIN_VALUE;
                     double branchPrevCenterX = branchDiagWanted ? trail.centerX : 0.0;
                     double branchPrevCenterY = branchDiagWanted ? trail.centerY : 0.0;
                     // 新 trail 首帧只 snapToTarget，不会执行 jump()，不能产出伪 branch。
-                    boolean branchWasInitialized = !branchDiagWanted || trail.isInitialized();
+                    boolean branchWasInitialized = !branchDiagWanted || wasInitialized;
                     long stampBefore = trail.lastStamp();
                     Point cp = editor.visualPositionToXY(cvp);
                     trail.markAt(cvp.line, cvp.column, stamp);
@@ -2533,27 +2510,19 @@ public class CaretAnimator implements Disposable, CaretListener {
                         markHook.run();
                     }
 
-                    // 【块选区：所有行必须共享同一个 charsMoved】
+                    // 【A1 2026-11-06】统一分支判据：同一屏幕视觉行 → SHORT(0)，
+                    // 视觉行变化 → CROSS(Integer.MAX_VALUE)。单光标与多光标共用。
                     //
-                    // 用户反馈（2026-10-24）：「加速度还是不均匀」。
+                    // 旧判据已删除：单光标用 |offset 差| 比 typingMaxChars，
+                    // 多光标恒传 -1 走 16px 像素兜底。320 条实机日志里，
+                    // 单光标 24 条无 反例；多光标 93/100 的 CROSS 是同一视觉行被误判
+                    // （其中 49 条只是 dx=17px 刚过 16px 阈值）。
                     //
-                    // 根因：每行用各自的 caretOff 算 charsMoved。而
-                    // TrailCorner.jump() 会按 charsMoved 分成两个分支：
-                    //   isShortJump = charsMoved <= typingMaxChars(3)  → 短跳
-                    //   否则 → 跨行三档（时长为 animationLength 的 0/0.5/1 倍）
-                    //
-                    // 两档时长差 2 倍以上。若某几行算出 1 个字符、另几行算出 4 个，
-                    // 就会一半走短跳、一半走跨行 —— 加速度自然不一致。
-                    //
-                    // 块选区在语义上是【一次整体移动】，所有行移动的字符数必然相同。
-                    // 因此统一用主行（第 0 行）的移动量。
-                    int charsMoved;
-                    if (multiCaret) {
-                        charsMoved = updateBlockCharsMoved();
-                    } else {
-                        charsMoved = trail.updateCharsMoved(caretOff);
-                    }
-                    trail.applyCharsMoved(charsMoved);
+                    // 每个 trail 用自己的上一帧视觉行，不共享 0/MAX ——
+                    // 同一帧里一个光标真实换行、另一个同行时，只有换行者走 CROSS。
+                    int semanticChars = SpringTrail.semanticCharsMoved(
+                            wasInitialized, previousVisualLine, cvp.line);
+                    trail.applyCharsMoved(semanticChars);
 
                     // 【每个光标都是单字符尺寸的线】（与 VS Code 一致）
                     //
@@ -2597,7 +2566,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                         if (branchDiagWanted && branchWasInitialized) {
                             noteBranchDecision(traceId, trail, frameSeq, i, multiCaret, cvp,
                                     cx - branchPrevCenterX, cy - branchPrevCenterY,
-                                    w, h, charsMoved, branchPrevLine,
+                                    w, h, semanticChars, branchPrevLine,
                                     branchSlopeTicks, crossShapeExperiment);
                         }
                     }
@@ -2608,8 +2577,10 @@ public class CaretAnimator implements Disposable, CaretListener {
                         recheckNextFrame.add(trail);
                     }
                 } else {
-                    // 目标没变，但仍要把字符移动量清零，避免上一帧的值残留
-                    trail.applyCharsMoved(-1);
+                    // 目标没变，不会执行 jump；这里只把四角的上次移动量清零。
+                    // A1：用 0（同一视觉行 / 短跳语义）而不是 -1（旧的像素兜底），
+                    // 保证「16px 像素阈值」不再有任何可达路径。
+                    trail.applyCharsMoved(0);
                 }
 
                 // 主光标的那份用于残影 / 日志 / 探针（保持旧语义）。
