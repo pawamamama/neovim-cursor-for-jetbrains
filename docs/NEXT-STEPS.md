@@ -1,6 +1,6 @@
 # 下一步做什么
 
-> 状态：**基线 0.9.131 已装 IDEA**（0.9.132 / 0.9.133 是中间版，行为 = 0.9.131；PyCharm 2025.2 装的是上游 0.6.0，用于对比）· 当前分支是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· tag 停在 v0.9.127（0.9.128~0.9.131 未打）
+> 状态：**基线 0.9.138-a1 已装 IDEA**（A1 视觉行分支统一已实机验收；`crossShapeExperiment` 仍是实验开关，默认关，不建议日常使用；PyCharm 2025.2 装的是上游 0.6.0，用于对比）· 当前分支是否同步用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写死 hash**）· tag 停在 v0.9.127（0.9.128 起未打；发布时补）
 > 本文最后更新：2026-11-02
 
 > ⚠️ **本文的数字曾长期失真，请勿直接采信或转抄。**
@@ -16,11 +16,11 @@
 
 | 项 | 值 |
 |---|---|
-| 版本 | **v0.9.131**（IDEA 2026.1 已装 0.9.131；0.9.132 / 0.9.133 是中间版，行为 = 0.9.131；PyCharm 2025.2 装的是上游 0.6.0，用于对比。读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
-| dist 最新 jar | `dist/neovide-cursor-0.9.127.jar`（2026-11-02） |
-| git tag | **v0.9.127**（0.9.84~0.9.125 缺 42 个；0.9.126 / 0.9.127 已打并推送 fork） |
-| 探针文件 | **118 个 `V*.java`**（全部 .java 133 个，2026-11-03 实测；其中 115 个注册进门禁） |
-| 探针基线 | **115 个注册探针 ALL PASS（0 红；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9 / VTypingSpan 5）**；VRegr2 R-5/R-6 仍是 informational |
+| 版本 | **v0.9.138**（A1 验收包 0.9.138-a1；IDEA 2026.1 已装；A1 视觉行分支统一已实机验收；PyCharm 2025.2 装的是上游 0.6.0，用于对比。读 jar 内 `META-INF/plugin.xml` 确认，不是文件名） |
+| dist 最新 jar | `dist/neovide-cursor-0.9.138-a1.jar`（A1 验收包） |
+| git tag | **v0.9.127**（0.9.128 起未打；发布任务补 0.9.138-a1） |
+| 探针文件 | **118 个 `V*.java`**（全部 .java 133 个，2026-11-06 实测；其中 117 个注册进门禁） |
+| 探针基线 | **117 个注册探针 ALL PASS（0 红；VMultiBranchDiag 35 / VPreviewBranch 8 / VTypingSpan 9）**；VRegr2 R-5/R-6 仍是 informational |
 | D0 门禁 | PASS（`core/NeovideConfig` 零 diff） |
 | PhysicsParity | PASS |
 | 生产代码 | **21,412 行 / 37 文件**（2026-11-02 实测，`find … -exec cat {} + \| wc -l`） |

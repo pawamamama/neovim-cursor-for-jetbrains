@@ -163,11 +163,11 @@ ui/         25 文件  绘制 + 帧调度 + Tools 菜单
 # 二、当前状态（用这组数字判断一切）
 
 ```
-版本         v0.9.131（已装；IDEA 2026.1 实测读 jar 内 META-INF/plugin.xml —— 文件名恒为 0.9.8.jar）
-             当前分支构建 0.9.133，运行时行为 = 0.9.131；0.9.132 / 0.9.133 是**中间版**，
-             **不作为基线，不回退/不重装**。
+版本         v0.9.138（A1 验收包 0.9.138-a1，已装；IDEA 2026.1 实测读 jar 内 META-INF/plugin.xml —— 文件名恒为 0.9.8.jar）
+             A1（视觉行分支统一）已实机验收通过；安装包由 0.9.138-a1 源码重打包，SHA 与 dist 原始包不同属正常。
+             当前验收分支为 claude/a1-visual-line-05e7f0（未合并/未 push；发布合并由发布任务处理）。
              PyCharm 2025.2 装的是**上游 0.6.0**，用于对比，不是本地版 —— 见 docs/UPSTREAM-COMPARE-2026-11-02.md。
-             git tag 停在 v0.9.127（0.9.128~0.9.133 未打 tag）—— **不要用 tag 判断已装版本**。
+             git tag 停在 v0.9.127（0.9.128 起未打 tag）—— **不要用 tag 判断已装版本**。
 HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过期一次；2026-11-04 是 Step B 撤回提交）
 远程         fork/main 与本机 HEAD 是否同步，**用命令核实，不在此写快照数字**：
              git rev-list --left-right --count fork/main...HEAD  → 输出 0 0 表示已同步；
@@ -175,12 +175,12 @@ HEAD         见 `git log -1`（**不写死 hash** —— 每提交一次就过�
              ⚠️ 推送必须走 SSH：https 经本机代理 127.0.0.1:7897 会 TLS 中途断开
              （`error:0A000126 SSL unexpected eof`），绕过代理直连 443 也会超时。
              fork 的 remote 已改成 git@github.com:...，`git push fork main` 即可。
-工作区       2026-11-04 文档任务已全部提交，工作区干净 —— **不要 reset / checkout / clean**
-D0 门禁      最近一次 PASS（2026-11-04 文档任务后重跑，core/NeovideConfig.java 零 diff）
-探针         118 个 V*.java / 133 个 *.java / **115 个注册探针**（2026-11-04 实测）；
-             最近一次门禁 ALL PASS（0 失败；VFadeTick 45 / VFadePreview 8 / VMultiCursorFix 9 /
+工作区       2026-11-06 A1 分支 worktree 干净；主仓库另有文档改动，发布前由发布任务统一处理 —— **不要 reset / checkout / clean**
+D0 门禁      最近一次 A1 门禁 PASS（2026-11-06，core/NeovideConfig.java 零 diff）
+探针         118 个 V*.java / 133 个 *.java / **117 个注册探针**（2026-11-06 实测）；
+             最近一次 A1 门禁 ALL PASS（0 失败；VMultiBranchDiag 35 / VPreviewBranch 8 /
              **VTypingSpan 9**）；**改动代码后必须重跑**，不要引用旧结果
-现状摘要     **先读 `docs/CURRENT-STATE-2026-11-04.md`**（已装版本 / trailSize / A-E 状态 / 下一步）
+现状摘要     **先读 `docs/CURRENT-STATE-2026-11-04.md`**（页首 2026-11-06 更新：A1 已验收 / 0.9.138-a1 / trailSize / A-E）
 ```
 
 ## 那 6 个探针：2026-10-28 已修绿（**改方向不删断言**）

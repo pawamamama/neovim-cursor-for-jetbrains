@@ -14,7 +14,7 @@
 
 | 文档 | 行数 | 内容 |
 |---|---|---|
-| [CURRENT-STATE-2026-11-04.md](CURRENT-STATE-2026-11-04.md) | 146 | **当前真相页（先读这一页）**。已装 0.9.131 / `trailSize=1.0` / A 暂缓 / B 撤回 / C 保留 / D、E 不做 |
+| [CURRENT-STATE-2026-11-04.md](CURRENT-STATE-2026-11-04.md) | 146 | **当前真相页（先读这一页）**。页首 2026-11-06 更新：A1 已验收 / 已装 0.9.138-a1 / `trailSize=1.0` / 实验开关不建议用；A 暂缓 / B 撤回 / C 保留 / D、E 不做 |
 | [WORKFLOW.md](WORKFLOW.md) | 129 | **每次干活的五步顺序**（bug 第一步 = 复现 + 证据） |
 | [SESSION-PROTOCOL.md](SESSION-PROTOCOL.md) | 170 | **决策会话 ↔ 执行会话**：PROMPT / REPORT 模板、代理与技能分工 |
 | [sessions/2026-11-05-doc-handoff/HANDOFF-TO-DECISION.md](sessions/2026-11-05-doc-handoff/HANDOFF-TO-DECISION.md) | 100 | **给决策会话的交接**：本轮改了什么、门禁出错的真相、下一轮该生成什么 |

@@ -7,6 +7,10 @@
 > 它不替代 `docs/BUG-LOG.md`（记录「发生过什么」），也不替代
 > `docs/WORK-DISCIPLINE.md`（记录「怎么干活」）。
 
+> **【2026-11-06 更新】A1（视觉行分支统一）已实机验收通过；当前安装 `0.9.138-a1`（读 jar 内版本）。**
+> `crossShapeExperiment` 仍是实验性开关，默认关，**不建议日常使用**（形状尚未改好）。
+> 以下 2026-11-04 正文保留为历史记录；版本、探针数与 A1 状态以本段和 §二表格为准。
+
 ---
 
 ## 一、两分钟看懂（大白话）
@@ -34,19 +38,19 @@
 
 ## 二、当前真相（表格）
 
-| 项 | 事实（2026-11-04 实测） |
+| 项 | 事实（2026-11-06 更新） |
 |---|---|
-| 已装 jar | **0.9.131**（读 jar 内 `META-INF/plugin.xml`；文件名恒为 `0.9.8.jar`） |
-| 文档/验收基线 | **0.9.131** |
-| 当前构建 | 0.9.133，行为 = 0.9.131；0.9.132/0.9.133 是中间版，**不回退/不重装** |
-| 分支 / HEAD | `fix/bug-016-completion-flicker` / `fddd529`（Step B 已撤回） |
-| 远程 | `git rev-list --left-right --count fork/main...HEAD` → **0 7**（未 push） |
-| 当前预设 | 面板选中「基础测试2」，`trailSize = 1.0` |
-| `trailSize = 0.2` | 属于另一个预设「纯平滑输入 副本」；**过期记录**，不是当前值 |
-| 探针 | 118 个 `V*.java` / 133 个 `*.java` / **115 个注册探针** |
-| 门禁 | 上次记录 `ALL PASS`；**本轮是文档阶段，没有重跑**（见 §六） |
-| D0 | `core/NeovideConfig.java` **零 diff**（最近一次记录） |
-| 工作区 | 有文档修改与未跟踪文档；**不要 reset / checkout / clean** |
+| 已装 jar | **0.9.138-a1**（读 jar 内 `META-INF/plugin.xml`；文件名恒为 `0.9.8.jar`） |
+| 文档/验收基线 | **0.9.138-a1**（A1 已实机验收） |
+| 当前构建 | 0.9.138-a1（A1）；`crossShapeExperiment` 实验开关默认关，**不建议日常使用** |
+| 分支 / HEAD | `claude/a1-visual-line-05e7f0` / 见 `git log -1`（A1 验收分支，未合并/未 push） |
+| 远程 | 用 `git rev-list --left-right --count fork/main...HEAD` 核实（**不写快照**） |
+| 当前预设 | 以面板为准；`trailSize = 1.0` 仍是期望值（调低会更难看） |
+| `trailSize = 0.2` | 属于「纯平滑输入 副本」；**过期记录**，不是当前值 |
+| 探针 | 118 个 `V*.java` / 133 个 `*.java` / **117 个注册探针**（2026-11-06） |
+| 门禁 | 2026-11-06 A1 门禁 `ALL PASS`（VMultiBranchDiag 35 / VPreviewBranch 8 / VTypingSpan 9） |
+| D0 | `core/NeovideConfig.java` **零 diff**（A1 门禁记录） |
+| 工作区 | A1 worktree 干净；主仓库有文档改动，发布前统一处理；**不要 reset / checkout / clean** |
 
 ### A / B / C / D / E 状态
 
