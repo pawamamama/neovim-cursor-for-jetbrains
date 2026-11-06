@@ -67,6 +67,32 @@ What changed:
 
 ---
 
+## Relationship to upstream
+
+This repository is an independent **MIT fork** of
+[yyyyolo7a79-sketch/neovim-cursor-for-jetbrains](https://github.com/yyyyolo7a79-sketch/neovim-cursor-for-jetbrains).
+The core trailing physics and the original codebase come from upstream; the
+original copyright notice and the MIT [`LICENSE`](LICENSE) are kept unchanged.
+See [NOTICE.md](NOTICE.md) for the upstream attribution and the change table.
+That table is an earlier snapshot; the current parameter and preset counts are
+the ones listed in this README.
+
+As the maintainer's hands-on assessment, the upstream baseline was not usable
+enough for daily work as-is. This fork's work has concentrated on:
+
+- feel and physics tuning (short-jump gradient, stretch/slant, glow behaviour);
+- the settings panel, persistence and presets;
+- glow fade, multi-caret behaviour and platform read-action compatibility;
+- the A1 visual-line branch rule that replaces the old character-count /
+  pixel-fallback split;
+- probes, release gates, packaging and release documentation.
+
+This fork does **not** claim authorship of upstream's core implementation. Its
+contributions are in usability, interaction, tuning, verification and release
+engineering.
+
+---
+
 ## Features
 
 - **Stretch, not afterimage.** Each corner of the caret rectangle runs its own
