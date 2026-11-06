@@ -1,0 +1,246 @@
+==> javac 源码树（37 个 .java）
+==> javac V 探针（118 个）
+  VDefects   exit=0  PASS=47  FAIL=0
+  VScheme    exit=0  PASS=15  FAIL=0
+  VSnap      exit=0  PASS=32  FAIL=0
+  VPreset    exit=0  PASS=49  FAIL=0
+  VTools     exit=0  PASS=12  FAIL=0
+  VSpring    exit=0  PASS=10  FAIL=0
+  VHints     exit=0  PASS=11  FAIL=0
+  VMixed     exit=0  PASS=2  FAIL=0
+  VCustom    exit=0  PASS=45  FAIL=0
+  VFacadeEquiv exit=0  PASS=19  FAIL=0
+  VSubpixel  exit=0  PASS=4  FAIL=0
+  VSeEdge    exit=0  PASS=7  FAIL=0
+  VRecurse   exit=0  PASS=6  FAIL=0
+  VSep       exit=0  PASS=36  FAIL=0
+  VPreset9   exit=0  PASS=42  FAIL=0
+  VVerify    exit=0  PASS=0  FAIL=0
+  VFrameRate exit=0  PASS=9  FAIL=0
+  VSmooth    exit=0  PASS=15  FAIL=0
+  VOrder     exit=0  PASS=2  FAIL=0
+  VOrtho     exit=0  PASS=29  FAIL=0
+  VPerf      exit=0  PASS=17  FAIL=0
+  VPerf2     exit=0  PASS=8  FAIL=0
+  VRank      exit=0  PASS=4  FAIL=0
+  VLabel     exit=0  PASS=5  FAIL=0
+  VGrad      exit=0  PASS=5  FAIL=0
+  VRegr2     exit=1  PASS=13  FAIL=2
+    FAIL  R-5 【第9字段】9 个预设字段逐个扰动后 match 都必须掉下来（否则勾选态对该字段撒谎）   [漏看的字段=[typingSmoothness]]
+    FAIL  R-6 【第9字段·派生】在内置预设上改 typingSmoothness 必须派生出落脚点（否则用户调好的 smooth 无处保存，切预设即丢）   [animCustomName="" smooth=1.0 自定义预设数=0]
+  VFreeze    exit=0  PASS=4  FAIL=0
+  VWidth     exit=0  PASS=7  FAIL=0
+  VQuad      exit=0  PASS=13  FAIL=0
+  VMulti     exit=0  PASS=7  FAIL=0
+  VBlock     exit=0  PASS=7  FAIL=0
+  VCaret     exit=0  PASS=8  FAIL=0
+  VAddSetting exit=0  PASS=6  FAIL=0
+  VCrossShapeExperiment exit=0  PASS=33  FAIL=0
+  VCursorSize exit=0  PASS=11  FAIL=0
+  VPreviewBranch exit=0  PASS=7  FAIL=0
+  VPreviewSizeLive exit=0  PASS=10  FAIL=0
+  VPreviewRealtime exit=0  PASS=9  FAIL=0
+  VRestoreDefault exit=0  PASS=7  FAIL=0
+  VDefaultFreeze exit=0  PASS=5  FAIL=0
+  VColorBinding exit=0  PASS=7  FAIL=0
+  VTextFacts exit=0  PASS=6  FAIL=0
+  VLoadState exit=0  PASS=5  FAIL=0
+  VReviewFixes exit=0  PASS=16  FAIL=0
+  VQuadProbeTruth exit=0  PASS=12  FAIL=0
+  VRgbWash   exit=0  PASS=6  FAIL=0
+  VRankCollapse exit=0  PASS=6  FAIL=0
+  VDeadField exit=0  PASS=4  FAIL=0
+  VSlopePreset exit=0  PASS=8  FAIL=0
+  VSlopeMigration exit=0  PASS=8  FAIL=0
+  VPresetReset exit=0  PASS=6  FAIL=0
+  VPresetChain exit=0  PASS=11  FAIL=0
+  VGlowFog   exit=0  PASS=8  FAIL=0
+  VBaseline  exit=0  PASS=6  FAIL=0
+  VBlockStretch exit=0  PASS=2  FAIL=0
+  VCursorWidth exit=0  PASS=0  FAIL=0
+  VDead      exit=0  PASS=6  FAIL=0
+  VDiagPersist exit=0  PASS=4  FAIL=0
+  VGroup     exit=0  PASS=8  FAIL=0
+  VHandFeel  exit=0  PASS=2  FAIL=0
+  VInfo      exit=0  PASS=8  FAIL=0
+  VMCDiff    exit=0  PASS=5  FAIL=0
+  VMultiNoGlow exit=0  PASS=5  FAIL=0
+  VPresetFeel exit=0  PASS=3  FAIL=0
+  VSelection exit=0  PASS=7  FAIL=0
+  VSelfCheck exit=0  PASS=4  FAIL=0
+  VSelFix    exit=0  PASS=7  FAIL=0
+  VSepDiag   exit=0  PASS=0  FAIL=0
+  VSepUi     exit=0  PASS=0  FAIL=0
+  VSize      exit=0  PASS=5  FAIL=0
+  VSleep2    exit=0  PASS=3  FAIL=0
+  VStretchDiag exit=0  PASS=0  FAIL=0
+  VUniform   exit=0  PASS=4  FAIL=0
+  VYourConfig exit=0  PASS=0  FAIL=0
+  V0Create   exit=0  PASS=0  FAIL=0
+  V0Tree     exit=0  PASS=0  FAIL=0
+  VerifyApplyConfig exit=0  PASS=26  FAIL=0
+  VerifyPanel exit=0  PASS=34  FAIL=0
+  VerifyPersistence exit=0  PASS=52  FAIL=0
+  VSmoothGlobal exit=0  PASS=6  FAIL=0
+  VPreviewSize exit=0  PASS=0  FAIL=0
+  VReset2    exit=0  PASS=7  FAIL=0
+  VSepBound  exit=0  PASS=43  FAIL=0
+  VSleep     exit=0  PASS=4  FAIL=0
+  VRainbowSep exit=0  PASS=6  FAIL=0
+  VFpsPersist exit=0  PASS=5  FAIL=0
+  VSwitchKeysGap exit=0  PASS=5  FAIL=0
+  VReset     exit=0  PASS=19  FAIL=0
+  VColorMatchBug exit=0  PASS=5  FAIL=0
+  VGradAllPresets exit=0  PASS=8  FAIL=0
+  VPreviewParity exit=0  PASS=12  FAIL=0
+  VFontScale exit=0  PASS=5  FAIL=0
+  VInlay     exit=0  PASS=5  FAIL=0
+  VFieldDomain exit=0  PASS=5  FAIL=0
+  VBoot      exit=0  PASS=5  FAIL=0
+  VDocCheck  exit=0  PASS=4  FAIL=0
+  VBuildDecl exit=0  PASS=9  FAIL=0
+  VReadAction exit=0  PASS=16  FAIL=0
+  VTrailCap  exit=0  PASS=6  FAIL=0
+  VMultiBranchDiag exit=0  PASS=26  FAIL=0
+  VTabPages  exit=0  PASS=8  FAIL=0
+  VAuditBatch1 exit=0  PASS=27  FAIL=0
+  VAuditBatch2Round2to4 exit=0  PASS=24  FAIL=0
+  VAuditBatch2Round5 exit=0  PASS=32  FAIL=0
+  VBatch3Fixes exit=0  PASS=21  FAIL=0
+  VBatch3Medium exit=0  PASS=25  FAIL=0
+  VPreviewRank exit=0  PASS=6  FAIL=0
+  VValidationSink exit=0  PASS=34  FAIL=0
+  VCatchRollback exit=0  PASS=6  FAIL=0
+  VBatch3Tail exit=0  PASS=36  FAIL=0
+  VLeadingSnap exit=0  PASS=12  FAIL=0
+  VI18n      exit=0  PASS=13  FAIL=0
+  VInputCommit exit=0  PASS=7  FAIL=0
+  VFadeTick  exit=0  PASS=45  FAIL=0
+  VFadePreview exit=0  PASS=8  FAIL=0
+  VMultiCursorFix exit=0  PASS=11  FAIL=0
+  VTypingSpan exit=0  PASS=9  FAIL=0
+
+########## V 探针汇总 ##########
+
+Probe                 Exit Pass Fail Summary
+-----                 ---- ---- ---- -------
+VDefects                 0   47    0 === V-DEFECTS 结果：PASS 19，FAIL 0 === | V-DEFECTS RESULT: ALL PASS
+VScheme                  0   15    0 === V-SCHEME 结果：PASS 15，FAIL 0 === | V-SCHEME RESULT: ALL PASS
+VSnap                    0   32    0 === V-SNAP 结果：PASS 23，FAIL 0 === | V-SNAP RESULT: ALL PASS
+VPreset                  0   49    0 === V-PRESET 结果：PASS 26，FAIL 0 === | V-PRESET RESULT: ALL PASS
+VTools                   0   12    0 === V-TOOLS 结果：PASS 12，FAIL 0 === | V-TOOLS RESULT: ALL PASS
+VSpring                  0   10    0 === V-SPRING 结果：PASS 10，FAIL 0 === | V-SPRING RESULT: ALL PASS
+VHints                   0   11    0 === V-HINTS 结果：PASS 11，FAIL 0 === | V-HINTS RESULT: ALL PASS
+VMixed                   0    2    0 === V-MIXED 结果：PASS 2，FAIL 0 === | V-MIXED RESULT: ALL PASS
+VCustom                  0   45    0 === V-CUSTOM 结果：PASS 45，FAIL 0 === | V-CUSTOM RESULT: ALL PASS
+VFacadeEquiv             0   19    0 === V-FACADE-EQUIV 结果：PASS 19，FAIL 0 === | V-FACADE-EQUIV RESULT: ALL PASS
+VSubpixel                0    4    0 === V-SUBPIXEL 结果：PASS 4，FAIL 0 === | V-SUBPIXEL RESULT: ALL PASS
+VSeEdge                  0    7    0 SEP-EDGE RESULT: ALL PASS
+VRecurse                 0    6    0 RECURSE RESULT: ALL PASS
+VSep                     0   36    0 === V-SEP 结果：PASS 36，FAIL 0 ===
+VPreset9                 0   42    0 === V-PRESET9 结果：PASS 42，FAIL 0 ===
+VVerify                  0    0    0
+VFrameRate               0    9    0 === V-FRAMERATE 结果：PASS 9，FAIL 0 === | V-FRAMERATE RESULT: ALL PASS
+VSmooth                  0   15    0 === V-SMOOTH 结果：PASS 15，FAIL 0 === | V-SMOOTH RESULT: ALL PASS
+VOrder                   0    2    0 === V-ORDER 结果：PASS 2，FAIL 0 === | V-ORDER RESULT: ALL PASS
+VOrtho                   0   29    0 === V-ORTHO 结果：PASS 20，FAIL 0 === | V-ORTHO RESULT: ALL PASS
+VPerf                    0   17    0 === V-PERF 结果：PASS 17，FAIL 0 === | V-PERF RESULT: ALL PASS
+VPerf2                   0    8    0 === V-PERF2 结果：PASS 8，FAIL 0 === | V-PERF2 RESULT: ALL PASS
+VRank                    0    4    0 === V-RANK 结果：PASS 4，FAIL 0 === | V-RANK RESULT: ALL PASS
+VLabel                   0    5    0 === V-LABEL 结果：PASS 5，FAIL 0 === | V-LABEL RESULT: ALL PASS
+VGrad                    0    5    0 === V-GRAD 结果：PASS 5，FAIL 0 === | V-GRAD RESULT: ALL PASS
+VRegr2                   1   13    2
+VFreeze                  0    4    0 === V-FREEZE 结果：PASS 4，FAIL 0 === | V-FREEZE RESULT: ALL PASS
+VWidth                   0    7    0 === V-WIDTH 结果：PASS 7，FAIL 0 === | V-WIDTH RESULT: ALL PASS
+VQuad                    0   13    0 === V-QUAD 结果：PASS 13，FAIL 0 === | V-QUAD RESULT: ALL PASS
+VMulti                   0    7    0 === V-MULTI 结果：PASS 7，FAIL 0 === | V-MULTI RESULT: ALL PASS
+VBlock                   0    7    0 === V-BLOCK 结果：PASS 7，FAIL 0 === | V-BLOCK RESULT: ALL PASS
+VCaret                   0    8    0 === V-CARET 结果：PASS 8，FAIL 0 === | V-CARET RESULT: ALL PASS
+VAddSetting              0    6    0 === V-ADD-SETTING 结果：PASS 6，FAIL 0 === | V-ADD-SETTING RESULT: ALL PASS
+VCrossShapeExperiment    0   33    0 === V-CROSS-SHAPE-EXPERIMENT 结果：PASS 33，FAIL 0 === | V-CROSS-SHAPE-EXPERIMENT RESULT: ALL PASS
+VCursorSize              0   11    0 === V-CURSOR-SIZE 结果：PASS 11，FAIL 0 === | V-CURSOR-SIZE RESULT: ALL PASS
+VPreviewBranch           0    7    0 === V-PREVIEW-BRANCH 结果：PASS 7，FAIL 0 === | V-PREVIEW-BRANCH RESULT: ALL PASS
+VPreviewSizeLive         0   10    0 === V-PREVIEW-SIZE-LIVE 结果：PASS 10，FAIL 0 === | V-PREVIEW-SIZE-LIVE RESULT: ALL PASS
+VPreviewRealtime         0    9    0 === V-PREVIEW-REALTIME 结果：PASS 9，FAIL 0 === | V-PREVIEW-REALTIME RESULT: ALL PASS
+VRestoreDefault          0    7    0 === V-RESTORE-DEFAULT 结果：PASS 7，FAIL 0 === | V-RESTORE-DEFAULT RESULT: ALL PASS
+VDefaultFreeze           0    5    0 === V-DEFAULT-FREEZE 结果：PASS 5，FAIL 0 === | V-DEFAULT-FREEZE RESULT: ALL PASS
+VColorBinding            0    7    0 === V-COLOR-BINDING 结果：PASS 7，FAIL 0 === | V-COLOR-BINDING RESULT: ALL PASS
+VTextFacts               0    6    0 === V-TEXT-FACTS 结果：PASS 6，FAIL 0 === | V-TEXT-FACTS RESULT: ALL PASS
+VLoadState               0    5    0 === V-LOAD-STATE 结果：PASS 5，FAIL 0 === | V-LOAD-STATE RESULT: ALL PASS
+VReviewFixes             0   16    0 === V-REVIEW-FIXES 结果：PASS 16，FAIL 0 === | V-REVIEW-FIXES RESULT: ALL PASS
+VQuadProbeTruth          0   12    0 === V-P4-FIXES 结果：PASS 12，FAIL 0 === | V-P4-FIXES RESULT: ALL PASS
+VRgbWash                 0    6    0 V-CURSOR-GRADIENT RESULT: ALL PASS
+VRankCollapse            0    6    0 === V-RANK 结果：PASS 6，FAIL 0 === | V-RANK RESULT: ALL PASS
+VDeadField               0    4    0 === V-DEAD-FIELD 结果：PASS 4，FAIL 0 === | V-DEAD-FIELD RESULT: ALL PASS
+VSlopePreset             0    8    0
+VSlopeMigration          0    8    0
+VPresetReset             0    6    0 === V-PRESET-RESET 结果：PASS 6，FAIL 0 === | V-PRESET-RESET RESULT: ALL PASS
+VPresetChain             0   11    0 === V-PRESET-CHAIN 结果：PASS 11，FAIL 0 === | V-PRESET-CHAIN RESULT: ALL PASS
+VGlowFog                 0    8    0 RESULT: ALL PASS
+VBaseline                0    6    0 === V-BASELINE(?) 结果：PASS 6，FAIL 0 === | V-BASELINE RESULT: ALL PASS
+VBlockStretch            0    2    0 === V-BLOCK-STRETCH 结果：PASS 2，FAIL 0 === | V-BLOCK-STRETCH RESULT: ALL PASS
+VCursorWidth             0    0    0
+VDead                    0    6    0 === V-DEAD 结果：PASS 6，FAIL 0 === | V-DEAD RESULT: ALL PASS
+VDiagPersist             0    4    0 === V-DIAG-PERSIST 结果：PASS 4，FAIL 0 === | V-DIAG-PERSIST RESULT: ALL PASS
+VGroup                   0    8    0 === V-GROUP 结果：PASS 8, FAIL 0 === | V-GROUP RESULT: ALL PASS
+VHandFeel                0    2    0 === V-HANDFEEL 结果：PASS 2，FAIL 0 === | V-HANDFEEL RESULT: ALL PASS
+VInfo                    0    8    0 === V-INFO 结果：PASS 8，FAIL 0 === | V-INFO RESULT: ALL PASS
+VMCDiff                  0    5    0 === V-MCDIFF 结果：PASS 5，FAIL 0 === | V-MCDIFF RESULT: ALL PASS
+VMultiNoGlow             0    5    0 === V-MULTI-NOGLOW 结果：PASS 5，FAIL 0 === | V-MULTI-NOGLOW RESULT: ALL PASS
+VPresetFeel              0    3    0 === V-PRESET-FEEL 结果：PASS 3，FAIL 0 === | V-PRESET-FEEL RESULT: ALL PASS
+VSelection               0    7    0 === V-SELECTION 结果：PASS 7，FAIL 0 === | V-SELECTION RESULT: ALL PASS
+VSelfCheck               0    4    0 === V-SELFCHECK 结果：PASS 4，FAIL 0 === | V-SELFCHECK RESULT: ALL PASS
+VSelFix                  0    7    0 === V-SELFCHECK 结果：PASS 7，FAIL 0 === | V-SELFCHECK RESULT: ALL PASS
+VSepDiag                 0    0    0
+VSepUi                   0    0    0
+VSize                    0    5    0 === V-SIZE 结果：PASS 5，FAIL 0 === | V-SIZE RESULT: ALL PASS
+VSleep2                  0    3    0 === V-SLEEP2 结果：PASS 3，FAIL 0 === | V-SLEEP2 RESULT: ALL PASS
+VStretchDiag             0    0    0
+VUniform                 0    4    0 === V-UNIFORM 结果：PASS 4，FAIL 0 === | V-UNIFORM RESULT: ALL PASS
+VYourConfig              0    0    0
+V0Create                 0    0    0
+V0Tree                   0    0    0
+VerifyApplyConfig        0   26    0
+VerifyPanel              0   34    0
+VerifyPersistence        0   52    0
+VSmoothGlobal            0    6    0 === V-SMOOTH-GLOBAL 结果：PASS 6，FAIL 0 === | V-SMOOTH-GLOBAL RESULT: ALL PASS
+VPreviewSize             0    0    0
+VReset2                  0    7    0 === V-RESET2 结果：PASS 7，FAIL 0 === | V-RESET2 RESULT: ALL PASS
+VSepBound                0   43    0 === V-SEP-BOUND 结果：PASS 43，FAIL 0 ===
+VSleep                   0    4    0 === V-SLEEP 结果：PASS 4，FAIL 0 === | V-SLEEP RESULT: ALL PASS
+VRainbowSep              0    6    0 RESULT: ALL PASS
+VFpsPersist              0    5    0
+VSwitchKeysGap           0    5    0 === V-SWITCH-GAP 结果：PASS 5，FAIL 0 === | V-SWITCH-GAP RESULT: ALL PASS
+VReset                   0   19    0 === V-RESET 结果：PASS 19，FAIL 0 === | V-RESET RESULT: ALL PASS
+VColorMatchBug           0    5    0 RESULT: 判据正常
+VGradAllPresets          0    8    0 RESULT: ALL PASS
+VPreviewParity           0   12    0 RESULT: ALL PASS
+VFontScale               0    5    0 === V-FONTSCALE 结果：PASS 5，FAIL 0 === | V-FONTSCALE RESULT: ALL PASS
+VInlay                   0    5    0 === V-INLAY 结果：PASS 5，FAIL 0 === | V-INLAY RESULT: ALL PASS
+VFieldDomain             0    5    0 === V-FIELD-DOMAIN 结果：PASS 5，FAIL 0 === | V-FIELD-DOMAIN RESULT: ALL PASS
+VBoot                    0    5    0 === V-BOOT 结果：PASS 5，FAIL 0 === | V-BOOT RESULT: ALL PASS
+VDocCheck                0    4    0 === V-DOC 结果：PASS 4，FAIL 0 === | V-DOC RESULT: ALL PASS
+VBuildDecl               0    9    0 === V-BUILD 结果：PASS 9，FAIL 0 === | V-BUILD RESULT: ALL PASS
+VReadAction              0   16    0 === V-READACTION 结果：PASS 16，FAIL 0 === | V-READACTION RESULT: ALL PASS
+VTrailCap                0    6    0 === V-TRAIL-CAP 结果：PASS 6，FAIL 0 === | V-TRAIL-CAP RESULT: ALL PASS
+VMultiBranchDiag         0   26    0 === V-MULTI-BRANCH-DIAG 结果：PASS 26，FAIL 0 === | V-MULTI-BRANCH-DIAG RESULT: ALL PASS
+VTabPages                0    8    0 === V-TAB-PAGES 结果：PASS 8，FAIL 0 === | V-TAB-PAGES RESULT: ALL PASS
+VAuditBatch1             0   27    0 VAUDIT-BATCH1 RESULT: ALL PASS
+VAuditBatch2Round2to4    0   24    0 VAUDIT-BATCH2-R2TO4 RESULT: ALL PASS
+VAuditBatch2Round5       0   32    0 VAUDIT-BATCH2-R5 RESULT: ALL PASS
+VBatch3Fixes             0   21    0 === V-BATCH3-FIXES 结果：PASS 21，FAIL 0 === | V-BATCH3-FIXES RESULT: ALL PASS
+VBatch3Medium            0   25    0 VBATCH3-MEDIUM RESULT: ALL PASS
+VPreviewRank             0    6    0 === V-PREVIEW-RANK 结果：PASS 6，FAIL 0 === | V-PREVIEW-RANK RESULT: ALL PASS
+VValidationSink          0   34    0 === V-VALIDATION-SINK 结果：PASS 34，FAIL 0 === | V-VALIDATION-SINK RESULT: ALL PASS
+VCatchRollback           0    6    0 === V-CATCH-ROLLBACK 结果：PASS 6，FAIL 0 === | V-CATCH-ROLLBACK RESULT: ALL PASS
+VBatch3Tail              0   36    0 === V-BATCH3-TAIL 结果：PASS 36，FAIL 0 === | | V-BATCH3-TAIL RESULT: ALL PASS
+VLeadingSnap             0   12    0 === V-LEADING-SNAP 结果：PASS 12，FAIL 0 === | V-LEADING-SNAP RESULT: ALL PASS
+VI18n                    0   13    0 === V-I18N 结果：PASS 13，FAIL 0 === | V-I18N RESULT: ALL PASS
+VInputCommit             0    7    0 === V-INPUT-COMMIT 结果：PASS 7，FAIL 0 === | V-INPUT-COMMIT RESULT: ALL PASS
+VFadeTick                0   45    0 === V-FADE-TICK 结果：PASS 45，FAIL 0 === | V-FADE-TICK RESULT: ALL PASS
+VFadePreview             0    8    0 === V-FADE-PREVIEW 结果：PASS 8，FAIL 0 === | V-FADE-PREVIEW RESULT: ALL PASS
+VMultiCursorFix          0   11    0 === V-MULTICURSOR-FIX 结果：PASS 11，FAIL 0 === | V-MULTICURSOR-FIX RESULT: ALL PASS
+VTypingSpan              0    9    0 === V-TYPING-SPAN 结果：PASS 9，FAIL 0 === | V-TYPING-SPAN RESULT: ALL PASS
+
+
+V-PROBES RESULT: ALL PASS

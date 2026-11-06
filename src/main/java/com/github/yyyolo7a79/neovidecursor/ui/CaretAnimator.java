@@ -1864,8 +1864,51 @@ public class CaretAnimator implements Disposable, CaretListener {
      * 精确查找 {@code refreshTarget()}；直接把签名改成 {@code refreshTarget(long)}
      * 会让它们全部 {@code NoSuchMethodException}（2026-11-02 门禁实测）。
      */
+    /** 诊断：只把本帧现成只读量放进 pending 快照，不改任何赋值与判据。 */
+    private void noteBranchDecision(int animatorId, SpringTrail trail, long frameSeq,
+                                    int slot, boolean multiCaret,
+                                    VisualPosition cvp, double deltaXpx, double deltaYpx,
+                                    double width, double height, int charsMoved,
+                                    int prevVisualLine, int slopeTicks, boolean aLike) {
+        try {
+            boolean visualLineChanged = prevVisualLine != Integer.MIN_VALUE
+                    && prevVisualLine != cvp.line;
+            boolean sameLine = !visualLineChanged;
+            CursorDiag.noteBranchSnapshot(animatorId, System.identityHashCode(trail),
+                    frameSeq, slot, multiCaret, cvp.line, cvp.column,
+                    deltaXpx, deltaYpx, width, height, charsMoved, prevVisualLine,
+                    sameLine, visualLineChanged, aLike,
+                    slopeTicks, (int) config.shortMoveThreshold,
+                    config.typingMaxChars, false);
+        } catch (Throwable t) {
+            // 诊断失败不得影响动画；enabled() 已保证关闭时不会走到这里。
+            swallowedQuietly("branchDiag.snapshot", t);
+        }
+    }
+
+    /** 诊断只读：取当前 State 的斜度字段，读不到记 -1，不写回设置。 */
+    private static int readSlopeTicksForDiag() {
+        try {
+            return com.github.yyyolo7a79.neovidecursor.settings.NeovideCursorSettings
+                    .getInstance().getState().slopeTicks;
+        } catch (Throwable t) {
+            swallowedQuietly("branchDiag.slopeTicks", t);
+            return -1;
+        }
+    }
+
     private boolean refreshTarget() {
         return refreshTarget(System.nanoTime());
+    }
+
+    /** 诊断只读：活跃拖尾在当前帧的下标；找不到返回 -1，不参与输出配对。 */
+    private int branchSlotOf(SpringTrail trail) {
+        for (int i = 0; i < activeTrails.size(); i++) {
+            if (activeTrails.get(i) == trail) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     /**
@@ -2192,6 +2235,8 @@ public class CaretAnimator implements Disposable, CaretListener {
             // 【BUG-007】诊断：这个 stamp 本来就要读，顺手判定「第一次改文档」
             CursorDiag.noteStampTrace(traceId, stamp);
             frameSeq++;
+            boolean branchDiagWanted = CursorDiag.branchTraceWanted(frameSeq);
+            int branchSlopeTicks = branchDiagWanted ? readSlopeTicksForDiag() : -1;
 
             CaretModel caretModel = editor.getCaretModel();
             List<Caret> carets = caretModel.getAllCarets();
@@ -2471,6 +2516,13 @@ public class CaretAnimator implements Disposable, CaretListener {
                         || recheckThisFrame.contains(trail);
 
                 if (needsUpdate) {
+                    // 诊断必须在 markAt 覆盖 lastLine 之前取上一帧视觉行。
+                    int branchPrevLine = branchDiagWanted
+                            ? trail.lastVisualLineForProbe() : Integer.MIN_VALUE;
+                    double branchPrevCenterX = branchDiagWanted ? trail.centerX : 0.0;
+                    double branchPrevCenterY = branchDiagWanted ? trail.centerY : 0.0;
+                    // 新 trail 首帧只 snapToTarget，不会执行 jump()，不能产出伪 branch。
+                    boolean branchWasInitialized = !branchDiagWanted || trail.isInitialized();
                     long stampBefore = trail.lastStamp();
                     Point cp = editor.visualPositionToXY(cvp);
                     trail.markAt(cvp.line, cvp.column, stamp);
@@ -2542,6 +2594,12 @@ public class CaretAnimator implements Disposable, CaretListener {
                         // 而不是从「拖尾收拢」起算（那是 0.9.125「停下才暗」的根因）。
                         glowStates.computeIfAbsent(trail, k -> new GlowState()).lastMoveNanos = now;
                         changed = true;
+                        if (branchDiagWanted && branchWasInitialized) {
+                            noteBranchDecision(traceId, trail, frameSeq, i, multiCaret, cvp,
+                                    cx - branchPrevCenterX, cy - branchPrevCenterY,
+                                    w, h, charsMoved, branchPrevLine,
+                                    branchSlopeTicks, crossShapeExperiment);
+                        }
                     }
                     // 【BUG-016-2】本帧的像素是在文档刚改过之后读的：平台布局可能
                     // 晚一帧，visualPositionToXY 仍返回旧坐标。本帧照常记账，
@@ -2875,9 +2933,26 @@ public class CaretAnimator implements Disposable, CaretListener {
     private boolean tickSpring(double dt, long now) {
         // 多光标：逐光标推进物理
         boolean anyAnimating = false;
+        boolean diagFrame = CursorDiag.shouldSample(frameSeq);
         for (SpringTrail trail : activeTrails) {
             if (trail.update(dt)) {
                 anyAnimating = true;
+            }
+            if (diagFrame) {
+                int branchTrailId = System.identityHashCode(trail);
+                // 先判待配对快照，避免快速帧上没有 branch 记录时白做槽位查找/反射。
+                if (CursorDiag.hasPendingBranch(traceId, branchTrailId)) {
+                    Boolean branchShort = trail.lastBranchShortForProbe();
+                    if (branchShort != null) {
+                        try {
+                            CursorDiag.branchTrace(traceId, frameSeq, branchTrailId,
+                                    branchSlotOf(trail), branchShort,
+                                    crossShapeExperiment);
+                        } catch (Throwable t) {
+                            swallowedQuietly("branchDiag.emit", t);
+                        }
+                    }
+                }
             }
         }
 
@@ -2973,7 +3048,6 @@ public class CaretAnimator implements Disposable, CaretListener {
         // 不再写 static 字段（那会让多个 animator 的 layers= 串台）。
 
         panel.beginQuads();
-        boolean diagFrame = CursorDiag.shouldSample(frameSeq);
         // [trail] 的行数上限按 animator 分桶（见 CursorDiag.TRAIL_MAX_LINES）。
         // 键与下面 frameSummary 用的完全相同：identityHashCode(this)，
         // 这样多编辑器各算各的额度，不会互相吃掉。

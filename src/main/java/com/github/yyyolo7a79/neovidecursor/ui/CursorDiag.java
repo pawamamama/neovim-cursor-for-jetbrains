@@ -435,10 +435,17 @@ eovide-cursor-diag.log}
         return FRAME_BUDGETS.computeIfAbsent(animatorId, k -> new TrailBudget());
     }
 
+    private static final java.util.Map<Integer, TrailBudget> BRANCH_BUDGETS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static TrailBudget branchBudgetOf(int animatorId) {
+        return BRANCH_BUDGETS.computeIfAbsent(animatorId, k -> new TrailBudget());
+    }
+
     /**
      * 【U-M-13】注销某个 animator 的全部分桶。
      *
-     * <p>四张表必须一起清 —— 漏一张就是「新 animator 继承了旧额度/旧标志」
+     * <p>六张表必须一起清 —— 漏一张就是「新 animator 继承了旧额度/旧标志」
      * （对象被 GC 后 identityHashCode 会被复用）。
      *
      * <p>包级可见：由 {@code CaretAnimator.dispose()} 在最后一步调用。
@@ -446,22 +453,40 @@ eovide-cursor-diag.log}
     static void forget(int animatorId) {
         TRAIL_BUDGETS.remove(animatorId);
         FRAME_BUDGETS.remove(animatorId);
+        BRANCH_BUDGETS.remove(animatorId);
+        PENDING_BRANCH.entrySet().removeIf(e -> e.getValue().animatorId == animatorId);
         SAMPLE_STATE.remove(animatorId);
         TRACES.remove(animatorId);
     }
 
-    /** 探针用：四张表里是否还有这个 id 的条目（T-10）。 */
+    /** 探针用：六张表里是否还有这个 id 的条目（T-10）。 */
     public static boolean tableContainsForProbe(int animatorId) {
         return TRAIL_BUDGETS.containsKey(animatorId)
                 || FRAME_BUDGETS.containsKey(animatorId)
+                || BRANCH_BUDGETS.containsKey(animatorId)
+                || PENDING_BRANCH.values().stream()
+                        .anyMatch(s -> s.animatorId == animatorId)
                 || SAMPLE_STATE.containsKey(animatorId)
                 || TRACES.containsKey(animatorId);
     }
 
-    /** 探针用：四张表的当前尺寸 [trail, frame, sample, trace]（冷启动应为全 0）。 */
+    /** 探针用：六张表的当前尺寸 [trail, frame, branch, pending, sample, trace]。 */
     public static int[] tableSizesForProbe() {
         return new int[]{TRAIL_BUDGETS.size(), FRAME_BUDGETS.size(),
+                BRANCH_BUDGETS.size(), PENDING_BRANCH.size(),
                 SAMPLE_STATE.size(), TRACES.size()};
+    }
+
+    /** 探针用：清空 [branch] 预算，保证每个用例从 0 条开始。 */
+    public static void resetBranchBudgetsForProbe() {
+        BRANCH_BUDGETS.clear();
+        PENDING_BRANCH.clear();
+    }
+
+    /** 探针用：读某个 animator 的 [branch] 预算计数（含唯一汇总行）。 */
+    public static int branchBudgetForProbe(int animatorId) {
+        TrailBudget b = BRANCH_BUDGETS.get(animatorId);
+        return b == null ? 0 : b.lines;
     }
 
     // ==================== 探针入口（B 批）====================
@@ -505,6 +530,8 @@ eovide-cursor-diag.log}
             totalCapLogged = false;
             bytesWritten = 0;
             linesSinceCheck = 0;
+            BRANCH_BUDGETS.clear();
+            PENDING_BRANCH.clear();
         }
     }
 
@@ -793,6 +820,11 @@ eovide-cursor-diag.log}
 
     private static String f(double v) {
         return String.format("%.1f", v);
+    }
+
+    /** 诊断日志专用：固定小数点，避免逗号小数分隔符 Locale 把字段拆坏。 */
+    private static String fr(double v) {
+        return String.format(java.util.Locale.ROOT, "%.1f", v);
     }
 
     private static int parseInt(String s, int def) {
@@ -1270,6 +1302,186 @@ eovide-cursor-diag.log}
     /** 毫秒格式（三位小数，6.944ms 这种帧间隔才看得出来）。 */
     private static String ms(double v) {
         return String.format("%.3f", v);
+    }
+
+    // ==================== 【方案 C】多光标跨行分支取证 ====================
+    //
+    // 只做诊断，不改任何判据：这些行的目的是让用户在真实机器上区分「真回绕」与
+    // 「像素阈值误判」。全部只写独立诊断文件（不刷 idea.log），并沿用 writeFile
+    // 的 synchronized 输出、单行/总量闸门与每 animator 5000 行预算。
+
+    /** 一次分支决策的原始输入 + 已读到的生产配置。 */
+    private static final class BranchSnapshot {
+        int animatorId;
+        int caretId;
+        long frameSeq;
+        int slot;
+        boolean multiCaret;
+        int vpLine;
+        int vpColumn;
+        double deltaXpx;
+        double deltaYpx;
+        double width;
+        double height;
+        int charsMoved;
+        int prevVisualLine;
+        boolean sameLine;
+        boolean visualLineChanged;
+        boolean aLike;
+        int slopeTicks;
+        int shortMoveThreshold;
+        float typingMaxChars;
+        boolean lastBranchShort;
+    }
+
+    /** 分支日志采样：与 [trail] 相同每 15 帧一次；关掉 diag 时只付一次 enabled()。 */
+    public static boolean branchTraceWanted(long frameSeq) {
+        return shouldSample(frameSeq);
+    }
+
+    /**
+     * 记录一次分支选择前的只读快照；只在诊断开启时由 CaretAnimator 调用。
+     *
+     * <p>快照只存本帧已经算出来的现成值，不调用编辑器、不重算 isShortJump、
+     * 不改 charsMoved / applyCharsMoved / setTarget / rank。
+     */
+    /** 分支日志待配对快照写入：调用方必须先经 {@link #branchTraceWanted(long)} 门控。 */
+    public static void noteBranchSnapshot(int animatorId, int caretId, long frameSeq,
+                                          int slot, boolean multiCaret,
+                                          int vpLine, int vpColumn,
+                                          double deltaXpx, double deltaYpx,
+                                          double width, double height,
+                                          int charsMoved, int prevVisualLine,
+                                          boolean sameLine, boolean visualLineChanged,
+                                          boolean aLike, int slopeTicks,
+                                          int shortMoveThreshold, float typingMaxChars,
+                                          boolean lastBranchShort) {
+        BranchSnapshot s = new BranchSnapshot();
+        s.animatorId = animatorId;
+        s.caretId = caretId;
+        s.frameSeq = frameSeq;
+        s.slot = slot;
+        s.multiCaret = multiCaret;
+        s.vpLine = vpLine;
+        s.vpColumn = vpColumn;
+        s.deltaXpx = deltaXpx;
+        s.deltaYpx = deltaYpx;
+        s.width = width;
+        s.height = height;
+        s.charsMoved = charsMoved;
+        s.prevVisualLine = prevVisualLine;
+        s.sameLine = sameLine;
+        s.visualLineChanged = visualLineChanged;
+        s.aLike = aLike;
+        s.slopeTicks = slopeTicks;
+        s.shortMoveThreshold = shortMoveThreshold;
+        s.typingMaxChars = typingMaxChars;
+        s.lastBranchShort = lastBranchShort;
+        PENDING_BRANCH.put(branchKey(animatorId, caretId), s);
+    }
+
+    /** 分支日志的待配对快照：key 是 animatorId/caretId 的 long 复合键，避免 int 碰撞。 */
+    private static final java.util.Map<Long, BranchSnapshot> PENDING_BRANCH =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static long branchKey(int animatorId, int caretId) {
+        return ((long) animatorId << 32) ^ (caretId & 0xffffffffL);
+    }
+
+    /** 探针/调度用：这对 animator+caret 是否还有待配对快照。 */
+    public static boolean hasPendingBranch(int animatorId, int caretId) {
+        return PENDING_BRANCH.containsKey(branchKey(animatorId, caretId));
+    }
+
+    /**
+     * 在物理更新之后输出一行 [branch]；branch 来自生产 TrailCorner 的最终判定。
+     *
+     * <p>没有快照、诊断关闭或超过预算时，不创建文件、不写入、不分配预算条目。
+     */
+    public static void branchTrace(int animatorId, long frameSeq, int caretId, int slot,
+                                   boolean branchShort, boolean aLike) {
+        // 关闭时也要消费/丢弃 pending，避免 note 与 branch 之间被关掉后残留。
+        BranchSnapshot s = PENDING_BRANCH.remove(branchKey(animatorId, caretId));
+        if (!enabled()) {
+            return;
+        }
+        if (s == null || s.animatorId != animatorId || s.slot != slot
+                || s.frameSeq != frameSeq) {
+            return;
+        }
+        s.aLike = aLike;
+        s.lastBranchShort = branchShort;
+        TrailBudget budget = branchBudgetOf(animatorId);
+        if (budget.lines >= TRACE_MAX_LINES) {
+            if (!budget.capLogged) {
+                budget.capLogged = true;
+                budget.lines++;
+                writeFileAndReport("[branch] " + traceStamp()
+                        + " animator=" + animatorId + " 已达上限 " + TRACE_MAX_LINES
+                        + " 行，后续不再输出");
+            }
+            return;
+        }
+        budget.lines++;
+        writeFileAndReport(formatBranch(s));
+    }
+
+    /** 把快照拼成一行；探针直接调这个方法验证字段，不读真实文件。 */
+    public static String formatBranchForProbe(int animatorId, int caretId, long frameSeq,
+                                              int slot, boolean multiCaret,
+                                              int vpLine, int vpColumn,
+                                              double deltaXpx, double deltaYpx,
+                                              double width, double height,
+                                              int charsMoved, int prevVisualLine,
+                                              boolean sameLine, boolean visualLineChanged,
+                                              int slopeTicks, int shortMoveThreshold,
+                                              float typingMaxChars, boolean aLike,
+                                              boolean lastBranchShort) {
+        BranchSnapshot s = new BranchSnapshot();
+        s.animatorId = animatorId;
+        s.caretId = caretId;
+        s.frameSeq = frameSeq;
+        s.slot = slot;
+        s.multiCaret = multiCaret;
+        s.vpLine = vpLine;
+        s.vpColumn = vpColumn;
+        s.deltaXpx = deltaXpx;
+        s.deltaYpx = deltaYpx;
+        s.width = width;
+        s.height = height;
+        s.charsMoved = charsMoved;
+        s.prevVisualLine = prevVisualLine;
+        s.sameLine = sameLine;
+        s.visualLineChanged = visualLineChanged;
+        s.aLike = aLike;
+        s.slopeTicks = slopeTicks;
+        s.shortMoveThreshold = shortMoveThreshold;
+        s.typingMaxChars = typingMaxChars;
+        s.lastBranchShort = lastBranchShort;
+        return formatBranch(s);
+    }
+
+    private static String formatBranch(BranchSnapshot s) {
+        return "[branch] " + traceStamp()
+                + " animator=" + s.animatorId
+                + " frame=" + s.frameSeq
+                + " caret=" + s.caretId
+                + " slot=" + s.slot
+                + " multi=" + s.multiCaret
+                + " vp=" + s.vpLine + ":" + s.vpColumn
+                + " deltaXpx=" + fr(s.deltaXpx)
+                + " deltaYpx=" + fr(s.deltaYpx)
+                + " wh=(" + fr(s.width) + "x" + fr(s.height) + ")"
+                + " charsMoved=" + s.charsMoved
+                + " sameLine=" + s.sameLine
+                + " visualLineChanged=" + s.visualLineChanged
+                + " prevVisualLine=" + (s.prevVisualLine == Integer.MIN_VALUE
+                        ? "?" : Integer.toString(s.prevVisualLine))
+                + " branch=" + (s.lastBranchShort ? "SHORT" : "CROSS")
+                + " aLike=" + s.aLike
+                + " slopeTicks=" + s.slopeTicks
+                + " shortMoveThreshold=" + s.shortMoveThreshold
+                + " typingMaxChars=" + fr(s.typingMaxChars);
     }
 
     /**

@@ -366,4 +366,27 @@ final class SpringTrail {
                 corners[3].getCurrentX(), corners[3].getCurrentY()
         };
     }
+
+    /** 诊断只读：上一次 markAt 记下的视觉行；从未记录时为 Integer.MIN_VALUE。 */
+    int lastVisualLineForProbe() {
+        return lastLine;
+    }
+
+    /**
+     * 诊断只读：四角最近一次 jump() 的真实短跳判定。
+     *
+     * <p>不做任何计算、不复制判据：TrailCorner.lastShortJump 是生产 jump()
+     * 在 decided=true 时写入的最终值。反射失败时返回 {@code null}，由调用方跳过
+     * 该行并留 {@code [error]} 证据；绝不把失败伪装成 CROSS。
+     */
+    Boolean lastBranchShortForProbe() {
+        try {
+            java.lang.reflect.Field f = TrailCorner.class.getDeclaredField("lastShortJump");
+            f.setAccessible(true);
+            return f.getBoolean(corners[0]);
+        } catch (Throwable t) {
+            CursorDiag.swallowed("SpringTrail.lastBranchShortForProbe", t);
+            return null;
+        }
+    }
 }

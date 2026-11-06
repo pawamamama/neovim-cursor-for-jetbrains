@@ -1,0 +1,2 @@
+  FAIL  D-3 diagLogging=false 零输出、零预算创建   [文件字节=286]
+  FAIL  D-4 diagLogging=false 五张预算表尺寸均为 0   [[0, 0, 1, 0, 0, 0]]

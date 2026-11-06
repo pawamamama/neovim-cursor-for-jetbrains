@@ -162,6 +162,8 @@ $mains = @('VDefects', 'VScheme', 'VSnap', 'VPreset', 'VTools', 'VSpring', 'VHin
         # 超限只补一条 / 多编辑器分桶独立 / 超限后不再增长。
         # 不登记 = 从不运行（见 docs/archive/DEAD-PROBE-CLEANUP.md）。
         'VTrailCap',
+        # 【2026-11-06】多光标跨行分支诊断：与 VTrailCap 同文件，避免新增第 119 个 V*.java。
+        'VMultiBranchDiag',
         # 【2026-10-29】分标签页后的守门缺口：漏一句 registerIntegratedPanel(page)
         # → 该页控件改了不写进 pending、点应用没反应、重置不回灌，
         # 而且【不报错、不抛异常、界面一切正常】。

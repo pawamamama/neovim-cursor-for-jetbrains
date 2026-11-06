@@ -1,0 +1,1 @@
+  FAIL  D-10d updateBlockCharsMoved() 仍恒为 -1（未实施 A）   [源码检查：方法体 return -1 且 multiCaret 调用点未被 0/MAX 替换]
