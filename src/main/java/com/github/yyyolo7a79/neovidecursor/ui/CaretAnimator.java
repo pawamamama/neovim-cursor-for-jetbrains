@@ -258,6 +258,9 @@ public class CaretAnimator implements Disposable, CaretListener {
     /** 多光标不辉光（全局设置，来自 State，不随预设变化） */
     private boolean multiCursorNoGlow;
 
+    /** 跨行形状实验（设备级，来自 State，不随预设变化） */
+    private boolean crossShapeExperiment;
+
 
     /** 光标宽度像素（1–5）；来自 State，不随预设变化 */
     private int cursorWidthPx = 2;
@@ -2345,6 +2348,7 @@ public class CaretAnimator implements Disposable, CaretListener {
                 SpringTrail trail = trails.get(key);
                 if (trail == null) {
                     trail = new SpringTrail(config);
+                    trail.setCrossShapeExperiment(crossShapeExperiment);
                     // 【块选区不做出场动画，直接各自吸附】
                     //
                     // 用户反馈：「第一行拖尾长，最后一行短」。
@@ -3202,6 +3206,7 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorHeightRatio = s.cursorHeightRatio;
             rgbGradient = s.rgbGradient;
             targetFps = s.targetFps;
+            crossShapeExperiment = s.crossShapeExperiment;
             // 【0.9.86】彩虹与双拼互斥：从「当前颜色匹配哪个预设」反推
             cursorRgbWash = resolveRgbWash(s);
         } catch (Throwable t) {
@@ -3216,7 +3221,11 @@ public class CaretAnimator implements Disposable, CaretListener {
             cursorHeightRatio = 1.0f;
             rgbGradient = false;
             targetFps = 125;
+            crossShapeExperiment = false;
             cursorRgbWash = false;
+        }
+        for (SpringTrail trail : trails.values()) {
+            trail.setCrossShapeExperiment(crossShapeExperiment);
         }
     }
 

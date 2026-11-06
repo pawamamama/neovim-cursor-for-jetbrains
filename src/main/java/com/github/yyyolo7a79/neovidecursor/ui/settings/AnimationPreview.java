@@ -246,6 +246,35 @@ public final class AnimationPreview extends JComponent {
     private boolean cursorRgbWash;
 
     /**
+     * 跨行形状实验（设备级）：只允许 {@link Mode#CROSS} 消费。
+     *
+     * <p>三个预览共用同一份 {@code previewConfig}，而 {@code NeovideConfig} 是
+     * 单行/跨行共用的；把开关放进 config 会漏进 {@code inlinePreview} 与
+     * {@code glowPreview}。所以这里用实例级字段，setter 首行直接拒绝非 CROSS。
+     */
+    private boolean crossShapeExperiment;
+
+    /** 面板在 refreshPreviews / pushStyleTo 里推送；非 CROSS 预览直接忽略。 */
+    public void setCrossShapeExperiment(boolean on) {
+        if (mode != Mode.CROSS) {
+            return;
+        }
+        if (crossShapeExperiment == on) {
+            return;
+        }
+        crossShapeExperiment = on;
+        for (TrailCorner corner : corners) {
+            corner.setCrossShapeExperiment(on);
+        }
+        repaint();
+    }
+
+    /** 供守门探针断言；非 CROSS 预览应恒为 false。 */
+    public boolean crossShapeExperimentForProbe() {
+        return crossShapeExperiment;
+    }
+
+    /**
      * 设置是否走彩虹（面板在 refreshPreviews 里推送）。
      *
      * <p><b>0.9.89 新增</b>：原来预览只看 {@code rgbGradient}，
@@ -707,6 +736,9 @@ public final class AnimationPreview extends JComponent {
         // 只是预览没有真实编辑器，只能按演示意图直接给值。
         for (int i = 0; i < 4; i++) {
             corners[i].setCharsMoved(pendingCharsMoved);
+            // 实例级开关：Mode.INLINE 时本字段恒为 false（setter 拒绝非 CROSS），
+            // 所以单行预览即使走兜底跨行分支也不会读实验形状。
+            corners[i].setCrossShapeExperiment(crossShapeExperiment);
         }
         int[] ranks = assignRanks(centerX, centerY);
         for (int i = 0; i < 4; i++) {

@@ -10,12 +10,19 @@ package com.github.yyyolo7a79.neovidecursor.core;
  *
  * <p>移植自 VS Code 版 {@code neovide-cursor.js} 的 {@code Corner} 类。
  *
- * <p><b>与上游的差异</b>：上游用「对齐度 &gt; 0.5 的单点硬吸附」（{@code useHardSnap}）。
- * 本实现默认<b>没有</b>硬吸附 —— 不是照搬上游的阈值方案（那个方案在 4 角点模型下
+ * <p><b>与上游的差异</b>：上游用「对齐度 &gt; 0.5 的 0ms 硬吸附」（{@code useHardSnap}）。
+ * 本实现<b>默认没有</b>硬吸附 —— 不是照搬上游的 0ms 阈值方案（那个方案在 4 角点模型下
  * 会同时命中同侧两角、把斜度抹平，见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1）。
  * 「前缘贴合（半边拖尾）」曾试过三版模型（前缘 0ms 吸附 / 四角同长 + 固定尾巴 /
  * 前缘 0ms + 短后缘），2026-11-01 按用户实机反馈全部回退，实现已删除，
  * 只保留设置页开关（不影响任何行为）。
+ *
+ * <p><b>2026-11-06 A-like 实验</b>：设备级开关 {@code crossShapeExperiment} 打开时，
+ * <b>仅跨行 / 鼠标拖动 / 键盘大跨度分支</b>（即 {@link #jump} 里的非短跳分支）
+ * 改用 VS Code 版 1.0.1 的形状：对齐度 &gt; 0.5 的前缘角固定 <b>20ms 正时长</b>，
+ * 其余角取 {@code animationLength × {1.0, 0.72, 0.42, 0.22}[rank]}。
+ * 20ms 不是 0ms —— 前缘仍走弹簧过渡，不会瞬移；单行短跳分支不读该开关、
+ * 不读对齐度、不读这里的任何常量。
  */
 public class TrailCorner {
 
@@ -72,6 +79,38 @@ public class TrailCorner {
      */
     private boolean lastShortJump;
 
+    /**
+     * 跨行形状实验（设备级开关）：为 true 时，跨行/大跨度分支走独立四档形状公式，
+     * 不再读 {@code trailSize}；默认 false 时旧三档公式逐字不变。
+     *
+     * <p>它不是 {@link NeovideConfig} 字段：该配置属于预设域且 D0 要求零 diff，
+     * 设备开关由 {@code CaretAnimator} / {@code AnimationPreview} 显式下发。
+     */
+    private boolean crossShapeExperiment = false;
+
+    /**
+     * 跨行形状实验的四档时间系数（A-like，对应 VS Code 版 1.0.1 的 rank 系数）。
+     *
+     * <p>rank 0 = 后缘最慢，rank 3 = 前缘最快。系数只乘 {@code animationLength}，
+     * 不读 {@code trailSize} / 单行参数。2026-11-06 由 {@code {1.0, 0.9, 0.5, 0.3}}
+     * 改为 A 版的 {@code {1.0, 0.72, 0.42, 0.22}}：后缘与前缘拉开 4.5 倍梯度，
+     * 但不像旧值那样让 rank 2/3 过于接近（那样前缘两角一快一慢，
+     * 用户实机看到「右下角先到位、那一点拉伸很长」）。
+     */
+    private static final double[] A_LIKE_TRAIL_FACTORS = {1.0, 0.72, 0.42, 0.22};
+
+    /**
+     * A-like 前缘角的固定时长（秒）：<b>正 20ms，不是 0ms</b>。
+     *
+     * <p>只在 {@code crossShapeExperiment == true} 的跨行/大跨度分支生效。
+     * 取自用户认可的 VS Code 版 1.0.1：{@code leadingSnapThreshold=0.5}、
+     * {@code snapAnimationLength=0.02}（实际 {@code animationLength=0.1}）。
+     */
+    private static final double A_LIKE_LEADING_ANIMATION_LENGTH = 0.02;
+
+    /** 判定「该角位于运动前方」的对齐度阈值；严格大于才吸附。 */
+    private static final double A_LIKE_LEADING_ALIGNMENT_THRESHOLD = 0.5;
+
     /** 零尺寸告警只报一次：四角每帧都会 jump，逐次记会把日志刷爆。 */
     private static final java.util.concurrent.atomic.AtomicBoolean ZERO_SIZE_WARNED =
             new java.util.concurrent.atomic.AtomicBoolean();
@@ -113,6 +152,21 @@ public class TrailCorner {
      */
     public void setCharsMoved(int charsMoved) {
         this.charsMoved = charsMoved;
+    }
+
+    /**
+     * 设备级「跨行形状实验」开关。默认 false；只影响跨行/大跨度分支。
+     *
+     * <p>由 {@code SpringTrail} / {@code AnimationPreview} 在每次推进前下发，
+     * 不经过 {@code NeovideConfig}（那是预设域，且 D0 零 diff）。
+     */
+    public void setCrossShapeExperiment(boolean enabled) {
+        this.crossShapeExperiment = enabled;
+    }
+
+    /** 供守门探针确认开关已下发到本角点。 */
+    public boolean crossShapeExperimentForProbe() {
+        return crossShapeExperiment;
     }
 
     /**
@@ -164,14 +218,16 @@ public class TrailCorner {
      *   <li>其余按 rank 名次取对应滞后系数，越靠后越慢</li>
      * </ul>
      *
-     * <p>本方法不做任何「前缘吸附」——时长只按 rank 与短跳判定分配。
+     * <p>短跳分支不做任何「前缘吸附」——时长只按 rank 取短跳系数。
      * 「前缘贴合（半边拖尾）」曾通过 {@code SpringTrail.assignRanks()} 在 jump
      * 之后改写时长实现（2026-11-01 已回退删除），放在 jump 内部会被本方法结尾的
      * {@code setAnimationLength(animationLength)} 覆盖掉。
      *
-     * <p>0.9.83 试过的「对齐度 &gt; 0.5」阈值方案已否决：纯轴向移动时同侧两角的
+     * <p>0.9.83 试过的「对齐度 &gt; 0.5」0ms 阈值方案已否决：纯轴向移动时同侧两角的
      * 对齐度完全相等，阈值会同时命中两个角、把时长差抹平，反而让斜度变小。
      * 完整数据见 {@code docs/design/UPSTREAM-VSCODE-RESEARCH.md} §3.1。
+     * 注意这与 2026-11-06 的 A-like 实验不矛盾：实验用的是 <b>20ms 正时长</b>，
+     * 前缘两角被拉成同速是<b>预期形状</b>（前缘成对咬住），且只作用于跨行/大跨度分支。
      *
      * <p><b>【忠实还原原版】</b>本方法的时长分配已按 VS Code 原版
      * {@code neovide-cursor.js} 的 {@code Corner.jump()}（第 149-173 行）对齐：
@@ -360,6 +416,22 @@ public class TrailCorner {
             // docs/archive/decisions/LEADING-SNAP-DECISION-2026-11-01.md。
             //
             // 保留此段注释，避免下次又从头试一遍（阈值方案仍然不可行）。
+        } else if (crossShapeExperiment) {
+            // ---- 2026-11-06 A-like：跨行/鼠标拖动/键盘大跨度分支 ----
+            //
+            // 只影响这一条「非短跳」路径；上面的单行短跳分支已经 return 掉，
+            // 所以 slopeTicks / stretchRatioK / typingSmoothness / shortAnimationLength
+            // 的派生结果不会因为本开关改变。
+            //
+            // 形状取自用户认可的 VS Code 版 1.0.1：
+            //   对齐度 > 0.5 的前缘角 → 固定 20ms（正时长，走弹簧，不瞬移）
+            //   其余角              → animationLength × {1.0, 0.72, 0.42, 0.22}[rank]
+            //
+            // 为什么对齐度用生产方法 calculateDirectionAlignment：
+            // 它正是 SpringTrail.assignRanks() 给本角定 rank 时用的同一份对齐度。
+            // 用它判断「是不是前缘」保证吸附角与最高 rank 角一致，
+            // 不会出现「rank 说它最靠前、吸附判据说它不是」的两套判据打架。
+            animationLength = crossShapeExperimentLength(width, height, centerX, centerY, rank);
         } else {
             // ---- 原版三档分配（跨行 / 大跨度）----
             //
@@ -429,6 +501,33 @@ public class TrailCorner {
         // 反而是本插件早期加的 animationResetThreshold 守卫引入了缺陷。
         springX.reset();
         springY.reset();
+    }
+
+    /**
+     * 跨行形状实验的独立四角时长（A-like）。
+     *
+     * <p>两条规则：
+     * <ol>
+     *   <li>对齐度 &gt; 0.5 → 固定 20ms 正时长（前缘吸附；<b>不是</b> 0ms）；</li>
+     *   <li>其余角 → {@code animationLength × {1.0, 0.72, 0.42, 0.22}[rank]}。</li>
+     * </ol>
+     *
+     * <p>这里刻意不读 {@code trailSize}，也不读单行参数；因此同一路径改变拖尾密度
+     * 时四角时长不变，而关闭开关时仍走旧三档公式。
+     *
+     * <p><b>对齐度的含义</b>：{@link #calculateDirectionAlignment} 返回
+     * 「归一化后的运动方向」与「角点相对方向」的点积，取值 -1~1。
+     * 纯水平右移时右侧两角同为 +0.707 &gt; 0.5 → 两只前缘角都拿 20ms（前缘成对）；
+     * 斜跳时通常只有一只角超过阈值 —— 与上游一致。
+     */
+    private double crossShapeExperimentLength(double width, double height,
+                                              double centerX, double centerY, int rank) {
+        double leadingAlignment = calculateDirectionAlignment(width, height, centerX, centerY);
+        if (leadingAlignment > A_LIKE_LEADING_ALIGNMENT_THRESHOLD) {
+            return A_LIKE_LEADING_ANIMATION_LENGTH;
+        }
+        int i = Math.max(0, Math.min(rank, A_LIKE_TRAIL_FACTORS.length - 1));
+        return config.animationLength * A_LIKE_TRAIL_FACTORS[i];
     }
 
     // ==================== 物理推进 ====================

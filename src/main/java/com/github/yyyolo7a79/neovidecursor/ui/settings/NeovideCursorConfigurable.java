@@ -756,6 +756,13 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
     private final GraphProperty<Boolean> springMode = graph.property(Boolean.TRUE);
     private final GraphProperty<Boolean> shadowOn = graph.property(Boolean.TRUE);
     private final GraphProperty<Boolean> fadeOn = graph.property(Boolean.TRUE);
+    /**
+     * 「拖尾密度」是否可调：弹簧模式且跨行形状实验关闭。
+     *
+     * <p>现有 {@code enabledIf} 只接受单个属性，无法表达「springMode && !实验」；
+     * 用一个派生属性，在 graphReset / 模式下拉 / 新复选框回调三处同步。
+     */
+    private final GraphProperty<Boolean> crossTrailSizeEnabled = graph.property(Boolean.TRUE);
 
     /**
      * 构造器<b>不得创建任何 Swing 组件</b>：application 级 Configurable
@@ -918,6 +925,9 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         // 否则选「彩虹（动态）」时预览完全不变（用户报「彩虹没有到预览」）。
         // 判据与 CaretAnimator.resolveRgbWash 一致：颜色匹配到的预设带 rgbWash 标记。
         preview.setCursorRgbWash(isRainbowSelected());
+        // 跨行形状实验：实例级开关，AnimationPreview 只让 Mode.CROSS 消费；
+        // inlinePreview / glowPreview 的 setter 会直接 return。
+        preview.setCrossShapeExperiment(pending.crossShapeExperiment);
     }
 
     /**
@@ -1515,8 +1525,8 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     // 与 trailFactors，**完全不读 trailSize**。trailSize 只出现在跨行分支。
                     // 所以「也影响行内」是没有依据的陈述，会误导用户去调它试行内手感。
                     np.row(NeovideCursorBundle.message("settings.row.trailSize"), r -> {
-                        addSlider(r, specOf("trailSize"), springMode);
-                        r.rowComment(W_TRAIL_SIZE, COMMENT, NO_LINK).enabledIf(springMode);
+                        addSlider(r, specOf("trailSize"), crossTrailSizeEnabled);
+                        r.rowComment(W_TRAIL_SIZE, COMMENT, NO_LINK).enabledIf(crossTrailSizeEnabled);
                         return kotlin.Unit.INSTANCE;
                     });
                     np.row(NeovideCursorBundle.message("settings.row.animLen"), r -> {
@@ -1526,6 +1536,19 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                     });
                     return kotlin.Unit.INSTANCE;
                 });
+                return kotlin.Unit.INSTANCE;
+            });
+            // 【2026-11-05】设备级跨行形状实验：默认关；开启只接管跨行/鼠标拖动路径。
+            // 位置在预览+两个跨行参数之后，跨行提示之前，与「列手感」页的预览同屏。
+            g.row(NeovideCursorBundle.message("settings.row.crossShapeExperiment"), row -> {
+                bindCheck(row, () -> pending.crossShapeExperiment, v -> {
+                    pending.crossShapeExperiment = v;
+                    syncCrossTrailSizeEnabled();
+                }).enabledIf(springMode);
+                row.rowComment(TAG_GLOBAL
+                                + NeovideCursorBundle.message("settings.comment.crossShapeExperiment"),
+                        COMMENT, NO_LINK)
+                        .enabledIf(springMode);
                 return kotlin.Unit.INSTANCE;
             });
             // 契约 §7.3 / §7.4：耦合提示保留在这里（它们讲的就是跨行与短跳的关系）
@@ -1739,7 +1762,10 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
                         });
                 com.intellij.openapi.ui.ComboBox<String> box = cell.getComponent();
                 trailModeCombo = box;
-                box.addActionListener(e -> springMode.set(isSpringText(box.getSelectedItem())));
+                box.addActionListener(e -> {
+                    springMode.set(isSpringText(box.getSelectedItem()));
+                    syncCrossTrailSizeEnabled();
+                });
                 return kotlin.Unit.INSTANCE;
             });
             g.row("", row -> {
@@ -3453,10 +3479,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
             //   · 普通 JLabel 也不换行，一条长文本会一直往右顶出面板边界。
             // 所以：整串包 <html>…</html> + 用 BR 显式分行。
             // 实测每行最宽 412px（原来单行 1160px），远小于用户已接受的 657px。
-            crossMoveHint.setText("<html>" + NeovideCursorBundle.message(
-                    "settings.hint.crossMove",
-                    Long.toString(trailing), leadText,
-                    String.format(Locale.ROOT, "%.2f", pending.trailSize)) + "</html>");
+            // 【2026-11-05】开关 ON 时旧三档公式已被接管，不能再显示旧 leading/trailing
+            // 数字（否则面板与真实行为分家）。OFF 时保持原提示逐字不变。
+            String crossHint = pending.crossShapeExperiment
+                    ? NeovideCursorBundle.message("settings.hint.crossShapeActive")
+                    : NeovideCursorBundle.message(
+                            "settings.hint.crossMove",
+                            Long.toString(trailing), leadText,
+                            String.format(Locale.ROOT, "%.2f", pending.trailSize));
+            crossMoveHint.setText("<html>" + crossHint + "</html>");
         }
         // 拉伸强度那一行的数值标签里也带派生时长 → 一并刷新
         for (SliderBinding b : bindings) {
@@ -4101,6 +4132,15 @@ public final class NeovideCursorConfigurable extends BoundConfigurable
         springMode.set(s.trailMode == NeovideConfig.TrailMode.SPRING);
         shadowOn.set(s.useShadow);
         fadeOn.set(s.overlayFadeOut);
+        crossTrailSizeEnabled.set(
+                s.trailMode == NeovideConfig.TrailMode.SPRING && !s.crossShapeExperiment);
+    }
+
+    /** 复选框点击后同步「拖尾密度」置灰；与 graphReset / 模式下拉共用同一判据。 */
+    private void syncCrossTrailSizeEnabled() {
+        crossTrailSizeEnabled.set(
+                pending.trailMode == NeovideConfig.TrailMode.SPRING
+                        && !pending.crossShapeExperiment);
     }
 
     private static NeovideCursorSettings serviceOrNull() {

@@ -46,6 +46,8 @@ public final class VDefaultFreeze {
         GOLDEN.put("multiCursorNoGlow", "false");
         // 【2026-10-31】前缘贴合（半边拖尾）：设备级，默认关（用户 2026-10-28 拍板）。
         GOLDEN.put("leadingSnap", "false");
+        // 【2026-11-05】跨行形状实验：设备级，默认关。
+        GOLDEN.put("crossShapeExperiment", "false");
         GOLDEN.put("cursorWidthPx", "2");
         GOLDEN.put("cursorHeightRatio", "1.0");
         GOLDEN.put("rgbGradient", "false");
@@ -133,6 +135,8 @@ public final class VDefaultFreeze {
                 && !def.multiCursorNoGlow && !def.rgbGradient
                 // 2026-10-31：前缘贴合（半边拖尾）出厂必须是关的（AC-003）。
                 && !def.leadingSnap
+                // 2026-11-05：跨行形状实验出厂必须是关的。
+                && !def.crossShapeExperiment
                 && def.cursorWidthPx == 2
                 && Math.abs(def.cursorHeightRatio - 1.0f) < 1e-6f
                 && Math.abs(def.typingSmoothness) < 1e-6f

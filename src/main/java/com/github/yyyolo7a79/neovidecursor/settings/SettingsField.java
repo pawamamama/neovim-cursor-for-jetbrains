@@ -860,6 +860,13 @@ public final class SettingsField {
         out.add(bools("leadingSnap", s -> s.leadingSnap,
                 (s, v) -> s.leadingSnap = v, null, null, true));
 
+        // 【2026-11-05】跨行形状实验（设备级 · 默认关）。
+        // 只进 State、不进 CONFIG：生效逻辑由 CaretAnimator 从 State 读取后
+        // 沿 SpringTrail → TrailCorner 下发，预览走 AnimationPreview 的 CROSS-only setter。
+        // runtimeSwitch=true 自动导出 syncsToConfig=false / inPreset=false。
+        out.add(bools("crossShapeExperiment", s -> s.crossShapeExperiment,
+                (s, v) -> s.crossShapeExperiment = v, null, null, true));
+
         // 【光标尺寸】只进 State（绘制时读 State，不进 CONFIG）
         out.add(ints("cursorWidthPx", s -> s.cursorWidthPx,
                 (s, v) -> s.cursorWidthPx = v, null, null, true).range(1, 5));

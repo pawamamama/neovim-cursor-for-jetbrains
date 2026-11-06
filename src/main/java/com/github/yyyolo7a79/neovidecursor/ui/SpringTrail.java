@@ -154,6 +154,17 @@ final class SpringTrail {
         }
     }
 
+    /**
+     * 设备级「跨行形状实验」开关：只转发给四角，不改 {@link #assignRanks()}。
+     *
+     * <p>默认 false；单行短跳分支在 {@code TrailCorner.jump()} 里先走，不读该标志。
+     */
+    void setCrossShapeExperiment(boolean enabled) {
+        for (TrailCorner corner : corners) {
+            corner.setCrossShapeExperiment(enabled);
+        }
+    }
+
     /** 构造时传入的配置（assignRanks 用 trailFactors / shortAnimationLength 等算时长）。 */
     private final NeovideConfig config;
 

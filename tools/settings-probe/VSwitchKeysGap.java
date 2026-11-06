@@ -16,7 +16,7 @@ import java.util.Set;
  *
  * <p><b>本次重构（runtimeSwitch）同时补上了这个洞</b>，改成三条断言：
  * <ul>
- *   <li><b>A（正向）</b>：{@code runtimeSwitch == true} 的字段集合 == 预期 9 个</li>
+ *   <li><b>A（正向）</b>：{@code runtimeSwitch == true} 的字段集合 == 预期 11 个</li>
  *   <li><b>B（反向）</b>：除 {@code animPresetBase} 指针外，没有字段被错标</li>
  *   <li><b>C（行为）</b>：造一份「毒快照」，调真实的
  *       {@link SettingsField#restoreSkipping}，断言运行环境开关一个都没被写、
@@ -39,6 +39,8 @@ public final class VSwitchKeysGap {
             "diagLogging", "multiCursorNoGlow",
             // 2026-10-31：前缘贴合（半边拖尾）—— 设备级，切预设不该改动它
             "leadingSnap",
+            // 2026-11-05：跨行形状实验 —— 设备级，切预设不该改动它
+            "crossShapeExperiment",
     };
 
     private static final Set<String> EXPECTED_RUNTIME_SET =
@@ -61,7 +63,7 @@ public final class VSwitchKeysGap {
         System.out.println("V-SWITCH-GAP RESULT: ALL PASS");
     }
 
-    /** A：带标志的字段集合必须精确等于预期 9 个。 */
+    /** A：带标志的字段集合必须精确等于预期 11 个。 */
     private static void checkA() {
         Set<String> actual = new LinkedHashSet<>();
         for (SettingsField f : SettingsField.FIELDS) {
@@ -113,22 +115,22 @@ public final class VSwitchKeysGap {
      * <p><b>2026-10-28 改为手工拼「旧格式毒快照」，不再用 {@code snapshot()} 现造。</b>
      * 原因：新写的快照里压根不再包含运行开关（用户要求「只存会生效的」），
      * 用 {@code snapshot()} 造出来的是新格式 —— 那样只能测到「新快照没问题」，
-     * <b>测不到真正要紧的兼容路径</b>：用户磁盘上已经存在的旧预设串里仍然带着这 9 个 key。
+     * <b>测不到真正要紧的兼容路径</b>：用户磁盘上已经存在的旧预设串里仍然带着这 11 个 key。
      */
     private static void checkC() {
-        // 旧格式毒快照：9 个运行开关（值都取「与默认相反」）+ 3 个观感字段。
+        // 旧格式毒快照：11 个运行开关（值都取「与默认相反」）+ 3 个观感字段。
         // 【2026-10-31】leadingSnap 是新增的第 10 个运行开关，但旧快照里不会有它 ——
         // 这正好覆盖「老 XML 没有该 key」的兼容路径（C-1 会确认它保持默认 false）。
         String snap = "enabled=0;hideNativeCaret=0;alwaysHighFps=0;trailMode=AFTERIMAGE;"
                 + "multiCursorNoGlow=1;targetFps=144;cursorWidthPx=5;cursorHeightRatio=0.5;"
-                + "diagLogging=1;leadingSnap=1;"
+                + "diagLogging=1;leadingSnap=1;crossShapeExperiment=1;"
                 + "slopeTicks=77;trailSize=0.9;glowLayers=3";
 
         NeovideCursorSettings.State dst = new NeovideCursorSettings.State();
         NeovideCursorSettings.State def = new NeovideCursorSettings.State();
         int applied = SettingsField.restoreSkipping(dst, snap);
 
-        // C-1：9 个运行环境开关必须保持默认（毒值一个都没进来）
+        // C-1：11 个运行环境开关必须保持默认（毒值一个都没进来）
         StringBuilder leaked = new StringBuilder();
         for (String key : EXPECTED_RUNTIME) {
             SettingsField f = SettingsField.byKey(key);
@@ -138,7 +140,7 @@ public final class VSwitchKeysGap {
             }
         }
         check(leaked.length() == 0,
-                "C-1 旧快照里的 9 个运行环境开关一个都没被写入",
+                "C-1 旧快照里的 11 个运行环境开关一个都没被写入",
                 leaked.length() == 0 ? "全部保持默认" : "被写入=" + leaked.toString().trim());
 
         // C-2：观感字段必须确实被写入（防止「整份 restore 都没生效」也过）
@@ -149,10 +151,10 @@ public final class VSwitchKeysGap {
                 "slopeTicks=" + dst.slopeTicks + " trailSize=" + dst.trailSize
                         + " glowLayers=" + dst.glowLayers);
 
-        // C-3：只有观感字段被计数（快照 12 条里 9 条是运行开关）
+        // C-3：只有观感字段被计数（快照 14 条里 11 条是运行开关）
         check(applied == 3,
                 "C-3 写入数只计观感字段，运行开关条目不计数",
-                "applied=" + applied + "  期望=3（快照共 12 条，其中 9 条是运行开关）");
+                "applied=" + applied + "  期望=3（快照共 14 条，其中 11 条是运行开关）");
     }
 
     /** 从快照串里取某个 key 的值；没有返回 null。 */

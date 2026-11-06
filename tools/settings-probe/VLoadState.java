@@ -106,8 +106,9 @@ public final class VLoadState {
             }
         }
         // 【2026-10-31 契约变更，非缺陷】新增设备级字段 leadingSnap（前缘贴合）→ 9 变 10。
-        check("L-5 SettingsField.runtimeSwitch 已标注（10 项，两条 restore 路径共用）",
-                runtimeCount == 10,
+        // 【2026-11-05 契约变更，非缺陷】新增设备级字段 crossShapeExperiment → 10 变 11。
+        check("L-5 SettingsField.runtimeSwitch 已标注（11 项，两条 restore 路径共用）",
+                runtimeCount == 11,
                 "带 runtimeSwitch 标志的字段 = " + runtimeCount + " 项");
 
         System.out.println();

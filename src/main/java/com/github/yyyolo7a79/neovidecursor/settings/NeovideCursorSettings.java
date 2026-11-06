@@ -235,6 +235,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         // 【2026-10-31】前缘贴合（设备级）。漏这一行 = 重启即失效。
         // 布尔无需 clamp，也不参与区间夹取（见本方法末尾的字段表遍历）。
         target.leadingSnap = from.leadingSnap;
+        // 【2026-11-05】跨行形状实验（设备级）。漏这一行 = 重启即失效。
+        target.crossShapeExperiment = from.crossShapeExperiment;
         target.cursorWidthPx = from.cursorWidthPx;
         target.cursorHeightRatio = from.cursorHeightRatio;
         target.rgbGradient = from.rgbGradient;
@@ -910,6 +912,18 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
     public boolean leadingSnap = false;
 
     /**
+     * 跨行形状实验（设备级）—— 默认关，不随动画预设变化。
+     *
+     * <p><b>作用范围</b>：只在「跨行 / 鼠标拖动」这类大跨度路径上，由
+     * {@code TrailCorner} 的独立四档形状公式完全接管；单行短跳、斜度、拉伸、
+     * 平滑、辉光、颜色、淡出、帧调度都不读它。
+     *
+     * <p><b>为什么是设备级</b>：它改变的是跨行路径的观感形状，不是某个动画预设的
+     * 数值；用 {@code runtimeSwitch=true} 自动排除在预设快照与恢复跳过逻辑之外。
+     */
+    public boolean crossShapeExperiment = false;
+
+    /**
      * 光标宽度（像素，0–5）。<b>0 = 跟随 IDEA 原生宽度</b>。
      *
      * <p><b>用户需求（2026-10-24）</b>：「光标自由大小…宽度最大 5px
@@ -1184,6 +1198,8 @@ public final class NeovideCursorSettings implements PersistentStateComponent<Neo
         multiCursorNoGlow = from.multiCursorNoGlow;
         // 【2026-10-31】前缘贴合（设备级）。漏这一行 = 面板打开时复选框永远不勾。
         leadingSnap = from.leadingSnap;
+        // 【2026-11-05】跨行形状实验（设备级）。同一条拷贝纪律。
+        crossShapeExperiment = from.crossShapeExperiment;
         cursorWidthPx = from.cursorWidthPx;
         cursorHeightRatio = from.cursorHeightRatio;
         rgbGradient = from.rgbGradient;
