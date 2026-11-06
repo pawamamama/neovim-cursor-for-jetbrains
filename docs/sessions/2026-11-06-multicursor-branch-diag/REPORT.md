@@ -1,15 +1,14 @@
 # 多光标跨行斜度 · 诊断日志取证 执行报告（2026-11-06）
 
-> 状态：待用户实机取证（方案 C 已交付；未实施 A / B1 / B2）
+> 状态：实机日志已分析；A1 产品语义已对齐，交决策会话审核（本轮未实施）
 > 提交：本报告所在提交（基于 `1733c11` 新建，未 amend、未 push、未合并）
 > 分支：`claude/determined-kowalevski-c1c64b`
 > 产物：`dist/neovide-cursor-0.9.137-branch-diag.jar`（253,923 B，SHA256 `e41114942c6368e220495ec0a584262469262e6646e132f16cab2f0f465686fc`）
+> 实机安装：`0.9.137-branch-diag`（安装脚本现场重打包，用户提供 SHA `66017bbb98d3…223db`；与上方 e411 同源码同版本，重打包差异）
 
 ## 1. 结论
 
-一句话：交付了**可关、有界、字段够复核**的 `[branch]` 诊断日志，全量门禁 `ALL PASS`、D0 零 diff、只打包未安装；**没有修多光标斜度**，没有实施 A/B1/B2，也没有改任何动画判据或时长。
-
-用户下一步是安装 `0.9.137-branch-diag` 做四组各 10 秒实机取证，把 `[branch]` 日志交回决策会话；选 A 还是 B1 由用户看完日志后裁决。
+一句话：方案 C 日志已交付，并已用用户实机 320 条 `[branch]` 记录完成分析：多光标 296 条中 `CROSS` 100 条，其中 **93 条是同一视觉行的像素阈值误判**，仅 7 条是真换行；单光标 24 条全部符合「同行短跳 / 换行跨行」。**没有改生产代码**，没有实施 A/B1/B2；A 的主要假设得到日志支持，但 44 条大跳需产品决定；B1 证据不足（详见 §9）。
 
 ## 2. 根因 / 为什么先做方案 C
 
@@ -202,8 +201,8 @@ javap 验证：CursorDiag 含 branchTrace/noteBranchSnapshot/formatBranchForProb
 
 ## 5. 用户实机取证步骤
 
-1. **确认诊断开关**：设置页「诊断日志」保持开启；记录当前 `crossShapeExperiment` 与 `slopeTicks` 的实际值（设置页显示为准）。执行会话只读 XML 能确认 `cursorHeightRatio=0.9`、`targetFps=144`；`diagLogging` / `crossShapeExperiment` / `slopeTicks` 未在顶层 `option` 中读到（可能按默认值省略），所以请以设置页为准。
-2. **安装本轮 jar**：执行会话**没有安装**，当前已装仍是 `0.9.136-a-like-snap`。需要实测时按你既有安装流程安装 `dist/neovide-cursor-0.9.137-branch-diag.jar`；不要覆盖前自行决定是否备份。
+1. **确认诊断开关**：`Settings（设置）→ Tools（工具）→ Neovide Cursor → 标签 7「调试」→ 组「高级（诊断）」（P11 起平铺，不需要展开）→ 勾选「诊断日志」→ Apply/OK`。同时记录当前 `crossShapeExperiment` 与 `slopeTicks` 的实际值（设置页显示为准）。
+2. **本轮安装状态**：用户已安装 `0.9.137-branch-diag`（安装脚本现场重打包，SHA `66017bbb98d3…223db`）；执行会话**没有安装**、未覆盖 0.9.136、未启动 IDEA。
 3. **四组各 10 秒**：
    - 多光标英文同行输入 / 长按 `→`；
    - 多光标中文同行输入；
@@ -233,7 +232,7 @@ javap 验证：CursorDiag 含 branchTrace/noteBranchSnapshot/formatBranchForProb
 ## 6. 阻塞与偏离
 
 - **同文件探针**：没有新增 `VMultiBranchDiag.java`，而是把 package-private 顶层类放进 `VTrailCap.java`，并在 `build-v-probes.ps1` 的 `$mains` 加一行。理由：`VDocCheck D-2` 把磁盘 `V*.java` 数与三份状态文档比对，本轮禁止改状态文档；新增第 119 个 `V*.java` 必红。`VTrailCap.java` 从 162 行增至 660 行（仍低于 800 行软上限）。
-- **最终分支读取方式**：`TrailCorner.java` 是禁区，`lastShortJump` 没有公开访问器；`SpringTrail.lastBranchShortForProbe()` 用只读反射读取该字段，失败时经 `CursorDiag.swallowed` 留痕并返回 false。没有改 `TrailCorner`、没有复刻 `isShortJump`；探针用生产 `SpringTrail` 真实链路验证 SHORT/CROSS。
+- **最终分支读取方式**：`TrailCorner.java` 是禁区，`lastShortJump` 没有公开访问器；`SpringTrail.lastBranchShortForProbe()` 用只读反射读取该字段，失败时经 `CursorDiag.swallowed` 留痕并返回 `null`，调用方跳过该行。没有改 `TrailCorner`、没有复刻 `isShortJump`；探针用生产 `SpringTrail` 真实链路验证 SHORT/CROSS。
 - **delta / sameLine 口径**：`deltaXpx/deltaYpx` 记录的是目标中心位移（与角点目标差在宽高不变时一致），不是直接读 `TrailCorner.jump()` 的局部变量；`sameLine` 是日志侧观测值（`!visualLineChanged`），不是 `TrailCorner` 内部局部变量的复制。视觉行变化在 `markAt` 之前从 `SpringTrail.lastLine` 读取，避免被覆盖。
 - **打包偏离**：`build/offline-build.ps1` 在本 worktree 因命令行过长失败，且该脚本是禁区未改；改用内联等价步骤（`javac @argfile` + 资源复制 + `plugin.xml` 注入 + `jar --update`）。PROMPT §6.6 指定的 worktree 底包 `dist/jetbrains-neovide-cursor-0.9.14-conclusion.jar` 不存在，改用主仓库同文件（只读）。最终 jar 已验证关键 class 存在。
 - **探针表扩展**：`CursorDiag.tableSizesForProbe()` 从 4 元数组扩为 6 元 `[trail, frame, branch, pending, sample, trace]`；既有消费者不检查长度（`VAuditBatch2Round2to4` 只用 `tableContainsForProbe`），最终门禁全绿。
@@ -253,15 +252,99 @@ javap 验证：CursorDiag 含 branchTrace/noteBranchSnapshot/formatBranchForProb
 - `diagLogging` / `crossShapeExperiment` / `slopeTicks` 实际值：
 - 四组操作是否都出现 `[branch]` 行：
 - 哪些帧是真回绕（`visualLineChanged=true`）：哪些是像素阈值误判（`visualLineChanged=false` 但 `branch=CROSS`）：
-- 结论：选 A / 选 A+B1 / 需要下一轮 PROMPT + 现象：
+- 结论：选 A1 / 选 A1+B1 / 需要下一轮 PROMPT + 现象：
 
 ## 8. 未验证项 / 遗留
 
-- **实机日志未产生**：本轮只验证了格式化方法与生产分支访问器，未在 IDEA 2026.1 真实多光标场景抓取 `[branch]`；四组取证由用户完成。
+- **实机日志已产生并分析**：用户已采集 320 条 `[branch]`；§9 完成统计与 A/B1 证据判断。仍缺：中英文/场景标签（日志不含输入字符）、A-like=true 或 `slopeTicks≠0` 的变化样本、B1 所需的四角形状/时长数据。
 - **反射失败路径未注入**：`lastBranchShortForProbe()` 的反射失败分支只做了代码审查，没有专门构造 `TrailCorner` 字段不可读的变异。
 - **delta 等价性是推导**：`deltaXpx/deltaYpx` 与 `TrailCorner.jump()` 角点目标差在宽高不变时数值一致；宽高变化帧可能有差异，日志字段已在 §4.6 标明口径。
 - **用户配置**：`diagLogging` / `crossShapeExperiment` / `slopeTicks` 的顶层值未从 XML 完整读出（可能按默认值省略），以设置页为准。
-- **选择 A/B1 不在本轮**：日志拿到后由用户裁决；本轮不把日志推导写成已验收结论。
+- **选择 A/B1**：用户已确认 **A1**（A1 之外不做）：单双光标统一按屏幕视觉行，同视觉行短跳、视觉行变化跨行；A-like 真换行形状、`trailSize=1.0`、预设/UI/State 不变；**B1 暂缓**。基础方案见 `A1-BASIC-PLAN.md`，交决策会话审核后再由新的执行会话实施。
 - **审查遗留 M-2**：`D-10a/D-10b` 仍主要直接调用 `TrailCorner` 验证时长，不足以单独证明「新增日志链路不改变行为」；但实际 diff 没有改 `TrailCorner`，且最终全量门禁与 `VCrossShapeExperiment`/`VTypingSpan` 全绿。
 - **审查遗留 M-3**：`sameLine` 是视觉行观测值、`deltaX/Y` 是目标中心位移，不是 `TrailCorner` 内部 `sameLine`/角点差的原样复制；用户复核时以 `visualLineChanged` + `deltaX/Y` + `shortMoveThreshold` 联合判断，口径已在 §4.6 写清。
 - **首帧行为**：未初始化 trail 首帧不产出 `[branch]`（因为生产 `setTarget` 只 `snapToTarget`、不执行 `jump()`）；这是为了避免伪 `CROSS`，不是漏记。
+
+## 9. 实机日志分析（2026-11-06）
+
+> 数据：用户已筛好的 `C:\Users\wangw\branch.txt`，320 行，均来自
+> `C:\Users\wangw\AppData\Local\JetBrains\IntelliJIdea2026.1\log\neovide-cursor-diag-3336.log`。
+> 每行带原始日志行号；下文「行 N」均指原始诊断日志行号。
+
+### 9.1 总览
+
+| 分组 | 记录 | `SHORT` | `CROSS` | 其中同视觉行 CROSS | 其中真换行 CROSS |
+|---|---:|---:|---:|---:|---:|
+| 多光标 `multi=true` | 296 | 196（66.2%） | 100（33.8%） | **93（93%）** | 7 |
+| 单光标 `multi=false` | 24 | 18（75%） | 6（25%） | 0 | 6 |
+| 合计 | 320 | 214 | 106 | 93 | 13 |
+
+全部 320 条：`aLike=false`、`slopeTicks=0`。296 条多光标全部 `charsMoved=-1`（确认走像素兜底）；24 条单光标主要 `charsMoved=1`，另有 70/41/8 等大位移样本。
+
+### 9.2 按 animator / 槽位分（日志没有场景标签）
+
+| 可观测分组 | 时间 | 记录 | 多光标/单光标 | `SHORT/CROSS` | 同视觉行 CROSS | 真换行 CROSS |
+|---|---|---:|---:|---:|---:|---:|
+| animator `466001901`，3/4/6 槽 | 18:52:15–18:54:25 | 239 | 224 / 15 | 149 / 90 | 81 | 4 |
+| animator `1274187569`，8 槽 + 单光标 | 18:54:33–18:56:25 | 81 | 72 / 9 | 65 / 16 | 12 | 3 |
+
+- `466001901` 中 4 槽是主体（50 帧/200 条），另有 3 槽 4 帧/12 条、6 槽 1 帧/6 条；单光标 21 帧。
+- `1274187569` 中 8 槽 9 帧/72 条，单光标 9 帧。
+- **日志没有「英文 / 中文 / Tab / End / 鼠标」标签**，只凭 `animator/槽位/时间` 不能可靠映射到四组操作；请按你的操作顺序对照两个时间段的槽位数。中英文分组见 9.4 的「未覆盖」说明。
+
+### 9.3 同帧不同分支
+
+共 7 帧出现同帧多光标分支混合，其中 **5 帧严格同向**：
+
+| frame | 原始日志行 | 分支与位移 | 说明 |
+|---:|---|---|---|
+| 30 | 19572–19579 | slot0/3 `CROSS dx=25`；其余 `SHORT dx=15` | 8 光标、同视觉行，典型分裂 |
+| 45 | 19787–19794 | slot7 `CROSS dx=25`；其余 `SHORT dx=15/16` | 8 光标、同视觉行 |
+| 75 | 20223–20230 | slot3 `CROSS dx=25`；其余 `SHORT` | 8 光标、同视觉行 |
+| 105 | 20662–20669 | slot2 `CROSS dx=24`；其余 `SHORT` | 8 光标、同视觉行 |
+| 120 | 20859–20866 | slot4 `CROSS dx=25`；其余 `SHORT` | 8 光标、同视觉行 |
+| 60 | 20017–20024 | slot4 `CROSS dx=-716,dy=41`（真换行）；slot5/6 `CROSS dx=25`；其余 `SHORT` | 真换行 + 同帧误判并存 |
+| 150 | 21253–21260 | slot0/6 `CROSS`（`dx=-76/-1126,dy=41`，真换行）；slot1/2/3/7 `CROSS dx=24/25`；slot4/5 `SHORT` | 真换行 + 同帧误判并存 |
+
+结论：前 5 帧是「同一视觉行、仅速度/位移不同」造成的分裂，正是 A1 要消除的；后 2 帧含真实视觉行变化，A1 后仍会有一部分 CROSS，这是语义正确的混合，不是误判。
+
+### 9.4 像素阈值与中英文覆盖
+
+- 生产阈值：`shortMoveThreshold=8`、`width=2.0` ⇒ **16px**。
+- 多光标 `SHORT` 的 `|deltaXpx|/width` 只有 `5.0(11条) / 5.5(44条) / 7.5(80条) / 8.0(61条)`；没有任何 SHORT 超过 8.0。
+- 多光标无换行 `CROSS` 93 条：
+  - **49 条是 `8.5`（dx=17px，刚过 16px）**，原始行范围 `13937–15870`（样本分散）；
+  - 其余 44 条是 `dx≥21px` 的大跳/累计位移（如 `dx=61px` 行 `4083–4086`、`dx=127px` 行 `14236–14239`、更大的 2330px 样本）。
+- 单光标同行 `charsMoved=1` 样本：`dx=-10/-11`（行 139–141）、`dx=17`（行 224/226/227）、`dx=±24/25`（行 240/315/316/318/319）全部是 `SHORT`，因为单光标走字符判据；这佐证「同样的横向 17/24/25px 在多光标像素判据下会跨线，而字符判据不会」。
+- **中英文未覆盖**：日志不含输入字符/语言标签，无法确认哪些行是中文输入。若按 `dx≈15–16px` 视为英文两字符、`dx≈24–25px` 视为中文一字，则与「中文一字越 16px、英文两字符才接近阈值」一致；但这是**像素分布推断，不是观测到的语言标签**，不能写成已验证结论。
+
+### 9.5 A / B1 判断
+
+**A（同一视觉行 → 短跳）**：日志支持主要假设。
+
+- 93/100 条多光标 CROSS 是同视觉行误判；其中 49 条只是 17px 刚过线；
+- 5 帧严格同向的同帧混合会在 A1 下统一为 SHORT；
+- 单光标 24 条全部符合「同行短跳 / 换行跨行」，没有反例。
+
+**A1 的已知副作用**：剩下 44 条同视觉行大跳（`dx≥21px`，可能含 Tab/End/Ctrl+方向/鼠标跳转）也会变成 SHORT；日志没有操作标签，无法确认你具体做了哪些操作。你已确认「统一一起统一」，即接受这个语义。
+
+**B1（跨行后缘按 trailFactors）**：证据不足，暂缓。
+
+- 真换行 CROSS 共 13 条（7 多光标 + 6 单光标），说明 A1 不会消除这些真换行的形状，B1 的目标存在；
+- 但日志没有 `trailSize`、`trailFactors`、`animationLength/shortAnimationLength`、四角时长/坐标；全部 `aLike=false`、`slopeTicks=0`，没有 A-like=true 或斜度变化的样本；
+- 无法量化 B1 的收益与风险，也不能验证它是否破坏已认可的 A-like 后缘斜度。**本轮不做 B1。**
+
+### 9.6 结论一句话
+
+**A1 的证据足够支持你已确认的产品方向；B1 证据不足；日志无法证明中英文分组，只能证明 16px 阈值在 16→17px 处分裂。**
+
+## 10. A1 基础方案（交决策会话审核）
+
+用户已确认：**A1、屏幕视觉行、单双光标统一、真实视觉行变化导致的同帧混合可接受、B1 暂缓。** 详细基础方案见 [A1-BASIC-PLAN.md](A1-BASIC-PLAN.md)；本节只记录结论，不实施。
+
+- 统一规则：同一视觉行 → `SHORT`，视觉行变化 → `CROSS`；不再按字符数/像素阈值分叉。
+- 覆盖：普通输入、Tab、End/Home、Ctrl+←/→、Ctrl+Shift+←/→、鼠标点击/拖拽、按词移动；同一视觉行全部短跳。
+- 真换行：Enter、上下行、行尾回绕、软换行跨视觉行、跨行选区 → 跨行；A-like 前缘 20ms / 后缘斜度保持不变。
+- 允许：同帧一个光标因真实换行走 CROSS、另一个同行走 SHORT；这是语义正确，不是旧式速度分裂。
+- 不变：`TrailCorner` 形状公式、`trailSize=1.0`、预设/UI/State/`NeovideConfig`、诊断日志开关。
+- 不实施：B1/B2；不在本轮改代码；由决策会话审核 `A1-BASIC-PLAN.md` 后另开新执行会话实施（当前会话上下文已不足）。
