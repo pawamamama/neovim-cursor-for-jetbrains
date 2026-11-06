@@ -238,3 +238,38 @@ asset      neovide-cursor-0.9.138-a1.jar（253,941 B，state=uploaded）
 - 发布页面核对：待用户填写
 - README 渲染核对：待用户填写
 - 结论：待用户填写（通过 / 不通过）
+
+---
+
+## 9. 2026-11-06 README 返工：与上游的关系
+
+按决策会话的返工要求，中英文 README 各新增一节
+「Relationship to upstream / 与上游的关系」：
+
+- 本仓库是 `yyyyolo7a79-sketch/neovim-cursor-for-jetbrains` 的 MIT fork；
+  核心拖尾物理与基础代码来自上游，上游版权声明与 MIT `LICENSE` 原样保留；
+  链接 `NOTICE.md` 的上游来源与改动表。
+- `NOTICE.md` 的改动表是**较早快照**（其参数 / 预设数量与当前 README 不同），
+  新增章节注明「当前参数与预设数量以本 README 为准」，避免两处数字冲突。
+- 写明维护者的实机体验判断：上游基线在日常使用中不够可用；本 fork 的工作集中在
+  手感 / 物理调优、设置面板 / 持久化 / 预设、辉光 / 淡出 / 多光标、A1 视觉行分支、
+  探针 / 发布门禁 / 打包与发布文档。
+- 明确「不主张上游核心实现的原创性；贡献集中在可用性、交互、调优、验证与发布工程」。
+- 未写未验证的量化收益，未写「完全重写」。
+
+命令与结果：
+
+```text
+git diff --check                              DIFF_CHECK_EXIT=0
+git commit                                   84dffaf docs: README 补充与上游的关系（仅 README ×2）
+git push fork HEAD:main                       6a4fddc..84dffaf  PUSH_EXIT=0
+git ls-remote fork refs/heads/main            84dffaff5e29799895254cf132948bb0e081222c
+git rev-list -n 1 v0.9.138-a1                 b5c85580d78e6714b53c756c5eeb323f3f5c48cc（未移动）
+```
+
+- **未改** `NOTICE.md`：其改动表是早期快照，本次不动历史文件；通过 README 的
+  「以本 README 为准」说明避免数字冲突。若需要把 NOTICE 表更新到当前数字，
+  属另一轮白名单变更。
+- **未改** tag `v0.9.138-a1`（仍指向发布提交 `b5c8558`）。
+- **未改** GitHub Release 正文；release 仍使用发布时的 notes。
+- 本 REPORT 追加内容由后续 docs-only 提交推送，不移动 tag。
